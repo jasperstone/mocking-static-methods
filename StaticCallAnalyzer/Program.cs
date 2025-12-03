@@ -32,39 +32,96 @@ class Program
                     m.Expression.ToString() == p.ClassName && m.Name.ToString() == p.MethodName))
                 .ToList();
 
-            if (staticCalls.Count < 2) continue; // Require multiple calls
+            if (staticCalls.Count == 0) continue;
+
+            // Changed from requiring 2+ calls to just requiring 1+ calls
+            if (staticCalls.Count < 1) continue;
 
             var classNode = staticCalls.First().Ancestors().OfType<ClassDeclarationSyntax>().FirstOrDefault();
             if (classNode == null) continue;
 
             // Exclude wrappers or injected abstractions
             if (Filters.IsWrapperClass(classNode) || Filters.HasDateTimeProviderInjection(classNode)) continue;
+            if (Filters.IsWrapperClass(classNode) || Filters.HasDateTimeProviderInjection(classNode)) continue;
 
             foreach (var method in classNode.DescendantNodes().OfType<MethodDeclarationSyntax>())
             {
                 var complexity = ComplexityCalculator.Compute(method);
-                if (complexity > 5)
+                
+                // Lowered complexity threshold to capture more results
+                if (complexity > 2)
                 {
-                    foreach (var call in staticCalls)
-                    {
-                        var pattern = StaticCallConfig.Patterns.First(p =>
-                            p.ClassName == call.Expression.ToString() && p.MethodName == call.Name.ToString());
+                    // Find static calls within this specific method, not the entire class
+                    var methodStaticCalls = method.DescendantNodes()
+                        .OfType<MemberAccessExpressionSyntax>()
+                        .Where(m => StaticCallConfig.Patterns.Any(p =>
+                            m.Expression.ToString() == p.ClassName && m.Name.ToString() == p.MethodName))
+                        .ToList();
 
-                        results.Add(new
+                    if (methodStaticCalls.Any())
+                    {
+                        // Group by pattern to avoid duplicates for the same pattern in the same method
+                        var patternGroups = methodStaticCalls
+                            .GroupBy(call => new { 
+                                ClassName = call.Expression.ToString(), 
+                                MethodName = call.Name.ToString() 
+                            })
+                            .ToList();
+
+                        foreach (var group in patternGroups)
                         {
-                            File = file,
-                            Class = classNode.Identifier.Text,
-                            Method = method.Identifier.Text,
-                            Pattern = pattern.ClassName + "." + pattern.MethodName,
-                            Complexity = complexity,
-                            StaticCallCount = staticCalls.Count
-                        });
+                            var pattern = StaticCallConfig.Patterns.First(p =>
+                                p.ClassName == group.Key.ClassName && p.MethodName == group.Key.MethodName);
+
+                            results.Add(new
+                            {
+                                File = file,
+                                Class = classNode.Identifier.Text,
+                                Method = method.Identifier.Text,
+                                Pattern = pattern.ClassName + "." + pattern.MethodName,
+                                PatternCount = group.Count(), // How many times this pattern appears in this method
+                                Complexity = complexity,
+                                StaticCallCount = methodStaticCalls.Count // Total static calls in this method
+                            });
+                        }
                     }
                 }
             }
         }
 
         var jsonOutput = JsonSerializer.Serialize(results, new JsonSerializerOptions { WriteIndented = true });
+        
+        // Write to analysis_results.json file
+        var outputPath = "analysis_results.json";
+        if (results.Any())
+        {
+            // Read existing results if file exists
+            var existingResults = new List<object>();
+            if (File.Exists(outputPath))
+            {
+                try
+                {
+                    var existingContent = File.ReadAllText(outputPath);
+                    if (!string.IsNullOrWhiteSpace(existingContent))
+                    {
+                        existingResults = JsonSerializer.Deserialize<List<object>>(existingContent) ?? new List<object>();
+                    }
+                }
+                catch
+                {
+                    // If file is corrupted, start fresh
+                    existingResults = new List<object>();
+                }
+            }
+            
+            // Append new results
+            existingResults.AddRange(results);
+            
+            // Write combined results back to file
+            var combinedJson = JsonSerializer.Serialize(existingResults, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(outputPath, combinedJson);
+        }
+        
         Console.WriteLine(jsonOutput);
     }
 }

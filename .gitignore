@@ -11,6 +11,9 @@
 *.sln.docstates
 *.env
 
+# Cloned repositories for analysis (keep out of source control)
+cloned_repos/
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

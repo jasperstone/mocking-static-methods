@@ -1,0 +1,35 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Orchestrator",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/orchestrator.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "Debug StaticCallAnalyzer",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder}/StaticCallAnalyzer/bin/Debug/net8.0/StaticCallAnalyzer.dll",
+            "args": ["${input:repoPath}"],
+            "cwd": "${workspaceFolder}/StaticCallAnalyzer",
+            "console": "internalConsole",
+            "stopAtEntry": false
+        }
+    ],
+    "inputs": [
+        {
+            "id": "repoPath",
+            "description": "Path to the repository to analyze",
+            "default": ".",
+            "type": "promptString"
+        }
+    ]
+}

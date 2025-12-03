@@ -4,7 +4,8 @@ public static class StaticCallConfig
     {
         ("DateTime", "Now"),
         ("DateTime", "UtcNow"),
-        ("HttpClient", "GetAsync"),
-        ("File", "Exists")
+        ("File", "Exists"),
+        ("Directory", "Exists"),
+        ("Guid", "NewGuid")
     };
 }

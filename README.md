@@ -103,7 +103,7 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 | Repository | GitHub Link | Build & Test Script | Engineer |
 |------------|-------------|---------------------|----------|
 | abp | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | [See below](#abp-framework-build--test-command) | jasper |
-| aspnetcore | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | | jasper |
+| aspnetcore | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | [See below](#aspnet-core-build--test-command) | jasper |
 | efcore | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | | |
 | mono | [https://github.com/mono/mono](https://github.com/mono/mono) | | |
 | orleans | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | | |
@@ -148,6 +148,27 @@ dotnet build && \
 dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults && \
 echo "Coverage data: cloned_repos/abp/framework/TestResults/"
 ```
+
+#### ASP.NET Core Build & Test Command
+
+```bash
+cd cloned_repos/aspnetcore && \
+# Commit ecb199c2 from release/10.0 (Jan 6, 2026) - SDK 10.0.101
+# Note: Cannot use tags (v10.0.0, v10.0.2) as they reference internal RC/servicing builds
+git checkout ecb199c29cbefb6fcb6aa789436de36e44427a78 && \
+git submodule update --init --recursive && \
+./restore.sh && \
+source ./activate.sh && \
+cd src/Servers/Kestrel && \
+./build.sh && \
+dotnet test src/Servers/Kestrel/Core/test/Microsoft.AspNetCore.Server.Kestrel.Core.Tests.csproj \
+  --no-build \
+  --collect:"XPlat Code Coverage" \
+  --results-directory ./TestResults && \
+echo "Coverage data: cloned_repos/aspnetcore/src/Servers/Kestrel/TestResults/"
+```
+
+**Note**: This specific commit snapshot uses a publicly-available released SDK version (10.0.101), avoiding RC or servicing builds not available in public feeds. Tags like `v10.0.0` and `v10.0.2` fail because they reference internal Microsoft builds. Successfully tested with Kestrel Core (9,842 tests passed).
 
 ### Coverage Report Generation
 

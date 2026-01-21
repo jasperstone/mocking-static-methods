@@ -78,7 +78,7 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 | Repository | GitHub Link | Build & Test Script | Engineer |
 |------------|-------------|---------------------|----------|
 | abp | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | [See below](#abp-framework-build--test-command) | jasper |
-| aspnetcore | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | | |
+| aspnetcore | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | | jasper |
 | efcore | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | | |
 | mono | [https://github.com/mono/mono](https://github.com/mono/mono) | | |
 | orleans | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | | |

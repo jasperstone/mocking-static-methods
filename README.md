@@ -77,7 +77,7 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 
 | Repository | GitHub Link | Build & Test Script | Engineer |
 |------------|-------------|---------------------|----------|
-| abp | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | | jasper |
+| abp | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | [See below](#abp-framework-build--test-command) | jasper |
 | aspnetcore | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | | |
 | efcore | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | | |
 | mono | [https://github.com/mono/mono](https://github.com/mono/mono) | | |
@@ -89,6 +89,18 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 | subtitleedit | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | | |
 
 > **Note:** Build commands may vary based on the specific repository structure and requirements. Some repositories may require additional setup steps or have custom build scripts. Always check the repository's README for specific build instructions.
+
+#### ABP Framework Build & Test Command
+
+```bash
+cd cloned_repos/abp && \
+git checkout 10.0.2 && \
+cd framework && \
+dotnet restore && \
+dotnet build && \
+dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults && \
+echo "Coverage data: cloned_repos/abp/framework/TestResults/"
+```
 
 ### Coverage Report Generation
 

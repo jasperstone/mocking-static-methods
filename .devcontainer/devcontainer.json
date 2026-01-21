@@ -1,37 +1,53 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/dotnet
 {
-	"name": "C# (.NET)",
-	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "mcr.microsoft.com/devcontainers/dotnet:1-8.0",
+	"name": "Mocking Static Methods - Multi-Project .NET Build Environment",
+	
+	// Use .NET 9 image which includes .NET 8, 9, 10 SDKs
+	"image": "mcr.microsoft.com/devcontainers/dotnet:1-9.0-bookworm",
+	
+	"features": {
+		// Python for orchestrator and analysis tools
+		"ghcr.io/devcontainers/features/python:1": {
+			"version": "3.12"
+		},
+		// Git for cloning and managing repos
+		"ghcr.io/devcontainers/features/git:1": {},
+		// GitHub CLI for token management
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		// PowerShell for ABP build scripts
+		"ghcr.io/devcontainers/features/powershell:1": {},
+		// Node.js for projects that need it
+		"ghcr.io/devcontainers/features/node:1": {
+			"version": "lts"
+		}
+	},
+	
 	"customizations": {
 		"vscode": {
 			"extensions": [
-				"ms-dotnettools.csdevkit"
+				"ms-dotnettools.csharp",
+				"ms-dotnettools.csdevkit",
+				"ms-python.python",
+				"ms-python.vscode-pylance",
+				"coverlet.vscode-coverlet",
+				"ms-azuretools.vscode-docker"
 			]
 		}
 	},
-	"features": {
-		"ghcr.io/devcontainers/features/python:1": {}
-	}
-
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	// "features": {},
-
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [5000, 5001],
-	// "portsAttributes": {
-	//		"5001": {
-	//			"protocol": "https"
-	//		}
-	// }
-
-	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "dotnet restore",
-
-	// Configure tool-specific properties.
-	// "customizations": {},
-
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
+	
+	// Run setup commands after container is created
+	"postCreateCommand": "pip install -r requirements.txt && dotnet tool install -g dotnet-reportgenerator-globaltool",
+	
+	// Mount .aspnet data for faster subsequent builds
+	"mounts": [
+		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.aspnet,target=/home/vscode/.aspnet,type=bind,consistency=cached"
+	],
+	
+	// Environment variables
+	"remoteEnv": {
+		"DOTNET_CLI_TELEMETRY_OPTOUT": "1"
+	},
+	
+	"runArgs": ["--name", "mocking-static-methods-devcontainer"]
 }

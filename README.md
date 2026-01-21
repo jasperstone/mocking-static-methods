@@ -3,6 +3,31 @@ Experiment in generating unit tests and mocks for code containing static method 
 
 ## Setup
 
+### Option 1: Dev Container (Recommended)
+
+The easiest way to get started is using the included dev container, which provides all dependencies pre-configured:
+
+1. **Prerequisites:**
+   - [Docker Desktop](https://www.docker.com/products/docker-desktop)
+   - [VS Code](https://code.visualstudio.com/)
+   - [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+
+2. **Open in container:**
+   - Open this folder in VS Code
+   - Click "Reopen in Container" when prompted (or use Command Palette: "Dev Containers: Reopen in Container")
+   - Wait for container to build and install dependencies
+
+3. **Set up your GitHub token:**
+   - Create a `.env` file: `cp .env.example .env`
+   - Add your GitHub personal access token
+   - Get a token from: https://github.com/settings/tokens
+
+4. **You're ready!** All tools (.NET SDKs, Python, PowerShell, coverage tools) are pre-installed.
+
+### Option 2: Local Installation
+
+If you prefer to run locally without containers:
+
 ### Prerequisites
 - .NET 8.0 SDK
 - Python 3.8+
@@ -89,6 +114,28 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 | subtitleedit | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | | |
 
 > **Note:** Build commands may vary based on the specific repository structure and requirements. Some repositories may require additional setup steps or have custom build scripts. Always check the repository's README for specific build instructions.
+
+### Containerized Builds
+
+For projects with complex dependencies, you can use Docker to ensure a consistent build environment:
+
+```bash
+# Example: Build ABP in a container
+docker run --rm -v "$(pwd)/cloned_repos/abp:/workspace" -w /workspace/framework \
+  mcr.microsoft.com/dotnet/sdk:9.0 \
+  bash -c "dotnet restore && dotnet build && dotnet test --collect:'XPlat Code Coverage' --results-directory ./TestResults"
+```
+
+**Benefits:**
+- ✅ Isolated dependencies per project
+- ✅ Reproducible builds across machines
+- ✅ No conflicts with local environment
+- ✅ Easily switch between .NET versions
+
+To create containerized build scripts for each repository, you can:
+1. Create a `Dockerfile` in each `cloned_repos/<repo>/` directory
+2. Use Docker Compose to orchestrate multiple builds
+3. Or use the dev container approach for the entire workspace
 
 #### ABP Framework Build & Test Command
 

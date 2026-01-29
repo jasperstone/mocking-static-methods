@@ -176,17 +176,13 @@ echo "Coverage data: cloned_repos/aspnetcore/src/Servers/Kestrel/TestResults/"
 cd cloned_repos/efcore && \
 git checkout release/10.0 && \
 source ./activate.sh && \
-./build.sh && \
-dotnet add test/EFCore.Tests/EFCore.Tests.csproj package coverlet.collector && \
-dotnet build test/EFCore.Tests/EFCore.Tests.csproj && \
-dotnet test test/EFCore.Tests/EFCore.Tests.csproj \
-  --no-build \
+dotnet test EFCore.sln \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults && \
 echo "Coverage data: cloned_repos/efcore/TestResults/"
 ```
 
-**Note**: EF Core on branch `release/10.0` requires the `coverlet.collector` package for code coverage and uses the local SDK via `activate.sh` (version 10.0.102). Successfully tested with EF Core Tests (6,622 tests passed).
+**Note**: EF Core on branch `release/10.0` uses the local SDK via `activate.sh` (version 10.0.102). Successfully tested EFCore.sln with 49,056 tests passed across multiple test projects (includes EFCore.Tests with 6,622 tests, Sqlite.FunctionalTests with 37,278 tests, and 12 other test projects). The `dotnet test` command automatically builds before testing.
 
 #### Orleans Build & Test Command
 

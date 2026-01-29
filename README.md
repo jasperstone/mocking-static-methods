@@ -105,8 +105,8 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 | abp | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | [See below](#abp-framework-build--test-command) | jasper |
 | aspnetcore | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | [See below](#aspnet-core-build--test-command) | jasper |
 | efcore | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | [See below](#ef-core-build--test-command) | jasper |
-| mono | [https://github.com/mono/mono](https://github.com/mono/mono) | | jasper |
-| orleans | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | | |
+| mono | [https://github.com/mono/mono](https://github.com/mono/mono) | **Skipped** - Final release Feb 2024, archived project | - |
+| orleans | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | [See below](#orleans-build--test-command) | jasper |
 | roslyn | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | | |
 | runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | | q |
 | semantic-kernel | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | | |
@@ -187,6 +187,20 @@ echo "Coverage data: cloned_repos/efcore/TestResults/"
 ```
 
 **Note**: EF Core on branch `release/10.0` requires the `coverlet.collector` package for code coverage and uses the local SDK via `activate.sh` (version 10.0.102). Successfully tested with EF Core Tests (6,622 tests passed).
+
+#### Orleans Build & Test Command
+
+```bash
+cd cloned_repos/orleans && \
+git checkout v9.2.1 && \
+dotnet restore Orleans.sln && \
+dotnet test Orleans.sln \
+  --collect:"XPlat Code Coverage" \
+  --results-directory ./TestResults && \
+echo "Coverage data: cloned_repos/orleans/TestResults/"
+```
+
+**Note**: Orleans v9.2.1 uses .NET 8 (installed via devcontainer feature). Successfully tested Orleans.sln with 309 tests passed across 20 test projects. Orleans is Microsoft's framework for building distributed applications using the virtual actor model.
 
 ### Coverage Report Generation
 

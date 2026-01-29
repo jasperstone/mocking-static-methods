@@ -20,6 +20,10 @@
 		// Node.js for projects that need it
 		"ghcr.io/devcontainers/features/node:1": {
 			"version": "lts"
+		},
+		// .NET 8 SDK for Orleans and other .NET 8 projects
+		"ghcr.io/devcontainers/features/dotnet:1": {
+			"version": "8.0"
 		}
 	},
 	

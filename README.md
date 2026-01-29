@@ -157,18 +157,15 @@ cd cloned_repos/aspnetcore && \
 # Note: Cannot use tags (v10.0.0, v10.0.2) as they reference internal RC/servicing builds
 git checkout ecb199c29cbefb6fcb6aa789436de36e44427a78 && \
 git submodule update --init --recursive && \
-./restore.sh && \
 source ./activate.sh && \
-cd src/Servers/Kestrel && \
-./build.sh && \
-dotnet test src/Servers/Kestrel/Core/test/Microsoft.AspNetCore.Server.Kestrel.Core.Tests.csproj \
-  --no-build \
+find src -name "*.Tests.csproj" -o -name "*FunctionalTests.csproj" | while read proj; do dotnet add "$proj" package coverlet.collector 2>&1 | grep -q "added" || true; done && \
+dotnet test AspNetCore.slnx \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults && \
-echo "Coverage data: cloned_repos/aspnetcore/src/Servers/Kestrel/TestResults/"
+echo "Coverage data: cloned_repos/aspnetcore/TestResults/"
 ```
 
-**Note**: This specific commit snapshot uses a publicly-available released SDK version (10.0.101), avoiding RC or servicing builds not available in public feeds. Tags like `v10.0.0` and `v10.0.2` fail because they reference internal Microsoft builds. Successfully tested with Kestrel Core (9,842 tests passed).
+**Note**: This specific commit snapshot uses a publicly-available released SDK version (10.0.101), avoiding RC or servicing builds not available in public feeds. Tags like `v10.0.0` and `v10.0.2` fail because they reference internal Microsoft builds. The command tests the full AspNetCore.slnx solution with 137+ test projects, adding coverlet.collector to all test projects for comprehensive coverage collection. The `dotnet test` command automatically restores and builds before testing. This provides coverage across all ASP.NET Core components including MVC, Razor, SignalR, Identity, Middleware, Kestrel, and more. Note: Adding coverlet to 137 projects may take 15-30 minutes, followed by build and test time.
 
 #### EF Core Build & Test Command
 

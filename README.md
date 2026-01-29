@@ -104,8 +104,8 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 |------------|-------------|---------------------|----------|
 | abp | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | [See below](#abp-framework-build--test-command) | jasper |
 | aspnetcore | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | [See below](#aspnet-core-build--test-command) | jasper |
-| efcore | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | | jasper |
-| mono | [https://github.com/mono/mono](https://github.com/mono/mono) | | |
+| efcore | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | [See below](#ef-core-build--test-command) | jasper |
+| mono | [https://github.com/mono/mono](https://github.com/mono/mono) | | jasper |
 | orleans | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | | |
 | roslyn | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | | |
 | runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | | q |
@@ -169,6 +169,24 @@ echo "Coverage data: cloned_repos/aspnetcore/src/Servers/Kestrel/TestResults/"
 ```
 
 **Note**: This specific commit snapshot uses a publicly-available released SDK version (10.0.101), avoiding RC or servicing builds not available in public feeds. Tags like `v10.0.0` and `v10.0.2` fail because they reference internal Microsoft builds. Successfully tested with Kestrel Core (9,842 tests passed).
+
+#### EF Core Build & Test Command
+
+```bash
+cd cloned_repos/efcore && \
+git checkout release/10.0 && \
+source ./activate.sh && \
+./build.sh && \
+dotnet add test/EFCore.Tests/EFCore.Tests.csproj package coverlet.collector && \
+dotnet build test/EFCore.Tests/EFCore.Tests.csproj && \
+dotnet test test/EFCore.Tests/EFCore.Tests.csproj \
+  --no-build \
+  --collect:"XPlat Code Coverage" \
+  --results-directory ./TestResults && \
+echo "Coverage data: cloned_repos/efcore/TestResults/"
+```
+
+**Note**: EF Core on branch `release/10.0` requires the `coverlet.collector` package for code coverage and uses the local SDK via `activate.sh` (version 10.0.102). Successfully tested with EF Core Tests (6,622 tests passed).
 
 ### Coverage Report Generation
 

@@ -100,18 +100,18 @@ Each repository below implements this algorithm with project-specific commands.
 
 The following table tracks the repositories cloned into the `cloned_repos/` directory with complete build and test scripts:
 
-| Description | GitHub Link | Build & Test Script |
-|-------------|-------------|---------------------|
-| App Framework | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | [See below](#abp-framework-build--test-command) |
-| Web Framework | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | [See below](#aspnet-core-build--test-command) |
-| ORM | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | [See below](#ef-core-build--test-command) |
-| XPlat Runtime | [https://github.com/mono/mono](https://github.com/mono/mono) | **Skipped** - Final release Feb 2024, archived project |
-| Distributed Actors | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | [See below](#orleans-build--test-command) |
-| Compiler | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | [See below](#roslyn-build--test-command) |
-| .NET Runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | |
-| AI SDK | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | [See below](#semantic-kernel-build--test-command) |
-| Auth Server | [https://github.com/DuendeArchive/IdentityServer4](https://github.com/DuendeArchive/IdentityServer4) | **Skipped** - Archived, moved to Duende IdentityServer (commercial) |
-| Subtitle Editor | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | **Skipped** - Uses .NET Framework 4.8, no .NET 10 support |
+| Description | GitHub Link | .NET Version | Build & Test Script |
+|-------------|-------------|--------------|---------------------|
+| App Framework | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | .NET 10 | [See below](#abp-framework-build--test-command) |
+| Web Framework | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | SDK 10.0.101 | [See below](#aspnet-core-build--test-command) |
+| ORM | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | SDK 10.0.102 | [See below](#ef-core-build--test-command) |
+| XPlat Runtime | [https://github.com/mono/mono](https://github.com/mono/mono) | Native (autotools) | **Skipped** - Final release Feb 2024, archived project |
+| Distributed Actors | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | .NET 8 | [See below](#orleans-build--test-command) |
+| Compiler | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | SDK 10.0.102 | [See below](#roslyn-build--test-command) |
+| .NET Runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | SDK 10.0.100 | [See below](#runtime-build--test-command) |
+| AI SDK | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | SDK 10.0.100 | [See below](#semantic-kernel-build--test-command) |
+| Auth Server | [https://github.com/DuendeArchive/IdentityServer4](https://github.com/DuendeArchive/IdentityServer4) | .NET 5/6 | **Skipped** - Archived, moved to Duende IdentityServer (commercial) |
+| Subtitle Editor | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | Framework 4.8 | **Skipped** - Uses .NET Framework 4.8, no .NET 10 support |
 
 > **Note:** Build commands may vary based on the specific repository structure and requirements. Some repositories may require additional setup steps or have custom build scripts. Always check the repository's README for specific build instructions.
 
@@ -207,6 +207,17 @@ echo "Coverage data: cloned_repos/roslyn/TestResults/"
 ```
 
 **Note**: Roslyn on the **release/dev18.3** branch requires .NET 10.0.100-rc.2 but works with .NET 10.0.102 stable via rollForward policy. This is a development branch tied to Visual Studio 2025 Preview. Roslyn is the .NET Compiler Platform providing C# and Visual Basic compilers with rich code analysis APIs. The `dotnet test` command automatically restores and builds before testing.
+
+#### Runtime Build & Test Command
+
+```bash
+cd cloned_repos/runtime && \
+git checkout v10.0.2 && \
+./build.sh -subset libs+libs.tests -test && \
+echo "Test results: cloned_repos/runtime/artifacts/TestResults/"
+```
+
+**Note**: .NET Runtime v10.0.2 (released Dec 11, 2025) is the latest patch release for .NET 10. This command builds and tests only the libraries (`libs+libs.tests`) without building the CoreCLR native runtime, which requires clang 8-22 and C++ build tools. The libraries subset includes all managed .NET Base Class Libraries (BCL) like System.Collections, System.IO, System.Text.Json, etc. The `- test` flag runs all library unit tests after building. The .NET Runtime repository is the largest .NET codebase containing the fundamental runtime, base class libraries, and host components. **Prerequisites**: To build the full CoreCLR runtime (not just libraries), install: `sudo apt install clang cmake build-essential`. Library tests run against the pre-installed .NET 10.0.102 SDK and don't require native compilation. Test results are placed in `artifacts/TestResults/` with thousands of test assemblies.
 
 #### Semantic Kernel Build & Test Command
 

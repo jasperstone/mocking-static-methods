@@ -110,8 +110,8 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 | roslyn | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | [See below](#roslyn-build--test-command) | jasper |
 | runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | | q |
 | semantic-kernel | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | [See below](#semantic-kernel-build--test-command) | jasper |
-| server | [https://github.com/IdentityServer/IdentityServer4](https://github.com/IdentityServer/IdentityServer4) | | |
-| subtitleedit | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | | |
+| server | [https://github.com/DuendeArchive/IdentityServer4](https://github.com/DuendeArchive/IdentityServer4) | **Skipped** - Archived, moved to Duende IdentityServer (commercial) | - |
+| subtitleedit | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | **Skipped** - Uses .NET Framework 4.8, no .NET 10 support | - |
 
 > **Note:** Build commands may vary based on the specific repository structure and requirements. Some repositories may require additional setup steps or have custom build scripts. Always check the repository's README for specific build instructions.
 

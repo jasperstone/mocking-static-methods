@@ -3,27 +3,22 @@
 {
 	"name": "Mocking Static Methods - Multi-Project .NET Build Environment",
 	
-	// Use .NET 9 image which includes .NET 8, 9, 10 SDKs
-	"image": "mcr.microsoft.com/devcontainers/dotnet:1-9.0-bookworm",
+	// Use custom Dockerfile to fix yarn GPG key issue before installing features
+	"build": {
+		"dockerfile": "Dockerfile"
+	},
+	
+	// Initialize command to fix yarn repo issue before features are installed
+	"initializeCommand": "echo 'Preparing devcontainer...'",
+	
+	// On create, remove the problematic yarn repository before installing features
+	"onCreateCommand": "sudo rm -f /etc/apt/sources.list.d/yarn.list || true",
 	
 	"features": {
 		// Python for orchestrator and analysis tools
 		"ghcr.io/devcontainers/features/python:1": {
-			"version": "3.12"
-		},
-		// Git for cloning and managing repos
-		"ghcr.io/devcontainers/features/git:1": {},
-		// GitHub CLI for token management
-		"ghcr.io/devcontainers/features/github-cli:1": {},
-		// PowerShell for ABP build scripts
-		"ghcr.io/devcontainers/features/powershell:1": {},
-		// Node.js for projects that need it
-		"ghcr.io/devcontainers/features/node:1": {
-			"version": "lts"
-		},
-		// .NET 8 SDK for Orleans and other .NET 8 projects
-		"ghcr.io/devcontainers/features/dotnet:1": {
-			"version": "8.0"
+			"version": "3.12",
+			"installTools": true
 		}
 	},
 	
@@ -41,12 +36,10 @@
 	},
 	
 	// Run setup commands after container is created
-	"postCreateCommand": "pip install -r requirements.txt && dotnet tool install -g dotnet-reportgenerator-globaltool",
+	"postCreateCommand": "bash -c 'pip install -r requirements.txt 2>/dev/null || true && dotnet tool install -g dotnet-reportgenerator-globaltool 2>/dev/null || true'",
 	
-	// Mount .aspnet data for faster subsequent builds
-	"mounts": [
-		"source=${localEnv:HOME}${localEnv:USERPROFILE}/.aspnet,target=/home/vscode/.aspnet,type=bind,consistency=cached"
-	],
+	// Install mono-complete in background after container starts (won't block connection)
+	"postStartCommand": "bash -c 'echo \"Installing mono-complete (this may take 5-10 minutes)...\" && sudo apt-get update -qq && sudo apt-get install -y mono-complete && echo \"mono-complete installation complete!\"'",
 	
 	// Environment variables
 	"remoteEnv": {

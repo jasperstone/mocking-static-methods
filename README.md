@@ -146,7 +146,8 @@ cd framework && \
 dotnet restore && \
 dotnet build && \
 dotnet test --collect:"XPlat Code Coverage" --results-directory ./TestResults && \
-echo "Coverage data: cloned_repos/abp/framework/TestResults/"
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:Html && \
+echo "Coverage report: cloned_repos/abp/framework/CoverageReport/index.html"
 ```
 
 #### ASP.NET Core Build & Test Command
@@ -162,7 +163,8 @@ find src -name "*.Tests.csproj" -o -name "*FunctionalTests.csproj" | while read 
 dotnet test AspNetCore.slnx \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults && \
-echo "Coverage data: cloned_repos/aspnetcore/TestResults/"
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:Html && \
+echo "Coverage report: cloned_repos/aspnetcore/CoverageReport/index.html"
 ```
 
 **Note**: This specific commit snapshot uses a publicly-available released SDK version (10.0.101), avoiding RC or servicing builds not available in public feeds. Tags like `v10.0.0` and `v10.0.2` fail because they reference internal Microsoft builds. The command tests the full AspNetCore.slnx solution with 137+ test projects, adding coverlet.collector to all test projects for comprehensive coverage collection. The `dotnet test` command automatically restores and builds before testing. This provides coverage across all ASP.NET Core components including MVC, Razor, SignalR, Identity, Middleware, Kestrel, and more. Note: Adding coverlet to 137 projects may take 15-30 minutes, followed by build and test time.
@@ -176,7 +178,8 @@ source ./activate.sh && \
 dotnet test EFCore.sln \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults && \
-echo "Coverage data: cloned_repos/efcore/TestResults/"
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:Html && \
+echo "Coverage report: cloned_repos/efcore/CoverageReport/index.html"
 ```
 
 **Note**: EF Core on branch `release/10.0` uses the local SDK via `activate.sh` (version 10.0.102). Successfully tested EFCore.sln with 49,056 tests passed across multiple test projects (includes EFCore.Tests with 6,622 tests, Sqlite.FunctionalTests with 37,278 tests, and 12 other test projects). The `dotnet test` command automatically builds before testing.
@@ -190,7 +193,8 @@ dotnet restore Orleans.sln && \
 dotnet test Orleans.sln \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults && \
-echo "Coverage data: cloned_repos/orleans/TestResults/"
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:Html && \
+echo "Coverage report: cloned_repos/orleans/CoverageReport/index.html"
 ```
 
 **Note**: Orleans v9.2.1 uses .NET 8 (installed via devcontainer feature). Successfully tested Orleans.sln with 309 tests passed across 20 test projects. Orleans is Microsoft's framework for building distributed applications using the virtual actor model.
@@ -203,7 +207,8 @@ git checkout release/dev18.3 && \
 dotnet test Roslyn.sln \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults && \
-echo "Coverage data: cloned_repos/roslyn/TestResults/"
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:Html && \
+echo "Coverage report: cloned_repos/roslyn/CoverageReport/index.html"
 ```
 
 **Note**: Roslyn on the **release/dev18.3** branch requires .NET 10.0.100-rc.2 but works with .NET 10.0.102 stable via rollForward policy. This is a development branch tied to Visual Studio 2025 Preview. Roslyn is the .NET Compiler Platform providing C# and Visual Basic compilers with rich code analysis APIs. The `dotnet test` command automatically restores and builds before testing.
@@ -214,7 +219,8 @@ echo "Coverage data: cloned_repos/roslyn/TestResults/"
 cd cloned_repos/runtime && \
 git checkout v10.0.2 && \
 ./build.sh -subset libs+libs.tests -test && \
-echo "Test results: cloned_repos/runtime/artifacts/TestResults/"
+reportgenerator -reports:"./artifacts/TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:Html && \
+echo "Coverage report: cloned_repos/runtime/CoverageReport/index.html"
 ```
 
 **Note**: .NET Runtime v10.0.2 (released Dec 11, 2025) is the latest patch release for .NET 10. This command builds and tests only the libraries (`libs+libs.tests`) without building the CoreCLR native runtime, which requires clang 8-22 and C++ build tools. The libraries subset includes all managed .NET Base Class Libraries (BCL) like System.Collections, System.IO, System.Text.Json, etc. The `- test` flag runs all library unit tests after building. The .NET Runtime repository is the largest .NET codebase containing the fundamental runtime, base class libraries, and host components. **Prerequisites**: To build the full CoreCLR runtime (not just libraries), install: `sudo apt install clang cmake build-essential`. Library tests run against the pre-installed .NET 10.0.102 SDK and don't require native compilation. Test results are placed in `artifacts/TestResults/` with thousands of test assemblies.
@@ -229,7 +235,8 @@ dotnet test SK-dotnet.slnx \
   --filter 'FullyQualifiedName!~SemanticKernel.IntegrationTests' \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults && \
-echo "Coverage data: cloned_repos/semantic-kernel/dotnet/TestResults/"
+reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:Html && \
+echo "Coverage report: cloned_repos/semantic-kernel/dotnet/CoverageReport/index.html"
 ```
 
 **Note**: Semantic Kernel v1.70.0 uses **.NET 10.0.100 SDK** (upgraded from .NET 9 in v1.68.0). The SK-dotnet.slnx solution includes the core Semantic Kernel library and its connectors for OpenAI, Azure OpenAI, Gemini, and other AI services, along with comprehensive test coverage. Semantic Kernel is Microsoft's SDK for integrating large language models (LLMs) into .NET applications with features like prompt templating, function calling, memory, and agents. The `dotnet test` command automatically restores and builds before testing. The filter excludes integration tests (namespace-based: `SemanticKernel.IntegrationTests`) that require API keys for OpenAI, Azure OpenAI, and other services.

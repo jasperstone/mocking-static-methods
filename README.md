@@ -107,9 +107,9 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 | efcore | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | [See below](#ef-core-build--test-command) | jasper |
 | mono | [https://github.com/mono/mono](https://github.com/mono/mono) | **Skipped** - Final release Feb 2024, archived project | - |
 | orleans | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | [See below](#orleans-build--test-command) | jasper |
-| roslyn | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | | |
+| roslyn | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | [See below](#roslyn-build--test-command) | jasper |
 | runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | | q |
-| semantic-kernel | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | | |
+| semantic-kernel | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | [See below](#semantic-kernel-build--test-command) | jasper |
 | server | [https://github.com/IdentityServer/IdentityServer4](https://github.com/IdentityServer/IdentityServer4) | | |
 | subtitleedit | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | | |
 
@@ -194,6 +194,34 @@ echo "Coverage data: cloned_repos/orleans/TestResults/"
 ```
 
 **Note**: Orleans v9.2.1 uses .NET 8 (installed via devcontainer feature). Successfully tested Orleans.sln with 309 tests passed across 20 test projects. Orleans is Microsoft's framework for building distributed applications using the virtual actor model.
+
+#### Roslyn Build & Test Command
+
+```bash
+cd cloned_repos/roslyn && \
+git checkout release/dev18.3 && \
+dotnet test Roslyn.sln \
+  --collect:"XPlat Code Coverage" \
+  --results-directory ./TestResults && \
+echo "Coverage data: cloned_repos/roslyn/TestResults/"
+```
+
+**Note**: Roslyn on the **release/dev18.3** branch requires .NET 10.0.100-rc.2 but works with .NET 10.0.102 stable via rollForward policy. This is a development branch tied to Visual Studio 2025 Preview. Roslyn is the .NET Compiler Platform providing C# and Visual Basic compilers with rich code analysis APIs. The `dotnet test` command automatically restores and builds before testing.
+
+#### Semantic Kernel Build & Test Command
+
+```bash
+cd cloned_repos/semantic-kernel && \
+git checkout dotnet-1.70.0 && \
+cd dotnet && \
+dotnet test SK-dotnet.slnx \
+  --filter 'FullyQualifiedName!~SemanticKernel.IntegrationTests' \
+  --collect:"XPlat Code Coverage" \
+  --results-directory ./TestResults && \
+echo "Coverage data: cloned_repos/semantic-kernel/dotnet/TestResults/"
+```
+
+**Note**: Semantic Kernel v1.70.0 uses **.NET 10.0.100 SDK** (upgraded from .NET 9 in v1.68.0). The SK-dotnet.slnx solution includes the core Semantic Kernel library and its connectors for OpenAI, Azure OpenAI, Gemini, and other AI services, along with comprehensive test coverage. Semantic Kernel is Microsoft's SDK for integrating large language models (LLMs) into .NET applications with features like prompt templating, function calling, memory, and agents. The `dotnet test` command automatically restores and builds before testing. The filter excludes integration tests (namespace-based: `SemanticKernel.IntegrationTests`) that require API keys for OpenAI, Azure OpenAI, and other services.
 
 ### Coverage Report Generation
 

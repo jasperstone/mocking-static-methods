@@ -100,18 +100,18 @@ Each repository below implements this algorithm with project-specific commands.
 
 The following table tracks the repositories cloned into the `cloned_repos/` directory with complete build and test scripts:
 
-| Repository | GitHub Link | Build & Test Script | Engineer |
-|------------|-------------|---------------------|----------|
-| abp | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | [See below](#abp-framework-build--test-command) | jasper |
-| aspnetcore | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | [See below](#aspnet-core-build--test-command) | jasper |
-| efcore | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | [See below](#ef-core-build--test-command) | jasper |
-| mono | [https://github.com/mono/mono](https://github.com/mono/mono) | **Skipped** - Final release Feb 2024, archived project | - |
-| orleans | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | [See below](#orleans-build--test-command) | jasper |
-| roslyn | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | [See below](#roslyn-build--test-command) | jasper |
-| runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | | q |
-| semantic-kernel | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | [See below](#semantic-kernel-build--test-command) | jasper |
-| server | [https://github.com/DuendeArchive/IdentityServer4](https://github.com/DuendeArchive/IdentityServer4) | **Skipped** - Archived, moved to Duende IdentityServer (commercial) | - |
-| subtitleedit | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | **Skipped** - Uses .NET Framework 4.8, no .NET 10 support | - |
+| Description | GitHub Link | Build & Test Script |
+|-------------|-------------|---------------------|
+| App Framework | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | [See below](#abp-framework-build--test-command) |
+| Web Framework | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | [See below](#aspnet-core-build--test-command) |
+| ORM | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | [See below](#ef-core-build--test-command) |
+| XPlat Runtime | [https://github.com/mono/mono](https://github.com/mono/mono) | **Skipped** - Final release Feb 2024, archived project |
+| Distributed Actors | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | [See below](#orleans-build--test-command) |
+| Compiler | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | [See below](#roslyn-build--test-command) |
+| .NET Runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | |
+| AI SDK | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | [See below](#semantic-kernel-build--test-command) |
+| Auth Server | [https://github.com/DuendeArchive/IdentityServer4](https://github.com/DuendeArchive/IdentityServer4) | **Skipped** - Archived, moved to Duende IdentityServer (commercial) |
+| Subtitle Editor | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | **Skipped** - Uses .NET Framework 4.8, no .NET 10 support |
 
 > **Note:** Build commands may vary based on the specific repository structure and requirements. Some repositories may require additional setup steps or have custom build scripts. Always check the repository's README for specific build instructions.
 

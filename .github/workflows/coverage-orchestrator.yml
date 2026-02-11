@@ -283,6 +283,15 @@ jobs:
       github.event.inputs.repo == 'roslyn'
 
     steps:
+      - name: Free up disk space
+        run: |
+          # GitHub runners come with ~14 GB free. Roslyn needs more.
+          # Remove pre-installed tools/SDKs we don't need to reclaim ~25 GB.
+          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/share/boost
+          sudo rm -rf /usr/share/swift /usr/local/.ghcup /usr/local/graalvm
+          sudo apt-get clean
+          df -h /
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:

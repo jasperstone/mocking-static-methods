@@ -368,8 +368,10 @@ jobs:
         working-directory: semantic-kernel
         run: |
           cd dotnet
+          # Exclude sample projects (Concepts, GettingStarted*, LearnResources) that require
+          # live API keys for OpenAI, HuggingFace, Azure, etc. and will fail in CI.
           dotnet test SK-dotnet.slnx \
-            --filter 'FullyQualifiedName!~SemanticKernel.IntegrationTests' \
+            --filter 'FullyQualifiedName!~SemanticKernel.IntegrationTests&FullyQualifiedName!~Concepts&FullyQualifiedName!~GettingStarted&FullyQualifiedName!~LearnResources' \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
           reportgenerator \

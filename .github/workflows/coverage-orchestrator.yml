@@ -142,16 +142,35 @@ jobs:
           git fetch --depth 1 origin ecb199c29cbefb6fcb6aa789436de36e44427a78
           git checkout FETCH_HEAD
 
-      - name: Build, Test & Generate Coverage
+      - name: Initialize submodules
+        working-directory: aspnetcore
+        run: git submodule update --init --recursive
+
+      - name: Restore SDK & dependencies
         working-directory: aspnetcore
         run: |
-          git submodule update --init --recursive
           ./restore.sh
           source ./activate.sh
+          echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
+          echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
+
+      - name: Build
+        working-directory: aspnetcore
+        run: ./eng/build.sh --all --no-test
+
+      - name: Test with coverage
+        working-directory: aspnetcore
+        run: |
           dotnet test AspNetCore.slnx \
+            --no-build \
             --filter "Category!=Integration&Category!=E2E&Category!=Quarantined" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
+
+      - name: Generate coverage report
+        if: always()
+        working-directory: aspnetcore
+        run: |
           reportgenerator \
             -reports:"./TestResults/*/coverage.cobertura.xml" \
             -targetdir:"./CoverageReport" \

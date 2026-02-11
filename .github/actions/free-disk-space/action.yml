@@ -1,0 +1,18 @@
+name: Free Disk Space
+description: >
+  Remove pre-installed tools/SDKs from the GitHub runner to reclaim ~25 GB.
+  Keeps .NET SDK intact since all jobs need it.
+
+runs:
+  using: composite
+  steps:
+    - name: Free up disk space
+      shell: bash
+      run: |
+        echo "=== Disk space BEFORE cleanup ==="
+        df -h /
+        sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/share/boost
+        sudo rm -rf /usr/share/swift /usr/local/.ghcup /usr/local/graalvm
+        sudo apt-get clean
+        echo "=== Disk space AFTER cleanup ==="
+        df -h /

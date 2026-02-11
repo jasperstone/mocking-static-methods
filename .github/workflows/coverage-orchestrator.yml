@@ -75,8 +75,11 @@ jobs:
       github.event.inputs.repo == 'abp'
 
     steps:
-      # "checkout" in GHA means checking out YOUR repo (the one this workflow lives in).
-      # We skip that here since we only need the target OSS repo.
+      - name: Checkout (for reusable actions)
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        uses: ./.github/actions/free-disk-space
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -127,6 +130,12 @@ jobs:
       github.event.inputs.repo == 'aspnetcore'
 
     steps:
+      - name: Checkout (for reusable actions)
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        uses: ./.github/actions/free-disk-space
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -196,6 +205,12 @@ jobs:
       github.event.inputs.repo == 'efcore'
 
     steps:
+      - name: Checkout (for reusable actions)
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        uses: ./.github/actions/free-disk-space
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -240,6 +255,12 @@ jobs:
       github.event.inputs.repo == 'orleans'
 
     steps:
+      - name: Checkout (for reusable actions)
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        uses: ./.github/actions/free-disk-space
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -283,14 +304,11 @@ jobs:
       github.event.inputs.repo == 'roslyn'
 
     steps:
+      - name: Checkout (for reusable actions)
+        uses: actions/checkout@v4
+
       - name: Free up disk space
-        run: |
-          # GitHub runners come with ~14 GB free. Roslyn needs more.
-          # Remove pre-installed tools/SDKs we don't need to reclaim ~25 GB.
-          sudo rm -rf /usr/local/lib/android /opt/ghc /usr/local/share/boost
-          sudo rm -rf /usr/share/swift /usr/local/.ghcup /usr/local/graalvm
-          sudo apt-get clean
-          df -h /
+        uses: ./.github/actions/free-disk-space
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -341,6 +359,12 @@ jobs:
       github.event.inputs.repo == 'runtime'
 
     steps:
+      - name: Checkout (for reusable actions)
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        uses: ./.github/actions/free-disk-space
+
       - name: Install native dependencies
         run: |
           sudo apt-get update
@@ -381,6 +405,12 @@ jobs:
       github.event.inputs.repo == 'semantic-kernel'
 
     steps:
+      - name: Checkout (for reusable actions)
+        uses: actions/checkout@v4
+
+      - name: Free up disk space
+        uses: ./.github/actions/free-disk-space
+
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:

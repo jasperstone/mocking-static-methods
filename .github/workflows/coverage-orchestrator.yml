@@ -146,6 +146,7 @@ jobs:
         working-directory: aspnetcore
         run: |
           git submodule update --init --recursive
+          ./restore.sh
           source ./activate.sh
           dotnet test AspNetCore.slnx \
             --filter "Category!=Integration&Category!=E2E&Category!=Quarantined" \

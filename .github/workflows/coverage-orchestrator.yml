@@ -306,6 +306,11 @@ jobs:
       github.event.inputs.repo == 'runtime'
 
     steps:
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libkrb5-dev libssl-dev zlib1g-dev
+
       - name: Install ReportGenerator
         run: dotnet tool install -g dotnet-reportgenerator-globaltool
 

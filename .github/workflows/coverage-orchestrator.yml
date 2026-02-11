@@ -191,6 +191,7 @@ jobs:
       - name: Build, Test & Generate Coverage
         working-directory: efcore
         run: |
+          ./restore.sh
           source ./activate.sh
           dotnet test EFCore.sln \
             --collect:"XPlat Code Coverage" \

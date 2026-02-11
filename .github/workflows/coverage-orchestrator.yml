@@ -1,0 +1,404 @@
+# =============================================================================
+# Coverage Orchestrator - GitHub Actions Pipeline
+# =============================================================================
+#
+# AZURE DEVOPS → GITHUB ACTIONS CHEAT SHEET:
+#
+#   ADO Concept             → GitHub Actions Equivalent
+#   ─────────────────────── → ──────────────────────────
+#   pipeline (YAML)         → workflow (YAML in .github/workflows/)
+#   trigger / pr            → on: push / pull_request
+#   stages                  → (no direct equivalent; use job dependencies)
+#   jobs                    → jobs (same name! run in parallel by default)
+#   steps                   → steps (same name!)
+#   pool: vmImage           → runs-on: ubuntu-latest
+#   variables               → env: (workflow, job, or step level)
+#   task: PublishBuildArtifacts → actions/upload-artifact
+#   $(Build.SourcesDirectory) → ${{ github.workspace }}
+#   dependsOn               → needs: [job1, job2]  (without this, jobs run in PARALLEL)
+#   condition: succeeded()  → if: success()  (default; usually omitted)
+#   condition: always()     → if: always()
+#
+# KEY DIFFERENCES:
+#   - Jobs run in PARALLEL by default (no "dependsOn" needed here).
+#     In ADO, stages are sequential by default; in GHA, jobs are parallel by default.
+#   - Each job gets a FRESH VM. There's no shared filesystem between jobs.
+#     That's why each job clones its own repo below.
+#   - Artifacts are uploaded per-job and downloadable from the workflow run's
+#     "Artifacts" section in the GitHub UI.
+# =============================================================================
+
+name: Coverage Orchestrator
+
+# When does this workflow run?
+# Equivalent to ADO "trigger:" and "pr:" sections.
+on:
+  # Manual trigger (like ADO "Run pipeline" button) — lets you pick one repo or all.
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Which repo to run (leave blank or "all" for all repos)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - abp
+          - aspnetcore
+          - efcore
+          - orleans
+          - roslyn
+          - runtime
+          - semantic-kernel
+
+  # Also run on pushes to main (adjust as needed)
+  push:
+    branches: [main]
+
+# =============================================================================
+# JOBS — These all run in PARALLEL on separate runners (separate VMs).
+# In ADO you'd need "dependsOn: []" to force parallelism between stages;
+# in GitHub Actions, jobs are parallel by default unless you add "needs:".
+# =============================================================================
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # ABP Framework
+  # ---------------------------------------------------------------------------
+  abp:
+    name: ABP Framework Coverage
+    runs-on: ubuntu-latest
+    # Only run if user selected "all" or "abp" (or it's a push trigger)
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'abp'
+
+    steps:
+      # "checkout" in GHA means checking out YOUR repo (the one this workflow lives in).
+      # We skip that here since we only need the target OSS repo.
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Clone ABP repository
+        run: git clone --depth 1 --branch 10.0.2 https://github.com/abpframework/abp.git abp
+
+      - name: Build, Test & Generate Coverage
+        working-directory: abp
+        run: |
+          cd framework
+          dotnet restore
+          dotnet build
+          dotnet test \
+            --filter "FullyQualifiedName!~SkiaSharp" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+          reportgenerator \
+            -reports:"./TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"./CoverageReport" \
+            -reporttypes:Html
+
+      # Upload the HTML report as a downloadable artifact.
+      # In ADO this is "PublishBuildArtifacts@1"; in GHA it's "actions/upload-artifact".
+      # After the run, go to the workflow run page → "Artifacts" section to download.
+      - name: Upload Coverage Report
+        if: always()                        # Upload even if tests failed
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-abp
+          path: abp/framework/CoverageReport/
+          retention-days: 30                # How long to keep (ADO default is 30 too)
+
+  # ---------------------------------------------------------------------------
+  # ASP.NET Core
+  # ---------------------------------------------------------------------------
+  aspnetcore:
+    name: ASP.NET Core Coverage
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'aspnetcore'
+
+    steps:
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Clone ASP.NET Core repository
+        run: |
+          git clone https://github.com/dotnet/aspnetcore.git aspnetcore
+          cd aspnetcore
+          git fetch --depth 1 origin ecb199c29cbefb6fcb6aa789436de36e44427a78
+          git checkout FETCH_HEAD
+
+      - name: Build, Test & Generate Coverage
+        working-directory: aspnetcore
+        run: |
+          git submodule update --init --recursive
+          source ./activate.sh
+          dotnet test AspNetCore.slnx \
+            --filter "Category!=Integration&Category!=E2E&Category!=Quarantined" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+          reportgenerator \
+            -reports:"./TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"./CoverageReport" \
+            -reporttypes:Html
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-aspnetcore
+          path: aspnetcore/CoverageReport/
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # EF Core
+  # ---------------------------------------------------------------------------
+  efcore:
+    name: EF Core Coverage
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'efcore'
+
+    steps:
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Clone EF Core repository
+        run: git clone --depth 1 --branch release/10.0 https://github.com/dotnet/efcore.git efcore
+
+      - name: Build, Test & Generate Coverage
+        working-directory: efcore
+        run: |
+          source ./activate.sh
+          dotnet test EFCore.sln \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+          reportgenerator \
+            -reports:"./TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"./CoverageReport" \
+            -reporttypes:Html
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-efcore
+          path: efcore/CoverageReport/
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Orleans
+  # ---------------------------------------------------------------------------
+  orleans:
+    name: Orleans Coverage
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'orleans'
+
+    steps:
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Clone Orleans repository
+        run: git clone --depth 1 --branch v10.0.0 https://github.com/dotnet/orleans.git orleans
+
+      - name: Build, Test & Generate Coverage
+        working-directory: orleans
+        run: |
+          dotnet restore Orleans.slnx
+          dotnet test Orleans.slnx \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+          reportgenerator \
+            -reports:"./TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"./CoverageReport" \
+            -reporttypes:Html
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-orleans
+          path: orleans/CoverageReport/
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Roslyn
+  # ---------------------------------------------------------------------------
+  roslyn:
+    name: Roslyn Coverage
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'roslyn'
+
+    steps:
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Clone Roslyn repository
+        run: git clone --depth 1 --branch release/dev18.3 https://github.com/dotnet/roslyn.git roslyn
+
+      - name: Build, Test & Generate Coverage
+        working-directory: roslyn
+        run: |
+          dotnet test Roslyn.sln \
+            --filter "FullyQualifiedName!~LanguageServer&TargetFrameworkIdentifier!=.NETFramework" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+          reportgenerator \
+            -reports:"./TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"./CoverageReport" \
+            -reporttypes:Html
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-roslyn
+          path: roslyn/CoverageReport/
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # .NET Runtime
+  # ---------------------------------------------------------------------------
+  runtime:
+    name: .NET Runtime Coverage
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'runtime'
+
+    steps:
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Clone Runtime repository
+        run: git clone --depth 1 --branch v10.0.2 https://github.com/dotnet/runtime.git runtime
+
+      - name: Build, Test & Generate Coverage
+        working-directory: runtime
+        run: |
+          ./build.sh -subset libs+libs.tests -test
+          reportgenerator \
+            -reports:"./artifacts/TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"./CoverageReport" \
+            -reporttypes:Html
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-runtime
+          path: runtime/CoverageReport/
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Semantic Kernel
+  # ---------------------------------------------------------------------------
+  semantic-kernel:
+    name: Semantic Kernel Coverage
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'semantic-kernel'
+
+    steps:
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Install ReportGenerator
+        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+
+      - name: Clone Semantic Kernel repository
+        run: git clone --depth 1 --branch dotnet-1.70.0 https://github.com/microsoft/semantic-kernel.git semantic-kernel
+
+      - name: Build, Test & Generate Coverage
+        working-directory: semantic-kernel
+        run: |
+          cd dotnet
+          dotnet test SK-dotnet.slnx \
+            --filter 'FullyQualifiedName!~SemanticKernel.IntegrationTests' \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+          reportgenerator \
+            -reports:"./TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"./CoverageReport" \
+            -reporttypes:Html
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report-semantic-kernel
+          path: semantic-kernel/dotnet/CoverageReport/
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Summary Job — runs AFTER all the others (like an ADO stage with dependsOn)
+  # ---------------------------------------------------------------------------
+  summary:
+    name: Coverage Summary
+    runs-on: ubuntu-latest
+    if: always()                            # Run even if some jobs failed
+    needs:                                  # ← This is the "dependsOn" equivalent
+      - abp
+      - aspnetcore
+      - efcore
+      - orleans
+      - roslyn
+      - runtime
+      - semantic-kernel
+
+    steps:
+      - name: Print Summary
+        run: |
+          echo "## Coverage Orchestrator Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| ABP Framework | ${{ needs.abp.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ASP.NET Core | ${{ needs.aspnetcore.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| EF Core | ${{ needs.efcore.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Orleans | ${{ needs.orleans.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Roslyn | ${{ needs.roslyn.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| .NET Runtime | ${{ needs.runtime.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Semantic Kernel | ${{ needs.semantic-kernel.result }} |" >> $GITHUB_STEP_SUMMARY

@@ -62,7 +62,7 @@ concurrency:
 env:
   SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:10.0-noble"
   REPORTGENERATOR_VERSION: "5.4.5"
-  DOTNET_COVERAGE_VERSION: "17.12.0"
+  DOTNET_COVERAGE_VERSION: "18.6.2"
 
 jobs:
 
@@ -181,6 +181,7 @@ jobs:
           restore-keys: nuget-aspnetcore-
 
       - name: Restore SDK & dependencies (./restore.sh + activate.sh)
+        shell: bash
         working-directory: target
         run: |
           chmod +x restore.sh activate.sh eng/build.sh
@@ -268,6 +269,7 @@ jobs:
           restore-keys: nuget-efcore-
 
       - name: Restore SDK & dependencies (./restore.sh + activate.sh)
+        shell: bash
         working-directory: target
         run: |
           chmod +x restore.sh activate.sh

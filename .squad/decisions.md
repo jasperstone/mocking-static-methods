@@ -32,8 +32,28 @@
 - actions/upload-artifact: `b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882` (v4.4.3)
 - actions/cache: `1bd1e32a3bdc45362d1e726936510720a7c30a57` (v4.2.0)
 
+### 2026-04-30: Methodology — finding buildable SDK commits
+
+**By:** Lewis
+
+When a target repo's tags reference internal RC/servicing SDKs that aren't publicly available, run `git log -p --all -- global.json | grep -E "(^commit|version.*10\.0\.10[1-9])"` to locate commits where `global.json` updates to a publicly released SDK (e.g., 10.0.101) rather than an internal `-rc.X` or `-servicing.X` version. This is how the aspnetcore pin `ecb199c29cbefb6fcb6aa789436de36e44427a78` was discovered. Reusable for any dotnet repo whose tags lag public SDK availability.
+
+**Source:** Preserved from pre-Squad scratch note `aspnetcore_build_results.md` (deleted 2026-04-30 with Jasper's authorization).
+
 ## Governance
 
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
+### 2026-04-30: Tracked root-level .md purge
+
+**By:** Lewis (Lead) — authorized by Jasper
+
+**What:** Deleted 13 tracked root-level .md files via `git rm`. All described the superseded `test_orchestrator.py` / ABP-only PoC architecture and predate the current `coverage-orchestrator.yml` + `StaticCallAnalyzer/` design. None contained unique operational facts worth preserving — patterns, commands, and workflow are now captured in README.md, the StaticCallAnalyzer source, and the coverage-orchestrator workflow.
+
+**Deleted:** 00_START_HERE.md, ABP_WORKFLOW.md, AGENT_TOOLS_EXAMPLES.md, ANALYSIS_REPORT.md, DELIVERY_SUMMARY.md, DOCUMENTATION_INDEX.md, DOCUMENTATION_MANIFEST.md, QUICK_REFERENCE.md, QUICK_START.md, TEST_ORCHESTRATOR_INDEX.md, TEST_ORCHESTRATOR_OVERVIEW.md, TEST_ORCHESTRATOR_README.md, TEST_ORCHESTRATOR_REFINEMENT.md.
+
+**Kept:** README.md, LICENSE, csharptune/README.md (unique component-level doc).
+
+**Why:** Default-discard policy. Comprehensive documentation pass deferred until CI is stable.

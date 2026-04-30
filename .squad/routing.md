@@ -6,12 +6,12 @@ How to decide who handles what.
 
 | Work Type | Route To | Examples |
 |-----------|----------|----------|
-| {domain 1} | {Name} | {example tasks} |
-| {domain 2} | {Name} | {example tasks} |
-| {domain 3} | {Name} | {example tasks} |
-| Code review | {Name} | Review PRs, check quality, suggest improvements |
-| Testing | {Name} | Write tests, find edge cases, verify fixes |
-| Scope & priorities | {Name} | What to build next, trade-offs, decisions |
+| Pinning strategy, scope, decisions | Lewis | Pick commit SHAs, decide build env of record, gate reviews |
+| Docker / dev container / build env | Watney | Dockerfile, devcontainer, dotnet restore/build, SDK pinning, submodules |
+| GitHub Actions / CI / parallelization | Vogel | Workflow YAML, matrix jobs, caching, artifact upload |
+| dotnet test / coverage / reportgenerator | Beck | Run tests, collect coverage, triage failures |
+| Code review | Lewis | Review changes from Watney/Vogel/Beck before they land |
+| Scope & priorities | Lewis | What to fix next, trade-offs, decisions |
 | Session logging | Scribe | Automatic — never needs routing |
 
 ## Issue Routing

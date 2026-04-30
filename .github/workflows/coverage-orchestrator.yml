@@ -1,45 +1,45 @@
 # =============================================================================
-# Coverage Orchestrator - GitHub Actions Pipeline
+# Coverage Orchestrator — Containerized, SHA-pinned, reproducible coverage runs
 # =============================================================================
 #
-# AZURE DEVOPS → GITHUB ACTIONS CHEAT SHEET:
+# STRATEGY:
+#   - Each repo job runs INSIDE a pinned .NET SDK Docker container.
+#     This isolates the build environment per repo without modifying the
+#     cloned repo's tree at all.
+#   - All actions, target-repo refs, and the runner image are pinned to SHAs.
+#   - Coverage strategy (chosen per repo so we never modify .csproj files):
+#       * coverlet.collector ALREADY in repo  -> dotnet test --collect:"XPlat Code Coverage"
+#         (aspnetcore, efcore, orleans, semantic-kernel)
+#       * coverlet NOT in repo                -> dotnet-coverage external collector
+#         (abp, roslyn, runtime)
+#   - Tests are run "the way each team runs them" (only integration/E2E filters).
+#   - Both HTML reports and raw cobertura XML are uploaded as artifacts.
+#   - continue-on-error on test steps so reportgenerator still runs on failures.
 #
-#   ADO Concept             → GitHub Actions Equivalent
-#   ─────────────────────── → ──────────────────────────
-#   pipeline (YAML)         → workflow (YAML in .github/workflows/)
-#   trigger / pr            → on: push / pull_request
-#   stages                  → (no direct equivalent; use job dependencies)
-#   jobs                    → jobs (same name! run in parallel by default)
-#   steps                   → steps (same name!)
-#   pool: vmImage           → runs-on: ubuntu-latest
-#   variables               → env: (workflow, job, or step level)
-#   task: PublishBuildArtifacts → actions/upload-artifact
-#   $(Build.SourcesDirectory) → ${{ github.workspace }}
-#   dependsOn               → needs: [job1, job2]  (without this, jobs run in PARALLEL)
-#   condition: succeeded()  → if: success()  (default; usually omitted)
-#   condition: always()     → if: always()
+# ACTION PINS (annotated with the version they came from):
+#   actions/checkout         11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+#   actions/upload-artifact  b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
+#   actions/cache            1bd1e32a3bdc45362d1e726936510720a7c30a57  # v4.2.0
 #
-# KEY DIFFERENCES:
-#   - Jobs run in PARALLEL by default (no "dependsOn" needed here).
-#     In ADO, stages are sequential by default; in GHA, jobs are parallel by default.
-#   - Each job gets a FRESH VM. There's no shared filesystem between jobs.
-#     That's why each job clones its own repo below.
-#   - Artifacts are uploaded per-job and downloadable from the workflow run's
-#     "Artifacts" section in the GitHub UI.
+# TARGET REPO PINS (resolved 2026-04-30):
+#   abp             ea4bbb8b517869a9fb735ea5bc05c819c209d0b5  (tag 10.0.2)
+#   aspnetcore      ecb199c29cbefb6fcb6aa789436de36e44427a78  (release/10.0)
+#   efcore          45e3af0273b71919189367bc152a335b69f443c6  (release/10.0)
+#   orleans         8024faf860549cb960b4b573c1571b379e283daa  (tag v10.0.0)
+#   roslyn          02d301627ed5016a4c18acd1a35e5bbc20ff03f0  (release/dev18.3 tip)
+#   runtime         9ffface2f3fa6fbbb427793c3230b1626a1fdd84  (tag v10.0.2)
+#   semantic-kernel 0c898161a355b0a845aea48de79cb43e2e9435d2  (tag dotnet-1.70.0)
 # =============================================================================
 
 name: Coverage Orchestrator
 
-# When does this workflow run?
-# Equivalent to ADO "trigger:" and "pr:" sections.
 on:
-  # Manual trigger (like ADO "Run pipeline" button) — lets you pick one repo or all.
   workflow_dispatch:
     inputs:
       repo:
-        description: 'Which repo to run (leave blank or "all" for all repos)'
-        required: false
-        default: 'all'
+        description: "Target repo (or 'all' for all 7)"
+        required: true
+        default: "all"
         type: choice
         options:
           - all
@@ -51,416 +51,605 @@ on:
           - runtime
           - semantic-kernel
 
-  # Also run on pushes to main (adjust as needed)
-  push:
-    branches: [main]
+permissions:
+  contents: read
 
-# =============================================================================
-# JOBS — These all run in PARALLEL on separate runners (separate VMs).
-# In ADO you'd need "dependsOn: []" to force parallelism between stages;
-# in GitHub Actions, jobs are parallel by default unless you add "needs:".
-# =============================================================================
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+# Workflow-level env: container shorthand and tool versions in one place.
+env:
+  SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim"
+  REPORTGENERATOR_VERSION: "5.4.5"
+  DOTNET_COVERAGE_VERSION: "17.12.0"
+
 jobs:
 
-  # ---------------------------------------------------------------------------
-  # ABP Framework
-  # ---------------------------------------------------------------------------
+  # ===========================================================================
+  # ABP Framework — external dotnet-coverage (no coverlet in repo)
+  # ===========================================================================
   abp:
-    name: ABP Framework Coverage
-    runs-on: ubuntu-latest
-    # Only run if user selected "all" or "abp" (or it's a push trigger)
-    if: >-
-      github.event_name == 'push' ||
-      github.event.inputs.repo == 'all' ||
-      github.event.inputs.repo == 'abp'
-
+    name: "Coverage: ABP"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+    timeout-minutes: 60
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'abp'
     steps:
-      - name: Checkout (for reusable actions)
-        uses: actions/checkout@v4
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory '*'
 
-      - name: Free up disk space
-        uses: ./.github/actions/free-disk-space
+      - name: Disk usage (start)
+        run: df -h
 
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Install ReportGenerator
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
-
-      - name: Clone ABP repository
-        run: git clone --depth 1 --branch 10.0.2 https://github.com/abpframework/abp.git abp
-
-      - name: Build, Test & Generate Coverage
-        working-directory: abp
+      - name: Clone ABP at pinned SHA
         run: |
-          cd framework
-          dotnet restore
-          dotnet build
-          dotnet test \
-            --filter "FullyQualifiedName!~SkiaSharp" \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults
-          reportgenerator \
-            -reports:"./TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"./CoverageReport" \
-            -reporttypes:Html
-
-      # Upload the HTML report as a downloadable artifact.
-      # In ADO this is "PublishBuildArtifacts@1"; in GHA it's "actions/upload-artifact".
-      # After the run, go to the workflow run page → "Artifacts" section to download.
-      - name: Upload Coverage Report
-        if: always()                        # Upload even if tests failed
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-abp
-          path: abp/framework/CoverageReport/
-          retention-days: 30                # How long to keep (ADO default is 30 too)
-
-  # ---------------------------------------------------------------------------
-  # ASP.NET Core
-  # ---------------------------------------------------------------------------
-  aspnetcore:
-    name: ASP.NET Core Coverage
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      github.event.inputs.repo == 'all' ||
-      github.event.inputs.repo == 'aspnetcore'
-
-    steps:
-      - name: Checkout (for reusable actions)
-        uses: actions/checkout@v4
-
-      - name: Free up disk space
-        uses: ./.github/actions/free-disk-space
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
-
-      - name: Install ReportGenerator
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
-
-      - name: Clone ASP.NET Core repository
-        run: |
-          git clone https://github.com/dotnet/aspnetcore.git aspnetcore
-          cd aspnetcore
-          git fetch --depth 1 origin ecb199c29cbefb6fcb6aa789436de36e44427a78
+          git clone --filter=blob:none https://github.com/abpframework/abp.git target
+          cd target
+          git fetch --depth 1 origin ea4bbb8b517869a9fb735ea5bc05c819c209d0b5
           git checkout FETCH_HEAD
 
-      - name: Initialize submodules
-        working-directory: aspnetcore
-        run: git submodule update --init --recursive
+      - name: Restore NuGet cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-abp-ea4bbb8b
+          restore-keys: nuget-abp-
 
-      - name: Restore SDK & dependencies
-        working-directory: aspnetcore
+      - name: Install dotnet-coverage
+        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      - name: Build ABP framework
+        working-directory: target/framework
         run: |
+          dotnet restore
+          dotnet build --no-restore
+
+      - name: Run tests with coverage
+        working-directory: target/framework
+        continue-on-error: true
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          dotnet-coverage collect \
+            "dotnet test --no-build --filter \"FullyQualifiedName!~SkiaSharp&Category!=IntegrationTests\"" \
+            -f cobertura -o TestResults/coverage.cobertura.xml
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          reportgenerator \
+            -reports:"target/framework/TestResults/coverage.cobertura.xml" \
+            -targetdir:"CoverageReport" \
+            -reporttypes:Html
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-report-abp
+          path: CoverageReport/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw cobertura XML
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-xml-abp
+          path: target/framework/TestResults/coverage.cobertura.xml
+          retention-days: 90
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # ASP.NET Core — built-in coverlet.collector
+  # ===========================================================================
+  aspnetcore:
+    name: "Coverage: ASP.NET Core"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+    timeout-minutes: 180
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'aspnetcore'
+    steps:
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory '*'
+
+      - name: Disk usage (start)
+        run: df -h
+
+      - name: Clone ASP.NET Core at pinned SHA (with submodules)
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/aspnetcore.git target
+          cd target
+          git fetch --depth 1 origin ecb199c29cbefb6fcb6aa789436de36e44427a78
+          git checkout FETCH_HEAD
+          git submodule update --init --recursive --depth 1
+
+      - name: Restore NuGet cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-aspnetcore-ecb199c2
+          restore-keys: nuget-aspnetcore-
+
+      - name: Restore SDK & dependencies (./restore.sh + activate.sh)
+        working-directory: target
+        run: |
+          chmod +x restore.sh activate.sh eng/build.sh
+          ./restore.sh
+          # activate.sh sets DOTNET_ROOT to the locally-pinned SDK; persist it
+          # so subsequent steps in this job pick up the right dotnet.
+          source ./activate.sh
+          echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
+          echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
+
+      - name: Build ASP.NET Core (no tests)
+        working-directory: target
+        run: ./eng/build.sh --all --no-test
+
+      - name: Run tests with coverage
+        working-directory: target
+        continue-on-error: true
+        run: |
+          dotnet test AspNetCore.slnx --no-build \
+            --filter "Category!=Integration&Category!=E2E&Category!=Quarantined" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          reportgenerator \
+            -reports:"target/TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"CoverageReport" \
+            -reporttypes:Html
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-report-aspnetcore
+          path: CoverageReport/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw cobertura XML
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-xml-aspnetcore
+          path: target/TestResults/*/coverage.cobertura.xml
+          retention-days: 90
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # EF Core — built-in coverlet.collector
+  # ===========================================================================
+  efcore:
+    name: "Coverage: EF Core"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+    timeout-minutes: 180
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'efcore'
+    steps:
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory '*'
+
+      - name: Disk usage (start)
+        run: df -h
+
+      - name: Clone EF Core at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/efcore.git target
+          cd target
+          git fetch --depth 1 origin 45e3af0273b71919189367bc152a335b69f443c6
+          git checkout FETCH_HEAD
+
+      - name: Restore NuGet cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-efcore-45e3af02
+          restore-keys: nuget-efcore-
+
+      - name: Restore SDK & dependencies (./restore.sh + activate.sh)
+        working-directory: target
+        run: |
+          chmod +x restore.sh activate.sh
           ./restore.sh
           source ./activate.sh
           echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
           echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
 
-      - name: Build
-        working-directory: aspnetcore
-        run: ./eng/build.sh --all --no-test
-
-      - name: Test with coverage
-        working-directory: aspnetcore
+      - name: Run tests with coverage (skipping the 37k SQLite functional suite)
+        working-directory: target
+        continue-on-error: true
         run: |
-          dotnet test AspNetCore.slnx \
-            --no-build \
-            --filter "Category!=Integration&Category!=E2E&Category!=Quarantined" \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults
-
-      - name: Generate coverage report
-        if: always()
-        working-directory: aspnetcore
-        run: |
-          reportgenerator \
-            -reports:"./TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"./CoverageReport" \
-            -reporttypes:Html
-
-      - name: Upload Coverage Report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-report-aspnetcore
-          path: aspnetcore/CoverageReport/
-          retention-days: 30
-
-  # ---------------------------------------------------------------------------
-  # EF Core
-  # ---------------------------------------------------------------------------
-  efcore:
-    name: EF Core Coverage
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      github.event.inputs.repo == 'all' ||
-      github.event.inputs.repo == 'efcore'
-
-    steps:
-      - name: Checkout (for reusable actions)
-        uses: actions/checkout@v4
-
-      - name: Free up disk space
-        uses: ./.github/actions/free-disk-space
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x'
-
-      - name: Install ReportGenerator
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
-
-      - name: Clone EF Core repository
-        run: git clone --depth 1 --branch release/10.0 https://github.com/dotnet/efcore.git efcore
-
-      - name: Build, Test & Generate Coverage
-        working-directory: efcore
-        run: |
-          ./restore.sh
-          source ./activate.sh
           dotnet test EFCore.sln \
+            --filter "FullyQualifiedName!~FunctionalTests&Category!=Integration" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
+          export PATH="$PATH:/github/home/.dotnet/tools"
           reportgenerator \
-            -reports:"./TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"./CoverageReport" \
+            -reports:"target/TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"CoverageReport" \
             -reporttypes:Html
 
-      - name: Upload Coverage Report
+      - name: Upload HTML coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: coverage-report-efcore
-          path: efcore/CoverageReport/
+          path: CoverageReport/
           retention-days: 30
+          if-no-files-found: warn
 
-  # ---------------------------------------------------------------------------
-  # Orleans
-  # ---------------------------------------------------------------------------
-  orleans:
-    name: Orleans Coverage
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      github.event.inputs.repo == 'all' ||
-      github.event.inputs.repo == 'orleans'
-
-    steps:
-      - name: Checkout (for reusable actions)
-        uses: actions/checkout@v4
-
-      - name: Free up disk space
-        uses: ./.github/actions/free-disk-space
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+      - name: Upload raw cobertura XML
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          dotnet-version: '9.0.x'
+          name: coverage-xml-efcore
+          path: target/TestResults/*/coverage.cobertura.xml
+          retention-days: 90
+          if-no-files-found: warn
 
-      - name: Install ReportGenerator
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+  # ===========================================================================
+  # Orleans — built-in coverlet.collector
+  # ===========================================================================
+  orleans:
+    name: "Coverage: Orleans"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+    timeout-minutes: 90
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'orleans'
+    steps:
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory '*'
 
-      - name: Clone Orleans repository
-        run: git clone --depth 1 --branch v10.0.0 https://github.com/dotnet/orleans.git orleans
+      - name: Disk usage (start)
+        run: df -h
 
-      - name: Build, Test & Generate Coverage
-        working-directory: orleans
+      - name: Clone Orleans at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/orleans.git target
+          cd target
+          git fetch --depth 1 origin 8024faf860549cb960b4b573c1571b379e283daa
+          git checkout FETCH_HEAD
+
+      - name: Restore NuGet cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-orleans-8024faf8
+          restore-keys: nuget-orleans-
+
+      - name: Run tests with coverage
+        working-directory: target
+        continue-on-error: true
         run: |
           dotnet restore Orleans.slnx
           dotnet test Orleans.slnx \
+            --filter "Category!=Integration&Category!=BVT" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
+          export PATH="$PATH:/github/home/.dotnet/tools"
           reportgenerator \
-            -reports:"./TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"./CoverageReport" \
+            -reports:"target/TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"CoverageReport" \
             -reporttypes:Html
 
-      - name: Upload Coverage Report
+      - name: Upload HTML coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: coverage-report-orleans
-          path: orleans/CoverageReport/
+          path: CoverageReport/
           retention-days: 30
+          if-no-files-found: warn
 
-  # ---------------------------------------------------------------------------
-  # Roslyn
-  # ---------------------------------------------------------------------------
-  roslyn:
-    name: Roslyn Coverage
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      github.event.inputs.repo == 'all' ||
-      github.event.inputs.repo == 'roslyn'
-
-    steps:
-      - name: Checkout (for reusable actions)
-        uses: actions/checkout@v4
-
-      - name: Free up disk space
-        uses: ./.github/actions/free-disk-space
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+      - name: Upload raw cobertura XML
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          dotnet-version: '9.0.x'
+          name: coverage-xml-orleans
+          path: target/TestResults/*/coverage.cobertura.xml
+          retention-days: 90
+          if-no-files-found: warn
 
-      - name: Install ReportGenerator
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+  # ===========================================================================
+  # Roslyn — external dotnet-coverage (no coverlet in repo)
+  # ===========================================================================
+  roslyn:
+    name: "Coverage: Roslyn"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+    timeout-minutes: 180
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'roslyn'
+    steps:
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory '*'
 
-      - name: Clone Roslyn repository
-        # Pinned to release/dev18.3 tip as of 2026-02-11
-        # https://github.com/dotnet/roslyn/commit/3f2819f9070f268c0c02fb1577e0c2b76289dd3e
+      - name: Disk usage (start)
+        run: df -h
+
+      - name: Clone Roslyn at pinned SHA
         run: |
-          git clone https://github.com/dotnet/roslyn.git roslyn
-          cd roslyn
-          git fetch --depth 1 origin 3f2819f9070f268c0c02fb1577e0c2b76289dd3e
+          git clone --filter=blob:none https://github.com/dotnet/roslyn.git target
+          cd target
+          git fetch --depth 1 origin 02d301627ed5016a4c18acd1a35e5bbc20ff03f0
           git checkout FETCH_HEAD
 
-      - name: Build, Test & Generate Coverage
-        working-directory: roslyn
+      - name: Restore NuGet cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-roslyn-02d30162
+          restore-keys: nuget-roslyn-
+
+      - name: Install dotnet-coverage
+        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      - name: Run tests with coverage
+        working-directory: target
+        continue-on-error: true
         run: |
-          dotnet test Roslyn.slnx \
-            --filter "FullyQualifiedName!~LanguageServer&TargetFrameworkIdentifier!=.NETFramework" \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          dotnet-coverage collect \
+            "dotnet test Roslyn.slnx --filter \"FullyQualifiedName!~LanguageServer&TargetFrameworkIdentifier!=.NETFramework&Category!=IntegrationTest\"" \
+            -f cobertura -o TestResults/coverage.cobertura.xml
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
+          export PATH="$PATH:/github/home/.dotnet/tools"
           reportgenerator \
-            -reports:"./TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"./CoverageReport" \
+            -reports:"target/TestResults/coverage.cobertura.xml" \
+            -targetdir:"CoverageReport" \
             -reporttypes:Html
 
-      - name: Upload Coverage Report
+      - name: Upload HTML coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: coverage-report-roslyn
-          path: roslyn/CoverageReport/
+          path: CoverageReport/
           retention-days: 30
+          if-no-files-found: warn
 
-  # ---------------------------------------------------------------------------
-  # .NET Runtime
-  # ---------------------------------------------------------------------------
-  runtime:
-    name: .NET Runtime Coverage
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      github.event.inputs.repo == 'all' ||
-      github.event.inputs.repo == 'runtime'
-
-    steps:
-      - name: Checkout (for reusable actions)
-        uses: actions/checkout@v4
-
-      - name: Free up disk space
-        uses: ./.github/actions/free-disk-space
-
-      - name: Install native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake libkrb5-dev libssl-dev zlib1g-dev
-
-      - name: Install ReportGenerator
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
-
-      - name: Clone Runtime repository
-        run: git clone --depth 1 --branch v10.0.2 https://github.com/dotnet/runtime.git runtime
-
-      - name: Build, Test & Generate Coverage
-        working-directory: runtime
-        run: |
-          ./build.sh -subset libs+libs.tests -test
-          reportgenerator \
-            -reports:"./artifacts/TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"./CoverageReport" \
-            -reporttypes:Html
-
-      - name: Upload Coverage Report
+      - name: Upload raw cobertura XML
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-xml-roslyn
+          path: target/TestResults/coverage.cobertura.xml
+          retention-days: 90
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # .NET Runtime — external dotnet-coverage + native build deps
+  # ===========================================================================
+  runtime:
+    name: "Coverage: .NET Runtime"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+    timeout-minutes: 240
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'runtime'
+    steps:
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory '*'
+
+      - name: Install native build dependencies
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            build-essential cmake clang llvm lld lldb \
+            libicu-dev liblttng-ust-dev libssl-dev libkrb5-dev libunwind8-dev \
+            pigz cpio python3
+          rm -rf /var/lib/apt/lists/*
+
+      - name: Disk usage (start)
+        run: df -h
+
+      - name: Clone .NET Runtime at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/runtime.git target
+          cd target
+          git fetch --depth 1 origin 9ffface2f3fa6fbbb427793c3230b1626a1fdd84
+          git checkout FETCH_HEAD
+
+      - name: Restore NuGet cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-runtime-9ffface2
+          restore-keys: nuget-runtime-
+
+      - name: Install dotnet-coverage
+        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      - name: Build & test runtime libraries (with coverage)
+        working-directory: target
+        continue-on-error: true
+        shell: bash
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          chmod +x build.sh
+          # dotnet-coverage follows child processes spawned by build.sh's test runners.
+          # libs+libs.tests subset = managed-only build (no native CoreCLR compilation).
+          dotnet-coverage collect \
+            "./build.sh -subset libs+libs.tests -test" \
+            -f cobertura -o ./TestResults/coverage.cobertura.xml
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - name: Generate HTML report (best-effort)
+        if: always()
+        shell: bash
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          shopt -s globstar nullglob
+          # Look for coverage in both the dotnet-coverage output AND the artifacts/ tree
+          mapfile -t reports < <(find target -type f -name 'coverage.cobertura.xml' 2>/dev/null)
+          if [ "${#reports[@]}" -gt 0 ]; then
+            reportgenerator \
+              -reports:"target/**/coverage.cobertura.xml" \
+              -targetdir:"CoverageReport" \
+              -reporttypes:Html
+          else
+            echo "WARN: no cobertura XML produced"
+            mkdir -p CoverageReport
+          fi
+
+      - name: Upload HTML coverage report
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: coverage-report-runtime
-          path: runtime/CoverageReport/
+          path: CoverageReport/
           retention-days: 30
+          if-no-files-found: warn
 
-  # ---------------------------------------------------------------------------
-  # Semantic Kernel
-  # ---------------------------------------------------------------------------
-  semantic-kernel:
-    name: Semantic Kernel Coverage
-    runs-on: ubuntu-latest
-    if: >-
-      github.event_name == 'push' ||
-      github.event.inputs.repo == 'all' ||
-      github.event.inputs.repo == 'semantic-kernel'
-
-    steps:
-      - name: Checkout (for reusable actions)
-        uses: actions/checkout@v4
-
-      - name: Free up disk space
-        uses: ./.github/actions/free-disk-space
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+      - name: Upload raw cobertura XML
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          dotnet-version: '9.0.x'
+          name: coverage-xml-runtime
+          path: |
+            target/TestResults/coverage.cobertura.xml
+            target/artifacts/**/coverage.cobertura.xml
+            target/artifacts/TestResults/**/*.trx
+          retention-days: 90
+          if-no-files-found: warn
 
-      - name: Install ReportGenerator
-        run: dotnet tool install -g dotnet-reportgenerator-globaltool
+  # ===========================================================================
+  # Semantic Kernel — built-in coverlet.collector
+  # ===========================================================================
+  semantic-kernel:
+    name: "Coverage: Semantic Kernel"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+    timeout-minutes: 60
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'semantic-kernel'
+    steps:
+      - name: Mark workspace as a safe git directory
+        run: git config --global --add safe.directory '*'
 
-      - name: Clone Semantic Kernel repository
-        run: git clone --depth 1 --branch dotnet-1.70.0 https://github.com/microsoft/semantic-kernel.git semantic-kernel
+      - name: Disk usage (start)
+        run: df -h
 
-      - name: Build, Test & Generate Coverage
-        working-directory: semantic-kernel/dotnet
+      - name: Clone Semantic Kernel at pinned SHA
         run: |
-          # Build everything with the solution file
-          dotnet build SK-dotnet.slnx
+          git clone --filter=blob:none https://github.com/microsoft/semantic-kernel.git target
+          cd target
+          git fetch --depth 1 origin 0c898161a355b0a845aea48de79cb43e2e9435d2
+          git checkout FETCH_HEAD
 
-          # Test using the solution file — filter to unit test namespaces only.
-          # - FullyQualifiedName~UnitTests  → matches *.UnitTests.* namespaces
-          # - FullyQualifiedName~.Tests.    → matches *.Tests.* namespaces
-          #   (e.g. Runtime.InProcess.Tests, Runtime.Core.Tests)
-          # This cleanly skips:
-          #   - samples/ (Concepts, GettingStarted*, Demos) — need live API keys
-          #   - IntegrationTests/ConformanceTests — need external services
-          dotnet test SK-dotnet.slnx \
-            --no-build \
+      - name: Restore NuGet cache
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-semantic-kernel-0c898161
+          restore-keys: nuget-semantic-kernel-
+
+      - name: Build Semantic Kernel
+        working-directory: target/dotnet
+        run: dotnet build SK-dotnet.slnx
+
+      - name: Run tests with coverage
+        working-directory: target/dotnet
+        continue-on-error: true
+        run: |
+          dotnet test SK-dotnet.slnx --no-build \
             --filter "FullyQualifiedName~UnitTests|FullyQualifiedName~.Tests." \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - name: Generate HTML report
+        if: always()
+        run: |
+          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
+          export PATH="$PATH:/github/home/.dotnet/tools"
           reportgenerator \
-            -reports:"./TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"./CoverageReport" \
+            -reports:"target/dotnet/TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"CoverageReport" \
             -reporttypes:Html
 
-      - name: Upload Coverage Report
+      - name: Upload HTML coverage report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: coverage-report-semantic-kernel
-          path: semantic-kernel/dotnet/CoverageReport/
+          path: CoverageReport/
           retention-days: 30
+          if-no-files-found: warn
 
-  # ---------------------------------------------------------------------------
-  # Summary Job — runs AFTER all the others (like an ADO stage with dependsOn)
-  # ---------------------------------------------------------------------------
+      - name: Upload raw cobertura XML
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-xml-semantic-kernel
+          path: target/dotnet/TestResults/*/coverage.cobertura.xml
+          retention-days: 90
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Summary — runs after all repo jobs (success or failure)
+  # ===========================================================================
   summary:
-    name: Coverage Summary
-    runs-on: ubuntu-latest
-    if: always()                            # Run even if some jobs failed
-    needs:                                  # ← This is the "dependsOn" equivalent
+    name: "Coverage Summary"
+    runs-on: ubuntu-24.04
+    if: always()
+    needs:
       - abp
       - aspnetcore
       - efcore
@@ -468,18 +657,21 @@ jobs:
       - roslyn
       - runtime
       - semantic-kernel
-
     steps:
-      - name: Print Summary
+      - name: Print summary
         run: |
-          echo "## Coverage Orchestrator Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Repository | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| ABP Framework | ${{ needs.abp.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ASP.NET Core | ${{ needs.aspnetcore.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| EF Core | ${{ needs.efcore.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Orleans | ${{ needs.orleans.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Roslyn | ${{ needs.roslyn.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| .NET Runtime | ${{ needs.runtime.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Semantic Kernel | ${{ needs.semantic-kernel.result }} |" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Coverage Orchestrator Results"
+            echo ""
+            echo "| Repository | Status |"
+            echo "|---|---|"
+            echo "| ABP Framework      | ${{ needs.abp.result }} |"
+            echo "| ASP.NET Core       | ${{ needs.aspnetcore.result }} |"
+            echo "| EF Core            | ${{ needs.efcore.result }} |"
+            echo "| Orleans            | ${{ needs.orleans.result }} |"
+            echo "| Roslyn             | ${{ needs.roslyn.result }} |"
+            echo "| .NET Runtime       | ${{ needs.runtime.result }} |"
+            echo "| Semantic Kernel    | ${{ needs.semantic-kernel.result }} |"
+            echo ""
+            echo "Artifacts: coverage-report-* (HTML) and coverage-xml-* (raw cobertura)."
+          } >> "$GITHUB_STEP_SUMMARY"

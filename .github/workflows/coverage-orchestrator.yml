@@ -84,7 +84,7 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Install ReportGenerator
         run: dotnet tool install -g dotnet-reportgenerator-globaltool
@@ -423,13 +423,21 @@ jobs:
         run: git clone --depth 1 --branch dotnet-1.70.0 https://github.com/microsoft/semantic-kernel.git semantic-kernel
 
       - name: Build, Test & Generate Coverage
-        working-directory: semantic-kernel
+        working-directory: semantic-kernel/dotnet
         run: |
-          cd dotnet
-          # Exclude sample projects (Concepts, GettingStarted*, LearnResources) that require
-          # live API keys for OpenAI, HuggingFace, Azure, etc. and will fail in CI.
+          # Build everything with the solution file
+          dotnet build SK-dotnet.slnx
+
+          # Test using the solution file — filter to unit test namespaces only.
+          # - FullyQualifiedName~UnitTests  → matches *.UnitTests.* namespaces
+          # - FullyQualifiedName~.Tests.    → matches *.Tests.* namespaces
+          #   (e.g. Runtime.InProcess.Tests, Runtime.Core.Tests)
+          # This cleanly skips:
+          #   - samples/ (Concepts, GettingStarted*, Demos) — need live API keys
+          #   - IntegrationTests/ConformanceTests — need external services
           dotnet test SK-dotnet.slnx \
-            --filter 'FullyQualifiedName!~SemanticKernel.IntegrationTests&FullyQualifiedName!~Concepts&FullyQualifiedName!~GettingStarted&FullyQualifiedName!~LearnResources' \
+            --no-build \
+            --filter "FullyQualifiedName~UnitTests|FullyQualifiedName~.Tests." \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
           reportgenerator \

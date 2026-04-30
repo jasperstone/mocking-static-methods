@@ -60,7 +60,7 @@ concurrency:
 
 # Workflow-level env: container shorthand and tool versions in one place.
 env:
-  SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim"
+  SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:10.0-noble"
   REPORTGENERATOR_VERSION: "5.4.5"
   DOTNET_COVERAGE_VERSION: "17.12.0"
 
@@ -73,7 +73,7 @@ jobs:
     name: "Coverage: ABP"
     runs-on: ubuntu-24.04
     container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 60
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'abp'
     steps:
@@ -155,7 +155,7 @@ jobs:
     name: "Coverage: ASP.NET Core"
     runs-on: ubuntu-24.04
     container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 180
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'aspnetcore'
     steps:
@@ -243,7 +243,7 @@ jobs:
     name: "Coverage: EF Core"
     runs-on: ubuntu-24.04
     container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 180
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'efcore'
     steps:
@@ -324,7 +324,7 @@ jobs:
     name: "Coverage: Orleans"
     runs-on: ubuntu-24.04
     container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 90
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'orleans'
     steps:
@@ -397,7 +397,7 @@ jobs:
     name: "Coverage: Roslyn"
     runs-on: ubuntu-24.04
     container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 180
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'roslyn'
     steps:
@@ -473,7 +473,7 @@ jobs:
     name: "Coverage: .NET Runtime"
     runs-on: ubuntu-24.04
     container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 240
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'runtime'
     steps:
@@ -573,7 +573,7 @@ jobs:
     name: "Coverage: Semantic Kernel"
     runs-on: ubuntu-24.04
     container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0-bookworm-slim
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 60
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'semantic-kernel'
     steps:

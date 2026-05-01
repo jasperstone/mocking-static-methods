@@ -9,9 +9,9 @@
 #   - All actions, target-repo refs, and the runner image are pinned to SHAs.
 #   - Coverage strategy (chosen per repo so we never modify .csproj files):
 #       * coverlet.collector ALREADY in repo  -> dotnet test --collect:"XPlat Code Coverage"
-#         (aspnetcore, efcore, orleans, semantic-kernel)
+#         (aspnetcore, orleans, semantic-kernel)
 #       * coverlet NOT in repo                -> dotnet-coverage external collector
-#         (abp, roslyn, runtime)
+#         (abp, efcore, roslyn, runtime)
 #   - Tests are run "the way each team runs them" (only integration/E2E filters).
 #   - Both HTML reports and raw cobertura XML are uploaded as artifacts.
 #   - continue-on-error on test steps so reportgenerator still runs on failures.
@@ -240,7 +240,7 @@ jobs:
           if-no-files-found: warn
 
   # ===========================================================================
-  # EF Core — built-in coverlet.collector
+  # EF Core — external dotnet-coverage (no coverlet in repo)
   # ===========================================================================
   efcore:
     name: "Coverage: EF Core"
@@ -280,14 +280,18 @@ jobs:
           echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
           echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
 
+      - name: Install dotnet-coverage
+        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+
       - name: Run tests with coverage (skipping the 37k SQLite functional suite)
         working-directory: target
         continue-on-error: true
         run: |
-          dotnet test EFCore.sln \
-            --filter "FullyQualifiedName!~FunctionalTests&Category!=Integration" \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          dotnet-coverage collect \
+            "dotnet test EFCore.sln --filter \"FullyQualifiedName!~FunctionalTests&Category!=Integration\"" \
+            -f cobertura -o TestResults/coverage.cobertura.xml
 
       - name: Disk usage (end)
         if: always()
@@ -299,7 +303,7 @@ jobs:
           dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
           export PATH="$PATH:/github/home/.dotnet/tools"
           reportgenerator \
-            -reports:"target/TestResults/*/coverage.cobertura.xml" \
+            -reports:"target/TestResults/coverage.cobertura.xml" \
             -targetdir:"CoverageReport" \
             -reporttypes:Html
 
@@ -317,7 +321,7 @@ jobs:
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: coverage-xml-efcore
-          path: target/TestResults/*/coverage.cobertura.xml
+          path: target/TestResults/coverage.cobertura.xml
           retention-days: 90
           if-no-files-found: warn
 

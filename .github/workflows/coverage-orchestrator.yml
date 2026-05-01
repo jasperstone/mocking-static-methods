@@ -192,10 +192,25 @@ jobs:
           echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
           echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
 
+      - name: Install Node.js (required for Blazor/WebView JS assets)
+        # aspnetcore/package.json requires node >=20.9.0. eng/build.sh
+        # auto-enables -build-nodejs when `node` is on PATH; without it,
+        # JS-dependent projects like Microsoft.AspNetCore.Components.WebView
+        # fail because ../../Web.JS/dist/Debug/blazor.webview.js is missing.
+        # Container is Ubuntu Noble (24.04); install Node 22 LTS via NodeSource.
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates gnupg
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y --no-install-recommends nodejs
+          node --version
+          npm --version
+
       - name: Build ASP.NET Core (no tests, no Java)
         working-directory: target
         # --no-build-java avoids the Java SignalR client subproject which
         # requires a JDK not present in mcr.microsoft.com/dotnet/sdk:10.0-noble.
+        # NodeJS build is auto-enabled because `node` is on PATH (see prior step).
         run: ./eng/build.sh --all --no-build-java --no-test
 
       - name: Run tests with coverage

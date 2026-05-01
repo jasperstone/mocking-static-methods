@@ -105,12 +105,22 @@ jobs:
       - name: Run tests with coverage
         working-directory: target/framework
         continue-on-error: true
+        # Use `dotnet test --collect "Code Coverage;Format=cobertura"` instead of
+        # `dotnet-coverage collect "dotnet test ..."`. The latter relies on the CLR
+        # profiler attaching to spawned testhost processes, which silently fails
+        # inside the SDK container ("Profiler was not initialized"), producing an
+        # empty 178-byte stub. The data-collector path runs in-process via vstest
+        # and works reliably. Per-test-project XMLs are then merged.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          dotnet-coverage collect \
-            "dotnet test --no-build --filter \"FullyQualifiedName!~SkiaSharp&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky\"" \
-            -f cobertura -o TestResults/coverage.cobertura.xml
+          dotnet test --no-build \
+            --filter "FullyQualifiedName!~SkiaSharp&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults || true
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
       - name: Disk usage (end)
         if: always()
@@ -215,12 +225,20 @@ jobs:
       - name: Run tests with coverage
         working-directory: target
         continue-on-error: true
+        # See ABP job for rationale: switched off `dotnet-coverage collect` because
+        # the CLR profiler fails to attach inside the SDK container, producing an
+        # empty cobertura stub. `dotnet test --collect` uses the in-process data
+        # collector instead.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          dotnet-coverage collect \
-            "dotnet test AspNetCore.slnx --no-build --filter \"FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky\"" \
-            -f cobertura -o TestResults/coverage.cobertura.xml
+          dotnet test AspNetCore.slnx --no-build \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults || true
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
       - name: Disk usage (end)
         if: always()
@@ -301,12 +319,18 @@ jobs:
       - name: Run tests with coverage (skipping the 37k SQLite functional suite)
         working-directory: target
         continue-on-error: true
+        # See ABP job for rationale: switched off `dotnet-coverage collect` because
+        # the CLR profiler fails to attach inside the SDK container.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          dotnet-coverage collect \
-            "dotnet test EFCore.sln --filter \"FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky\"" \
-            -f cobertura -o TestResults/coverage.cobertura.xml
+          dotnet test EFCore.sln \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults || true
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
       - name: Disk usage (end)
         if: always()
@@ -450,12 +474,18 @@ jobs:
       - name: Run tests with coverage
         working-directory: target
         continue-on-error: true
+        # See ABP job for rationale: switched off `dotnet-coverage collect` because
+        # the CLR profiler fails to attach inside the SDK container.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          dotnet-coverage collect \
-            "dotnet test Roslyn.slnx --filter \"FullyQualifiedName!~LanguageServer&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&TargetFrameworkIdentifier!=.NETFramework&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky\"" \
-            -f cobertura -o TestResults/coverage.cobertura.xml
+          dotnet test Roslyn.slnx \
+            --filter "FullyQualifiedName!~LanguageServer&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&TargetFrameworkIdentifier!=.NETFramework&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults || true
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
       - name: Disk usage (end)
         if: always()

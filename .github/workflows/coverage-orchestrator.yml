@@ -202,6 +202,9 @@ jobs:
           node --version
           npm --version
 
+      - name: Install dotnet-coverage
+        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+
       - name: Build ASP.NET Core (no tests, no Java)
         working-directory: target
         # --no-build-java avoids the Java SignalR client subproject which
@@ -213,10 +216,11 @@ jobs:
         working-directory: target
         continue-on-error: true
         run: |
-          dotnet test AspNetCore.slnx --no-build \
-            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          dotnet-coverage collect \
+            "dotnet test AspNetCore.slnx --no-build --filter \"FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky\"" \
+            -f cobertura -o TestResults/coverage.cobertura.xml
 
       - name: Disk usage (end)
         if: always()
@@ -228,7 +232,7 @@ jobs:
           dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
           export PATH="$PATH:/github/home/.dotnet/tools"
           reportgenerator \
-            -reports:"target/TestResults/*/coverage.cobertura.xml" \
+            -reports:"target/TestResults/coverage.cobertura.xml" \
             -targetdir:"CoverageReport" \
             -reporttypes:Html
 
@@ -246,7 +250,7 @@ jobs:
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: coverage-xml-aspnetcore
-          path: target/TestResults/*/coverage.cobertura.xml
+          path: target/TestResults/coverage.cobertura.xml
           retention-days: 90
           if-no-files-found: warn
 

@@ -113,7 +113,7 @@ jobs:
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
           dotnet-coverage collect \
-            "dotnet test --no-build --filter \"FullyQualifiedName!~SkiaSharp&Category!=IntegrationTests\"" \
+            "dotnet test --no-build --filter \"FullyQualifiedName!~SkiaSharp&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky\"" \
             -f cobertura -o TestResults/coverage.cobertura.xml
 
       - name: Disk usage (end)
@@ -156,7 +156,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 180
+    timeout-minutes: 90
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'aspnetcore'
     steps:
       - name: Mark workspace as a safe git directory
@@ -218,7 +218,7 @@ jobs:
         continue-on-error: true
         run: |
           dotnet test AspNetCore.slnx --no-build \
-            --filter "Category!=Integration&Category!=E2E&Category!=Quarantined" \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 
@@ -262,7 +262,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 180
+    timeout-minutes: 60
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'efcore'
     steps:
       - name: Mark workspace as a safe git directory
@@ -305,7 +305,7 @@ jobs:
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
           dotnet-coverage collect \
-            "dotnet test EFCore.sln --filter \"FullyQualifiedName!~FunctionalTests&Category!=Integration\"" \
+            "dotnet test EFCore.sln --filter \"FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky\"" \
             -f cobertura -o TestResults/coverage.cobertura.xml
 
       - name: Disk usage (end)
@@ -377,7 +377,7 @@ jobs:
         run: |
           dotnet restore Orleans.slnx
           dotnet test Orleans.slnx \
-            --filter "Category!=Integration&Category!=BVT" \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky&Category!=BVT&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 
@@ -454,7 +454,7 @@ jobs:
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
           dotnet-coverage collect \
-            "dotnet test Roslyn.slnx --filter \"FullyQualifiedName!~LanguageServer&TargetFrameworkIdentifier!=.NETFramework&Category!=IntegrationTest\"" \
+            "dotnet test Roslyn.slnx --filter \"FullyQualifiedName!~LanguageServer&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&TargetFrameworkIdentifier!=.NETFramework&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky\"" \
             -f cobertura -o TestResults/coverage.cobertura.xml
 
       - name: Disk usage (end)
@@ -629,7 +629,7 @@ jobs:
         continue-on-error: true
         run: |
           dotnet test SK-dotnet.slnx --no-build \
-            --filter "FullyQualifiedName~UnitTests|FullyQualifiedName~.Tests." \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&FullyQualifiedName!~ConformanceTests&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 

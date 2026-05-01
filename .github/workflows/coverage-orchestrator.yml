@@ -192,9 +192,11 @@ jobs:
           echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
           echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
 
-      - name: Build ASP.NET Core (no tests)
+      - name: Build ASP.NET Core (no tests, no Java)
         working-directory: target
-        run: ./eng/build.sh --all --no-test
+        # --no-build-java avoids the Java SignalR client subproject which
+        # requires a JDK not present in mcr.microsoft.com/dotnet/sdk:10.0-noble.
+        run: ./eng/build.sh --all --no-build-java --no-test
 
       - name: Run tests with coverage
         working-directory: target

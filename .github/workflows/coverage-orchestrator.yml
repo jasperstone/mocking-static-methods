@@ -54,10 +54,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: coverage-${{ github.ref }}
-  cancel-in-progress: false
-
 # Workflow-level env: container shorthand and tool versions in one place.
 env:
   SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:10.0-noble"
@@ -74,7 +70,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 60
+    timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'abp'
     steps:
       - name: Mark workspace as a safe git directory
@@ -156,7 +152,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 90
+    timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'aspnetcore'
     steps:
       - name: Mark workspace as a safe git directory
@@ -262,7 +258,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 60
+    timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'efcore'
     steps:
       - name: Mark workspace as a safe git directory
@@ -348,7 +344,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 90
+    timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'orleans'
     steps:
       - name: Mark workspace as a safe git directory
@@ -421,7 +417,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 180
+    timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'roslyn'
     steps:
       - name: Mark workspace as a safe git directory
@@ -497,7 +493,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 240
+    timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'runtime'
     steps:
       - name: Mark workspace as a safe git directory
@@ -597,7 +593,7 @@ jobs:
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
-    timeout-minutes: 60
+    timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'semantic-kernel'
     steps:
       - name: Mark workspace as a safe git directory

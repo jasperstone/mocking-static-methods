@@ -1,0 +1,9 @@
+Repo,Lines (total),Lines (covered),Line coverage %,Branches (total),Branches (covered),Branch coverage %,Static call sites,Classes with static calls
+abp,0,0,0.0000,0,0,0.0000,126,61
+aspnetcore,0,0,0.0000,0,0,0.0000,155,80
+efcore,0,0,0.0000,0,0,0.0000,39,16
+orleans,4429586,269509,6.0843,1154700,62698,5.4298,91,50
+roslyn,0,0,0.0000,0,0,0.0000,117,68
+runtime,230646,23477,10.1788,92141,11479,12.4581,613,245
+semantic-kernel,611211,74073,12.1191,218717,21385,9.7775,38,25
+TOTAL,5271443,367059,6.9632,1465558,95562,6.5205,1179,545

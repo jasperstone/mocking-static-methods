@@ -122,6 +122,40 @@ jobs:
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
+      - name: Validate cobertura has real data
+        if: always()
+        shell: bash
+        working-directory: target/framework
+        run: |
+          shopt -s nullglob globstar
+          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
+          BEST=""
+          BEST_SIZE=0
+          for f in "${FILES[@]}"; do
+            [[ -f "$f" ]] || continue
+            SIZE=$(stat -c%s "$f")
+            if (( SIZE > BEST_SIZE )); then
+              BEST="$f"
+              BEST_SIZE=$SIZE
+            fi
+          done
+          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
+          if [[ -z "$BEST" ]]; then
+            echo "::error::No cobertura file produced. Coverage collection failed silently."
+            exit 1
+          fi
+          if (( BEST_SIZE < 5120 )); then
+            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
+            exit 1
+          fi
+          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
+          echo "Class count: $CLASSES"
+          if (( CLASSES < 1 )); then
+            echo "::error::Cobertura has zero <class> elements. No real coverage data."
+            exit 1
+          fi
+          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+
       - name: Disk usage (end)
         if: always()
         run: df -h
@@ -142,6 +176,15 @@ jobs:
         with:
           name: coverage-report-abp
           path: CoverageReport/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw TestResults tree (forensics)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-raw-abp
+          path: target/framework/TestResults/
           retention-days: 30
           if-no-files-found: warn
 
@@ -222,23 +265,81 @@ jobs:
         # NodeJS build is auto-enabled because `node` is on PATH (see prior step).
         run: ./eng/build.sh --all --no-build-java --no-test
 
-      - name: Run tests with coverage
+      - name: Run tests with coverage (per-csproj, FunctionalTests excluded)
+        shell: bash
         working-directory: target
         continue-on-error: true
-        # See ABP job for rationale: switched off `dotnet-coverage collect` because
-        # the CLR profiler fails to attach inside the SDK container, producing an
-        # empty cobertura stub. `dotnet test --collect` uses the in-process data
-        # collector instead.
+        # Slnx-wide `dotnet test --collect "Code Coverage"` produced 0 attachments
+        # in run 25451789359 — the data-collector adapter wasn't on the test
+        # asset path. Switch to the proven per-csproj loop pattern (same as
+        # EF Core): explicit build above already populated artifacts/bin, then
+        # iterate *.Tests.csproj under src/ with --no-build so the in-process
+        # data collector attaches per project.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          dotnet test AspNetCore.slnx --no-build \
-            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
-            --collect "Code Coverage;Format=cobertura" \
-            --results-directory TestResults || true
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          mapfile -t PROJECTS < <(find src -type f -name "*.Tests.csproj" \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            ! -path "*E2ETest*" \
+            ! -path "*E2E.Tests*" \
+            ! -path "*EndToEnd*" \
+            ! -path "*Stress*" \
+            ! -path "*Performance*" \
+            ! -path "*Benchmarks*" \
+            ! -path "*FunctionalTest*" \
+            ! -path "*HelixTests*" \
+            ! -path "*NonHelixTests*" \
+            | sort -u)
+          echo "Discovered ${#PROJECTS[@]} test projects:"
+          printf '  %s\n' "${PROJECTS[@]}"
+          for proj in "${PROJECTS[@]}"; do
+            echo "::group::Running $(basename "$proj")"
+            dotnet test "$proj" --no-build \
+              --filter "$FILTER" \
+              --collect "Code Coverage;Format=cobertura" \
+              --results-directory TestResults \
+              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
+            echo "::endgroup::"
+          done
           dotnet-coverage merge -r -f cobertura \
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - name: Validate cobertura has real data
+        if: always()
+        shell: bash
+        working-directory: target
+        run: |
+          shopt -s nullglob globstar
+          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
+          BEST=""
+          BEST_SIZE=0
+          for f in "${FILES[@]}"; do
+            [[ -f "$f" ]] || continue
+            SIZE=$(stat -c%s "$f")
+            if (( SIZE > BEST_SIZE )); then
+              BEST="$f"
+              BEST_SIZE=$SIZE
+            fi
+          done
+          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
+          if [[ -z "$BEST" ]]; then
+            echo "::error::No cobertura file produced. Coverage collection failed silently."
+            exit 1
+          fi
+          if (( BEST_SIZE < 5120 )); then
+            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
+            exit 1
+          fi
+          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
+          echo "Class count: $CLASSES"
+          if (( CLASSES < 1 )); then
+            echo "::error::Cobertura has zero <class> elements. No real coverage data."
+            exit 1
+          fi
+          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
 
       - name: Disk usage (end)
         if: always()
@@ -260,6 +361,15 @@ jobs:
         with:
           name: coverage-report-aspnetcore
           path: CoverageReport/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw TestResults tree (forensics)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-raw-aspnetcore
+          path: target/TestResults/
           retention-days: 30
           if-no-files-found: warn
 
@@ -334,33 +444,68 @@ jobs:
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
           FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
-          mapfile -t DLLS < <(find artifacts/bin -type f -name "*.Tests.dll" \
-            -path "*/Debug/*" \
-            ! -path "*/ref/*" \
-            ! -path "*/refint/*" \
-            ! -name "*FunctionalTests*" \
-            ! -name "*IntegrationTests*" \
-            ! -name "*E2E*" \
-            ! -name "*EndToEnd*" \
-            ! -name "*Stress*" \
-            ! -name "*Performance*" \
-            ! -name "*Benchmarks*" \
-            ! -name "*Specification.Tests*" \
+          # Discover *.Tests.csproj (NOT .dll) — VSTest's Code Coverage data collector
+          # adapter only attaches when --collect is passed against a project/sln target.
+          # Run 25451789359 ran 60k+ tests against built .dll files but produced 0
+          # Attachments because the collector silently no-ops on .dll targets.
+          mapfile -t PROJECTS < <(find test -type f \( -name "*.Tests.csproj" -o -name "*.Tests.fsproj" -o -name "*.Tests.vbproj" \) \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            ! -path "*E2E*" \
+            ! -path "*EndToEnd*" \
+            ! -path "*Stress*" \
+            ! -path "*Performance*" \
+            ! -path "*Benchmarks*" \
+            ! -path "*Specification.Tests*" \
             | sort -u)
-          echo "Discovered ${#DLLS[@]} test assemblies:"
-          printf '  %s\n' "${DLLS[@]}"
-          for dll in "${DLLS[@]}"; do
-            echo "::group::Running $(basename "$dll")"
-            dotnet test "$dll" --no-build \
+          echo "Discovered ${#PROJECTS[@]} test projects:"
+          printf '  %s\n' "${PROJECTS[@]}"
+          for proj in "${PROJECTS[@]}"; do
+            echo "::group::Running $(basename "$proj")"
+            dotnet test "$proj" --no-build \
               --filter "$FILTER" \
               --collect "Code Coverage;Format=cobertura" \
               --results-directory TestResults \
-              || echo "::warning::Tests in $(basename "$dll") failed or runner pressure — continuing"
+              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
             echo "::endgroup::"
           done
           dotnet-coverage merge -r -f cobertura \
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - name: Validate cobertura has real data
+        if: always()
+        shell: bash
+        working-directory: target
+        run: |
+          shopt -s nullglob globstar
+          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
+          BEST=""
+          BEST_SIZE=0
+          for f in "${FILES[@]}"; do
+            [[ -f "$f" ]] || continue
+            SIZE=$(stat -c%s "$f")
+            if (( SIZE > BEST_SIZE )); then
+              BEST="$f"
+              BEST_SIZE=$SIZE
+            fi
+          done
+          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
+          if [[ -z "$BEST" ]]; then
+            echo "::error::No cobertura file produced. Coverage collection failed silently."
+            exit 1
+          fi
+          if (( BEST_SIZE < 5120 )); then
+            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
+            exit 1
+          fi
+          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
+          echo "Class count: $CLASSES"
+          if (( CLASSES < 1 )); then
+            echo "::error::Cobertura has zero <class> elements. No real coverage data."
+            exit 1
+          fi
+          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
 
       - name: Disk usage (end)
         if: always()
@@ -382,6 +527,15 @@ jobs:
         with:
           name: coverage-report-efcore
           path: CoverageReport/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw TestResults tree (forensics)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-raw-efcore
+          path: target/TestResults/
           retention-days: 30
           if-no-files-found: warn
 
@@ -435,6 +589,40 @@ jobs:
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 
+      - name: Validate cobertura has real data
+        if: always()
+        shell: bash
+        working-directory: target
+        run: |
+          shopt -s nullglob globstar
+          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
+          BEST=""
+          BEST_SIZE=0
+          for f in "${FILES[@]}"; do
+            [[ -f "$f" ]] || continue
+            SIZE=$(stat -c%s "$f")
+            if (( SIZE > BEST_SIZE )); then
+              BEST="$f"
+              BEST_SIZE=$SIZE
+            fi
+          done
+          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
+          if [[ -z "$BEST" ]]; then
+            echo "::error::No cobertura file produced. Coverage collection failed silently."
+            exit 1
+          fi
+          if (( BEST_SIZE < 5120 )); then
+            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
+            exit 1
+          fi
+          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
+          echo "Class count: $CLASSES"
+          if (( CLASSES < 1 )); then
+            echo "::error::Cobertura has zero <class> elements. No real coverage data."
+            exit 1
+          fi
+          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+
       - name: Disk usage (end)
         if: always()
         run: df -h
@@ -455,6 +643,15 @@ jobs:
         with:
           name: coverage-report-orleans
           path: CoverageReport/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw TestResults tree (forensics)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-raw-orleans
+          path: target/TestResults/
           retention-days: 30
           if-no-files-found: warn
 
@@ -498,6 +695,22 @@ jobs:
           key: nuget-roslyn-02d30162
           restore-keys: nuget-roslyn-
 
+      - name: Install pinned .NET SDK from global.json
+        # Roslyn's global.json pins SDK 10.0.100-rc.2.25502.107 but the
+        # mcr.microsoft.com/dotnet/sdk:10.0-noble container ships a different
+        # patch (e.g. 10.0.203). Without this step `dotnet test` fails in 0.04s
+        # with "A compatible .NET SDK was not found" and `|| true` masked it,
+        # producing a 289-byte empty cobertura stub. Roslyn doesn't ship its
+        # own restore.sh (unlike ABP/EF/ASP) so we use the canonical installer.
+        shell: bash
+        working-directory: target
+        run: |
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --jsonfile global.json --install-dir "$GITHUB_WORKSPACE/.dotnet"
+          echo "DOTNET_ROOT=$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_PATH"
+
       - name: Install dotnet-coverage
         run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
 
@@ -516,6 +729,40 @@ jobs:
           dotnet-coverage merge -r -f cobertura \
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - name: Validate cobertura has real data
+        if: always()
+        shell: bash
+        working-directory: target
+        run: |
+          shopt -s nullglob globstar
+          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
+          BEST=""
+          BEST_SIZE=0
+          for f in "${FILES[@]}"; do
+            [[ -f "$f" ]] || continue
+            SIZE=$(stat -c%s "$f")
+            if (( SIZE > BEST_SIZE )); then
+              BEST="$f"
+              BEST_SIZE=$SIZE
+            fi
+          done
+          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
+          if [[ -z "$BEST" ]]; then
+            echo "::error::No cobertura file produced. Coverage collection failed silently."
+            exit 1
+          fi
+          if (( BEST_SIZE < 5120 )); then
+            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
+            exit 1
+          fi
+          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
+          echo "Class count: $CLASSES"
+          if (( CLASSES < 1 )); then
+            echo "::error::Cobertura has zero <class> elements. No real coverage data."
+            exit 1
+          fi
+          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
 
       - name: Disk usage (end)
         if: always()
@@ -537,6 +784,15 @@ jobs:
         with:
           name: coverage-report-roslyn
           path: CoverageReport/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw TestResults tree (forensics)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-raw-roslyn
+          path: target/TestResults/
           retention-days: 30
           if-no-files-found: warn
 
@@ -693,6 +949,40 @@ jobs:
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 
+      - name: Validate cobertura has real data
+        if: always()
+        shell: bash
+        working-directory: target/dotnet
+        run: |
+          shopt -s nullglob globstar
+          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
+          BEST=""
+          BEST_SIZE=0
+          for f in "${FILES[@]}"; do
+            [[ -f "$f" ]] || continue
+            SIZE=$(stat -c%s "$f")
+            if (( SIZE > BEST_SIZE )); then
+              BEST="$f"
+              BEST_SIZE=$SIZE
+            fi
+          done
+          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
+          if [[ -z "$BEST" ]]; then
+            echo "::error::No cobertura file produced. Coverage collection failed silently."
+            exit 1
+          fi
+          if (( BEST_SIZE < 5120 )); then
+            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
+            exit 1
+          fi
+          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
+          echo "Class count: $CLASSES"
+          if (( CLASSES < 1 )); then
+            echo "::error::Cobertura has zero <class> elements. No real coverage data."
+            exit 1
+          fi
+          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+
       - name: Disk usage (end)
         if: always()
         run: df -h
@@ -713,6 +1003,15 @@ jobs:
         with:
           name: coverage-report-semantic-kernel
           path: CoverageReport/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw TestResults tree (forensics)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: coverage-raw-semantic-kernel
+          path: target/dotnet/TestResults/
           retention-days: 30
           if-no-files-found: warn
 

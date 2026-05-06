@@ -269,12 +269,15 @@ jobs:
         shell: bash
         working-directory: target
         continue-on-error: true
-        # Slnx-wide `dotnet test --collect "Code Coverage"` produced 0 attachments
-        # in run 25451789359 — the data-collector adapter wasn't on the test
-        # asset path. Switch to the proven per-csproj loop pattern (same as
-        # EF Core): explicit build above already populated artifacts/bin, then
-        # iterate *.Tests.csproj under src/ with --no-build so the in-process
-        # data collector attaches per project.
+        # Run 25455447205: per-csproj loop ran 100+ projects, all tests passed,
+        # zero `Attachments:` produced. ASP's test project asset paths don't
+        # ship the inline "Code Coverage" data collector adapter (unlike ABP/
+        # EF Core/Roslyn). Switch to external instrumentation: wrap each
+        # per-csproj `dotnet test` with `dotnet-coverage collect`, which uses
+        # dotnet-coverage's own bundled collector — no dependency on what
+        # packages each test project happens to reference. Per-csproj sequential
+        # testhosts are a much simpler attach scenario than slnx-wide concurrent
+        # testhosts (which is what failed for us before with collect).
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
@@ -292,15 +295,19 @@ jobs:
             ! -path "*HelixTests*" \
             ! -path "*NonHelixTests*" \
             | sort -u)
-          echo "Discovered ${#PROJECTS[@]} test projects:"
-          printf '  %s\n' "${PROJECTS[@]}"
+          echo "Discovered ${#PROJECTS[@]} test projects"
+          i=0
           for proj in "${PROJECTS[@]}"; do
-            echo "::group::Running $(basename "$proj")"
-            dotnet test "$proj" --no-build \
-              --filter "$FILTER" \
-              --collect "Code Coverage;Format=cobertura" \
-              --results-directory TestResults \
-              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
+            i=$((i+1))
+            base=$(basename "$proj" .csproj)
+            out="TestResults/${i}_${base}.cobertura.xml"
+            echo "::group::[$i/${#PROJECTS[@]}] $base"
+            dotnet-coverage collect \
+              --output "$out" \
+              --output-format cobertura \
+              --session-id "asp-$i-$base" \
+              -- dotnet test "$proj" --no-build --filter "$FILTER" \
+              || echo "::warning::Tests in $base failed or runner pressure — continuing"
             echo "::endgroup::"
           done
           dotnet-coverage merge -r -f cobertura \
@@ -714,18 +721,54 @@ jobs:
       - name: Install dotnet-coverage
         run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
 
-      - name: Run tests with coverage
+      - name: Restore and build Roslyn (slnx, no tests)
+        shell: bash
+        working-directory: target
+        # `dotnet test Roslyn.slnx` fails in the rc.2 SDK with MSB1009 — the
+        # test command does not accept slnx. `dotnet build` and `dotnet restore`
+        # DO accept slnx in this SDK, so we build the slnx here and then iterate
+        # csprojs with --no-build for the test step (same shape as EF Core).
+        # eng/build.sh is too heavy for our purposes; plain `dotnet build` is
+        # sufficient because we only need the test asset trees populated.
+        run: |
+          dotnet restore Roslyn.slnx
+          dotnet build Roslyn.slnx --no-restore -c Debug
+
+      - name: Run tests with coverage (per-csproj, slnx-incompatible workaround)
+        shell: bash
         working-directory: target
         continue-on-error: true
-        # See ABP job for rationale: switched off `dotnet-coverage collect` because
-        # the CLR profiler fails to attach inside the SDK container.
+        # `dotnet test Roslyn.slnx` is rejected by the rc.2 SDK (MSB1009).
+        # There is no Roslyn.sln, so per-csproj is the only path. Iterate
+        # *.UnitTests.csproj and *.Tests.csproj under src/ with --no-build,
+        # using the inline Code Coverage data collector (Roslyn's test
+        # projects DO ship the adapter on their asset path, unlike ASP).
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          dotnet test Roslyn.slnx \
-            --filter "FullyQualifiedName!~LanguageServer&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&TargetFrameworkIdentifier!=.NETFramework&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
-            --collect "Code Coverage;Format=cobertura" \
-            --results-directory TestResults || true
+          FILTER="FullyQualifiedName!~LanguageServer&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&TargetFrameworkIdentifier!=.NETFramework&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky"
+          mapfile -t PROJECTS < <(find src -type f \( -name "*.UnitTests.csproj" -o -name "*.Tests.csproj" \) \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            ! -path "*E2E*" \
+            ! -path "*EndToEnd*" \
+            ! -path "*Stress*" \
+            ! -path "*Performance*" \
+            ! -path "*Benchmarks*" \
+            ! -path "*Specification.Tests*" \
+            ! -path "*LanguageServer*" \
+            | sort -u)
+          echo "Discovered ${#PROJECTS[@]} test projects:"
+          printf '  %s\n' "${PROJECTS[@]}"
+          for proj in "${PROJECTS[@]}"; do
+            echo "::group::Running $(basename "$proj")"
+            dotnet test "$proj" --no-build \
+              --filter "$FILTER" \
+              --collect "Code Coverage;Format=cobertura" \
+              --results-directory TestResults \
+              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
+            echo "::endgroup::"
+          done
           dotnet-coverage merge -r -f cobertura \
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"

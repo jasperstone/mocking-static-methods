@@ -253,7 +253,11 @@ jobs:
             asm="${asm_dir}/${base}.dll"
             if [[ ! -f "$asm" ]]; then
               # Some projects' AssemblyName differs from csproj name. Find the test DLL.
-              asm=$(find "$asm_dir" -maxdepth 1 \( -name "*.Tests.dll" -o -name "*.Test.dll" \) 2>/dev/null | head -1)
+              # Use `|| true` to defang SIGPIPE from `head -1` closing the pipe
+              # early — under `set -e -o pipefail` (GitHub's default shell: bash),
+              # an unguarded SIGPIPE aborts the entire test loop. Run 25468601840
+              # exited at project 28/117 because of this.
+              asm=$(set +o pipefail; find "$asm_dir" -maxdepth 1 \( -name "*.Tests.dll" -o -name "*.Test.dll" \) 2>/dev/null | head -1 || true)
             fi
             if [[ -z "$asm" || ! -f "$asm" ]]; then
               echo "::warning::No built test DLL for $base — skipping"

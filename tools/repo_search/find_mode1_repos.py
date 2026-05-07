@@ -62,6 +62,13 @@ PATTERNS: list[tuple[str, str, str]] = [
     ('"HttpClient" "SendAsync("', "HttpClient.SendAsync", "HttpClient"),
     # IServiceProvider extension methods
     ('"GetRequiredService<"', "GetRequiredService<T>", "ServiceProvider"),
+    # IConfiguration extension methods (Microsoft.Extensions.Configuration)
+    # The interface only exposes GetSection(string) and an indexer; all of
+    # these are extension methods that fail when naively mocked on Mock<IConfiguration>.
+    ('"GetValue<"', "GetValue<T>", "IConfiguration"),
+    ('"GetConnectionString("', "GetConnectionString", "IConfiguration"),
+    ('"configuration.Bind("', "Configuration.Bind", "IConfiguration"),
+    ('"GetSection(" "configuration"', "Configuration.GetSection", "IConfiguration"),
 ]
 
 API_BASE = "https://api.github.com"
@@ -220,7 +227,7 @@ def write_outputs(repos: list[RepoStats], top_n: int) -> None:
         w = csv.writer(fh)
         w.writerow(
             ["repo", "stars", "seeded", "total_hits", "ilogger_total",
-             "httpclient_total", "serviceprovider_total"]
+             "httpclient_total", "serviceprovider_total", "iconfiguration_total"]
             + pattern_labels
         )
         for r in ranked:
@@ -233,6 +240,7 @@ def write_outputs(repos: list[RepoStats], top_n: int) -> None:
                     r.family_counts.get("ILogger", 0),
                     r.family_counts.get("HttpClient", 0),
                     r.family_counts.get("ServiceProvider", 0),
+                    r.family_counts.get("IConfiguration", 0),
                 ]
                 + [r.pattern_counts.get(label, 0) for label in pattern_labels]
             )
@@ -255,8 +263,8 @@ def write_outputs(repos: list[RepoStats], top_n: int) -> None:
     lines.append(f"_{len(ranked)} repos with at least one Mode #1 hit. "
                  f"Top {min(top_n, len(ranked))} shown._")
     lines.append("")
-    lines.append("| Rank | Repo | Stars | Total | ILogger | HttpClient | ServiceProvider | Already cloned |")
-    lines.append("|---:|---|---:|---:|---:|---:|---:|:---:|")
+    lines.append("| Rank | Repo | Stars | Total | ILogger | HttpClient | ServiceProvider | IConfiguration | Already cloned |")
+    lines.append("|---:|---|---:|---:|---:|---:|---:|---:|:---:|")
     for i, r in enumerate(ranked[:top_n], 1):
         seeded_marker = "✅" if r.seeded else ""
         lines.append(
@@ -265,6 +273,7 @@ def write_outputs(repos: list[RepoStats], top_n: int) -> None:
             f"| {r.family_counts.get('ILogger', 0)} "
             f"| {r.family_counts.get('HttpClient', 0)} "
             f"| {r.family_counts.get('ServiceProvider', 0)} "
+            f"| {r.family_counts.get('IConfiguration', 0)} "
             f"| {seeded_marker} |"
         )
     lines.append("")

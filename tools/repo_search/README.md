@@ -36,9 +36,9 @@ between queries (24 req/min, safe margin).
 
 | Repos × Patterns | Queries | Wall clock |
 |---:|---:|---:|
-| 50 × 10 | 500 | ~21 min |
-| 150 × 10 | 1500 | ~63 min |
-| 250 × 10 | 2500 | ~104 min |
+| 50 × 14 | 700 | ~29 min |
+| 150 × 14 | 2,100 | ~88 min |
+| 250 × 14 | 3,500 | ~146 min |
 
 The 7 already-cloned repos are auto-seeded into the candidate list so the
 existing baseline always appears alongside new candidates.
@@ -49,3 +49,5 @@ See `PATTERNS` in `find_mode1_repos.py`. Currently:
 - ILogger extension methods: `LogInformation/Warning/Error/Debug/Critical/Trace`
 - HttpClient instance methods: `GetAsync`, `PostAsync`, `SendAsync`
 - IServiceProvider extensions: `GetRequiredService<T>`
+- IConfiguration extensions: `GetValue<T>`, `GetConnectionString`,
+  `Configuration.Bind`, `Configuration.GetSection`

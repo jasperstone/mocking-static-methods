@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # ⚠️  ALWAYS DISPATCH WITH repo=all  ⚠️
-#   The 7 jobs run in parallel on independent runners. Single-repo dispatch
+#   The 14 jobs run in parallel on independent runners. Single-repo dispatch
 #   saves ZERO wall-clock time and produces a partial artifact set, forcing
 #   a full re-run for aggregation. NEVER trigger a single repo to validate a
 #   fix — re-run the whole thing. Decision: .squad/decisions.md (2026-05-01).
@@ -15,9 +15,10 @@
 #   - All actions, target-repo refs, and the runner image are pinned to SHAs.
 #   - Coverage strategy (chosen per repo so we never modify .csproj files):
 #       * coverlet.collector ALREADY in repo  -> dotnet test --collect:"XPlat Code Coverage"
-#         (aspnetcore, orleans, semantic-kernel)
-#       * coverlet NOT in repo                -> dotnet-coverage external collector
-#         (abp, efcore, roslyn, runtime)
+#         (aspnetcore, orleans, semantic-kernel, jellyfin, maui, server, duplicati)
+#       * coverlet NOT in repo                -> dotnet test --collect "Code Coverage;Format=cobertura"
+#                                                + dotnet-coverage merge
+#         (abp, efcore, roslyn, runtime, Avalonia, eShop, garnet)
 #   - Tests are run "the way each team runs them" (only integration/E2E filters).
 #   - Both HTML reports and raw cobertura XML are uploaded as artifacts.
 #   - continue-on-error on test steps so reportgenerator still runs on failures.
@@ -31,7 +32,7 @@
 #   actions/upload-artifact  b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
 #   actions/cache            1bd1e32a3bdc45362d1e726936510720a7c30a57  # v4.2.0
 #
-# TARGET REPO PINS (resolved 2026-04-30):
+# TARGET REPO PINS (original 7 resolved 2026-04-30; new 7 resolved 2026-05-07):
 #   abp             ea4bbb8b517869a9fb735ea5bc05c819c209d0b5  (tag 10.0.2)
 #   aspnetcore      ecb199c29cbefb6fcb6aa789436de36e44427a78  (release/10.0)
 #   efcore          45e3af0273b71919189367bc152a335b69f443c6  (release/10.0)
@@ -39,6 +40,13 @@
 #   roslyn          02d301627ed5016a4c18acd1a35e5bbc20ff03f0  (release/dev18.3 tip)
 #   runtime         9ffface2f3fa6fbbb427793c3230b1626a1fdd84  (tag v10.0.2)
 #   semantic-kernel 0c898161a355b0a845aea48de79cb43e2e9435d2  (tag dotnet-1.70.0)
+#   Avalonia        dcb607179b707a6c0e41a39fc697af43c00abc48  (master HEAD)
+#   duplicati       4afa374d7b994cfbfb8167750baabec3eea557e3  (master HEAD)
+#   eShop           9b4f9434f46fdc5c1a6e9e936af2868340cdbc48  (main HEAD)
+#   garnet          38cac99c7ad80ae8465ea6e0f120bd6698730a75  (main HEAD)
+#   jellyfin        e1e18e8da015e7311e62cdb62167d51e90331edd  (master HEAD)
+#   maui            b71adea6e63829f4fc264302f1cad08aa542c794  (main HEAD)
+#   server          ea233580d24734f78feffe7fa5cef185b1a2df28  (main HEAD, bitwarden/server)
 # =============================================================================
 
 name: Coverage Orchestrator
@@ -47,7 +55,7 @@ on:
   workflow_dispatch:
     inputs:
       repo:
-        description: "Target repo (or 'all' for all 7)"
+        description: "Target repo (or 'all' for all 14)"
         required: true
         default: "all"
         type: choice
@@ -55,11 +63,18 @@ on:
           - all
           - abp
           - aspnetcore
+          - Avalonia
+          - duplicati
           - efcore
+          - eShop
+          - garnet
+          - jellyfin
+          - maui
           - orleans
           - roslyn
           - runtime
           - semantic-kernel
+          - server
 
 permissions:
   contents: read
@@ -748,6 +763,602 @@ jobs:
           reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
+  # Avalonia — external data collector (no coverlet in repo); MTP test runner
+  # ===========================================================================
+  Avalonia:
+    name: "Coverage: Avalonia"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'Avalonia'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Avalonia at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/AvaloniaUI/Avalonia.git target
+          cd target
+          git fetch --depth 1 origin dcb607179b707a6c0e41a39fc697af43c00abc48
+          git checkout FETCH_HEAD
+          git submodule update --init --recursive --depth 1
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: Avalonia
+          sha-prefix: dcb60717
+
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      - name: Restore Avalonia.slnx
+        shell: bash
+        working-directory: target
+        run: dotnet restore Avalonia.slnx
+
+      - name: Build Avalonia.slnx
+        shell: bash
+        working-directory: target
+        run: dotnet build Avalonia.slnx -c Debug --no-restore
+
+      # Avalonia is UI framework; render/leak/integration tests need X server or
+      # GPU. Scope to *.UnitTests.csproj under tests/, exclude RenderTests / LeakTests
+      # / Designer / Browser. Per-csproj keeps a single broken assembly from
+      # killing the whole loop. global.json sets test runner to MTP, so dotnet test
+      # uses Microsoft.Testing.Platform; --collect "Code Coverage;Format=cobertura"
+      # is honored by MTP via the standard collector adapter.
+      - name: Run tests with coverage (per-csproj, UnitTests subset)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          mapfile -t PROJECTS < <(find tests -type f -name "*.UnitTests.csproj" \
+            ! -path "*RenderTests*" \
+            ! -path "*LeakTests*" \
+            ! -path "*Designer*" \
+            ! -path "*Browser*" \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            | sort -u)
+          echo "Discovered ${#PROJECTS[@]} test projects:"
+          printf '  %s\n' "${PROJECTS[@]}"
+          for proj in "${PROJECTS[@]}"; do
+            echo "::group::Running $(basename "$proj")"
+            dotnet test "$proj" --no-build \
+              --filter "$FILTER" \
+              --collect "Code Coverage;Format=cobertura" \
+              --results-directory TestResults \
+              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
+            echo "::endgroup::"
+          done
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: Avalonia
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # Duplicati — built-in coverlet.collector (only on Duplicati.UnitTest)
+  # ===========================================================================
+  duplicati:
+    name: "Coverage: Duplicati"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'duplicati'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Duplicati at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/duplicati/duplicati.git target
+          cd target
+          git fetch --depth 1 origin 4afa374d7b994cfbfb8167750baabec3eea557e3
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: duplicati
+          sha-prefix: 4afa374d
+
+      # Restore the whole solution so transitive project refs resolve, but only
+      # build/test Duplicati.UnitTest. Browser.Test needs Playwright browsers,
+      # Backend.Tests under LiveTests/ need real cloud creds — both excluded.
+      - name: Restore Duplicati.slnx
+        shell: bash
+        working-directory: target
+        run: dotnet restore Duplicati.slnx
+
+      - name: Build Duplicati.UnitTest
+        shell: bash
+        working-directory: target
+        run: dotnet build Duplicati/UnitTest/Duplicati.UnitTest.csproj -c Debug --no-restore
+
+      - name: Run tests with coverage
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          dotnet test Duplicati/UnitTest/Duplicati.UnitTest.csproj --no-build \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: duplicati
+          working-directory: target
+          cobertura-glob: TestResults/*/coverage.cobertura.xml
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # eShop — external data collector (no coverlet); MTP + MSTest.Sdk test runner
+  # ===========================================================================
+  eShop:
+    name: "Coverage: eShop"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'eShop'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone eShop at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/eShop.git target
+          cd target
+          git fetch --depth 1 origin 9b4f9434f46fdc5c1a6e9e936af2868340cdbc48
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: eShop
+          sha-prefix: 9b4f9434
+
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      # eShop's tests/ contains only 3 unit-test csprojs (Ordering / Basket /
+      # ClientApp). They use MSTest.Sdk + Microsoft.Testing.Platform — exe-style
+      # entry points, not standard vstest hosts. Their src/ project refs pull in
+      # Aspire NuGets, but Aspire is no longer a workload in .NET 10 (just packages),
+      # so no `dotnet workload install` is needed.
+      - name: Restore eShop.slnx
+        shell: bash
+        working-directory: target
+        run: dotnet restore eShop.slnx
+
+      - name: Build unit-test projects only
+        shell: bash
+        working-directory: target
+        # Build only the three UnitTests csprojs (and their transitive deps) to
+        # avoid the AppHost/orchestrator build path which targets Aspire dashboards.
+        run: |
+          for proj in tests/Ordering.UnitTests/Ordering.UnitTests.csproj \
+                      tests/Basket.UnitTests/Basket.UnitTests.csproj \
+                      tests/ClientApp.UnitTests/ClientApp.UnitTests.csproj; do
+            echo "::group::Build $proj"
+            dotnet build "$proj" -c Debug --no-restore \
+              || echo "::warning::Build of $proj failed — continuing"
+            echo "::endgroup::"
+          done
+
+      - name: Run tests with coverage (per-csproj, UnitTests only)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          for proj in tests/Ordering.UnitTests/Ordering.UnitTests.csproj \
+                      tests/Basket.UnitTests/Basket.UnitTests.csproj \
+                      tests/ClientApp.UnitTests/ClientApp.UnitTests.csproj; do
+            echo "::group::Running $(basename "$proj")"
+            dotnet test "$proj" --no-build \
+              --filter "$FILTER" \
+              --collect "Code Coverage;Format=cobertura" \
+              --results-directory TestResults \
+              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
+            echo "::endgroup::"
+          done
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: eShop
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # Garnet — external data collector (no coverlet); NUnit-based suite
+  # ===========================================================================
+  garnet:
+    name: "Coverage: Garnet"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'garnet'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Garnet at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/garnet.git target
+          cd target
+          git fetch --depth 1 origin 38cac99c7ad80ae8465ea6e0f120bd6698730a75
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: garnet
+          sha-prefix: 38cac99c
+
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      - name: Restore Garnet.slnx
+        shell: bash
+        working-directory: target
+        run: dotnet restore Garnet.slnx
+
+      - name: Build Garnet.slnx
+        shell: bash
+        working-directory: target
+        run: dotnet build Garnet.slnx -c Debug --no-restore
+
+      # Garnet test projects don't follow the *.Tests.csproj suffix convention —
+      # they're under test/ as Garnet.test, Garnet.test.cluster, Garnet.fuzz.
+      # Garnet.test is the main NUnit unit-test suite. Cluster tests need a multi-
+      # node cluster (integration-shaped). Fuzz is non-deterministic. Run only
+      # Garnet.test with the standard exclusion filter.
+      - name: Run tests with coverage (Garnet.test only)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          dotnet test test/Garnet.test/Garnet.test.csproj --no-build \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&FullyQualifiedName!~Cluster&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults \
+            || echo "::warning::Garnet.test failed or runner pressure — continuing"
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: garnet
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # Jellyfin — built-in coverlet.collector (all 16 test projects)
+  # ===========================================================================
+  jellyfin:
+    name: "Coverage: Jellyfin"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'jellyfin'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Jellyfin at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/jellyfin/jellyfin.git target
+          cd target
+          git fetch --depth 1 origin e1e18e8da015e7311e62cdb62167d51e90331edd
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: jellyfin
+          sha-prefix: e1e18e8d
+
+      - name: Restore Jellyfin.sln
+        shell: bash
+        working-directory: target
+        run: dotnet restore Jellyfin.sln
+
+      - name: Build Jellyfin.sln
+        shell: bash
+        working-directory: target
+        run: dotnet build Jellyfin.sln -c Debug --no-restore
+
+      # All 16 test projects under tests/ reference coverlet.collector, so the
+      # XPlat Code Coverage adapter attaches reliably from a sln-level invocation.
+      - name: Run tests with coverage
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          dotnet test Jellyfin.sln --no-build \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: jellyfin
+          working-directory: target
+          cobertura-glob: TestResults/*/coverage.cobertura.xml
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # MAUI — built-in coverlet.collector; SCOPED to non-device UnitTests only.
+  # ===========================================================================
+  # Scope rationale: MAUI's full test set requires Android/iOS workloads and
+  # device emulators. The coverlet-instrumented test set under
+  # src/Controls/tests/*.UnitTests/ targets net10.0 host-side and exercises the
+  # cross-platform Controls/Core/Xaml surface — which is what Mode #1 sites in
+  # MAUI predominantly live in (logger/configuration/static helpers). Device
+  # tests (TestCases.iOS/Mac/Android, TemplatedView native tests) are excluded.
+  # `dotnet workload install maui` is required because Controls.Core.csproj is
+  # a multi-targeted workload-bound project; without it `dotnet build` on the
+  # UnitTests csproj fails to resolve TFM tooling.
+  maui:
+    name: "Coverage: MAUI"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'maui'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone MAUI at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/maui.git target
+          cd target
+          git fetch --depth 1 origin b71adea6e63829f4fc264302f1cad08aa542c794
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: maui
+          sha-prefix: b71adea6
+
+      - name: Install pinned .NET SDK from global.json
+        # MAUI's global.json pins an RTM preview SDK (10.0.100-rtm.25523.113)
+        # that the noble container does not satisfy. Same pattern as Roslyn:
+        # install via dotnet-install.sh --jsonfile, then prepend to PATH.
+        shell: bash
+        working-directory: target
+        run: |
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --jsonfile global.json --install-dir "$GITHUB_WORKSPACE/.dotnet"
+          echo "DOTNET_ROOT=$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_PATH"
+
+      - name: Install MAUI workload
+        shell: bash
+        working-directory: target
+        # Pulls Android SDK (~2GB) — slow but deterministic. Without it,
+        # multi-targeted Controls.Core.csproj refuses to restore.
+        run: |
+          dotnet workload install maui --skip-sign-check
+          dotnet workload list
+
+      - name: Run tests with coverage (UnitTests subset only)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        # Scope: src/Controls/tests/*.UnitTests/*.csproj — the 4 coverlet-bearing
+        # cross-platform unit-test projects (Core / SourceGen / BindingSourceGen /
+        # Xaml). TestCases.* are device tests and are excluded by the path filter.
+        run: |
+          mkdir -p TestResults
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          mapfile -t PROJECTS < <(find src/Controls/tests -type f -name "*.UnitTests.csproj" \
+            ! -path "*TestCases*" \
+            ! -path "*Device*" \
+            | sort -u)
+          echo "Discovered ${#PROJECTS[@]} test projects:"
+          printf '  %s\n' "${PROJECTS[@]}"
+          for proj in "${PROJECTS[@]}"; do
+            base=$(basename "$proj" .csproj)
+            echo "::group::Restore+Build+Test $base"
+            dotnet test "$proj" \
+              --filter "$FILTER" \
+              --collect:"XPlat Code Coverage" \
+              --results-directory ./TestResults \
+              || echo "::warning::Tests in $base failed or runner pressure — continuing"
+            echo "::endgroup::"
+          done
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: maui
+          working-directory: target
+          cobertura-glob: TestResults/*/coverage.cobertura.xml
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # SQL Tools Service / Bitwarden Server — built-in coverlet; SDK 8.0 pin
+  # ===========================================================================
+  # NOTE: The local clone path `cloned_repos/server/` actually holds the
+  # bitwarden/server repo (the "server" name was assigned during cloning and
+  # stuck). bitwarden-server.sln + the test project layout matches that repo,
+  # not microsoft/sqltoolsservice. Pinned to bitwarden/server here for fidelity
+  # with the local clone Mode-1 analysis was performed against.
+  server:
+    name: "Coverage: Server (Bitwarden)"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'server'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Bitwarden Server at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/bitwarden/server.git target
+          cd target
+          git fetch --depth 1 origin ea233580d24734f78feffe7fa5cef185b1a2df28
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: server
+          sha-prefix: ea233580
+
+      - name: Install pinned .NET 8 SDK from global.json
+        # Bitwarden's global.json pins SDK 8.0.100 latestFeature; the noble
+        # container ships .NET 10. Install .NET 8 alongside via dotnet-install.sh
+        # so `dotnet build`/`dotnet test` resolve the pinned MSBuild.
+        shell: bash
+        working-directory: target
+        run: |
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --jsonfile global.json --install-dir "$GITHUB_WORKSPACE/.dotnet"
+          echo "DOTNET_ROOT=$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_PATH"
+          dotnet --list-sdks
+
+      - name: Restore bitwarden-server.sln
+        shell: bash
+        working-directory: target
+        run: dotnet restore bitwarden-server.sln
+
+      - name: Build bitwarden-server.sln
+        shell: bash
+        working-directory: target
+        run: dotnet build bitwarden-server.sln -c Debug --no-restore
+
+      # Test projects under test/ split into *.Test (unit) and *.IntegrationTest
+      # (need real DB / external services). FILTER excludes IntegrationTests by
+      # FQN; sln-level invocation with coverlet adapter loads all *.Test DLLs.
+      - name: Run tests with coverage
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          dotnet test bitwarden-server.sln --no-build \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTest&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect:"XPlat Code Coverage" \
+            --results-directory ./TestResults
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: server
+          working-directory: target
+          cobertura-glob: TestResults/*/coverage.cobertura.xml
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
   # Summary — runs after all repo jobs (success or failure)
   # ===========================================================================
   summary:
@@ -757,11 +1368,18 @@ jobs:
     needs:
       - abp
       - aspnetcore
+      - Avalonia
+      - duplicati
       - efcore
+      - eShop
+      - garnet
+      - jellyfin
+      - maui
       - orleans
       - roslyn
       - runtime
       - semantic-kernel
+      - server
     steps:
       - name: Print summary
         run: |
@@ -772,11 +1390,18 @@ jobs:
             echo "|---|---|"
             echo "| ABP Framework      | ${{ needs.abp.result }} |"
             echo "| ASP.NET Core       | ${{ needs.aspnetcore.result }} |"
+            echo "| Avalonia           | ${{ needs.Avalonia.result }} |"
+            echo "| Duplicati          | ${{ needs.duplicati.result }} |"
             echo "| EF Core            | ${{ needs.efcore.result }} |"
+            echo "| eShop              | ${{ needs.eShop.result }} |"
+            echo "| Garnet             | ${{ needs.garnet.result }} |"
+            echo "| Jellyfin           | ${{ needs.jellyfin.result }} |"
+            echo "| MAUI               | ${{ needs.maui.result }} |"
             echo "| Orleans            | ${{ needs.orleans.result }} |"
             echo "| Roslyn             | ${{ needs.roslyn.result }} |"
             echo "| .NET Runtime       | ${{ needs.runtime.result }} |"
             echo "| Semantic Kernel    | ${{ needs.semantic-kernel.result }} |"
+            echo "| Server (Bitwarden) | ${{ needs.server.result }} |"
             echo ""
             echo "Artifacts: coverage-report-* (HTML) and coverage-xml-* (raw cobertura)."
           } >> "$GITHUB_STEP_SUMMARY"

@@ -67,9 +67,12 @@ jobs:
 
       - name: Run shellcheck
         run: |
-          # Lint committed shell scripts. Errors only — warnings allowed.
+          # Lint shell scripts that the project actually executes.
+          # Excludes csharptune/ (SLURM templates with placeholders) and
+          # cloned_repos/ (vendored OSS, not ours).
           fail=0
           while IFS= read -r f; do
             shellcheck -S error "$f" || fail=1
-          done < <(git ls-files '*.sh')
+          done < <(git ls-files '*.sh' \
+            | grep -vE '^(csharptune|cloned_repos)/')
           exit $fail

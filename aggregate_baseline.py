@@ -31,7 +31,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 ARTIFACTS_DIR = REPO_ROOT / "baseline_artifacts"
 CLONED_DIR = REPO_ROOT / "cloned_repos"
-ANALYZER_DLL = REPO_ROOT / "StaticCallAnalyzer" / "bin" / "Release" / "net8.0" / "StaticCallAnalyzer.dll"
+ANALYZER_WRAPPER = REPO_ROOT / "StaticCallAnalyzer" / "run.sh"
+# Docker mounts the target source at this path inside the analyzer container.
+ANALYZER_MOUNT = "/src"
 
 REPOS = ["abp", "aspnetcore", "efcore", "orleans", "roslyn", "runtime", "semantic-kernel"]
 
@@ -46,8 +48,45 @@ PINNED_SHAS = {
     "semantic-kernel": "0c898161a355b0a845aea48de79cb43e2e9435d2",
 }
 
-RUN_ID = "25215078473"
-REPORT_DATE = "2026-05-01"
+# CI run IDs that produced the artifacts in baseline_artifacts/. Multiple runs supported
+# (e.g. when one run had to be re-attempted for a subset of repos).
+RUN_IDS = ["25468601840", "25472048463"]
+REPORT_DATE = "2026-05-07"
+
+
+def _git(*args: str) -> str:
+    try:
+        return subprocess.check_output(["git", *args], cwd=REPO_ROOT, text=True).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+
+
+def github_repo_slug() -> str:
+    """Return 'owner/repo' from `git remote get-url origin`. Falls back to a sensible default."""
+    url = _git("remote", "get-url", "origin")
+    if not url:
+        return "jasperstone/mocking-static-methods"
+    # Strip .git suffix
+    if url.endswith(".git"):
+        url = url[:-4]
+    # git@github.com:owner/repo
+    if url.startswith("git@"):
+        _, _, path = url.partition(":")
+        return path
+    # https://github.com/owner/repo
+    if "github.com/" in url:
+        return url.split("github.com/", 1)[1]
+    return url
+
+
+_REPO_SLUG_CACHE: str | None = None
+
+
+def repo_slug() -> str:
+    global _REPO_SLUG_CACHE
+    if _REPO_SLUG_CACHE is None:
+        _REPO_SLUG_CACHE = github_repo_slug()
+    return _REPO_SLUG_CACHE
 
 
 def _to_int(val: str | None) -> int:
@@ -114,11 +153,10 @@ def run_static_analyzer(repo: str) -> list[dict]:
     # Run from a clean tmp cwd because analyzer appends to ./analysis_results.json
     with tempfile.TemporaryDirectory() as tmp:
         proc = subprocess.run(
-            ["dotnet", str(ANALYZER_DLL), str(repo_path)],
+            ["bash", str(ANALYZER_WRAPPER), str(repo_path)],
             cwd=tmp,
             capture_output=True,
             text=True,
-            env={**os.environ, "DOTNET_NOLOGO": "1"},
         )
     if proc.returncode != 0:
         print(f"  ! analyzer failed for {repo}: {proc.stderr[:500]}", file=sys.stderr)
@@ -152,14 +190,19 @@ def aggregate_static(repo: str, rows: list[dict]) -> dict:
         key = (r.get("File", ""), r.get("Class", ""))
         by_class[key] += pc
 
-    # Per-class JSON for Phase 2
+    # Per-class JSON for Phase 2.
+    # Analyzer (run via Docker) emits paths under /src/<...>; strip that mount prefix.
+    # Also tolerate legacy host-path output for backwards compatibility.
     repo_path = CLONED_DIR / repo
-    repo_str = str(repo_path) + os.sep
+    host_prefix = str(repo_path) + os.sep
+    mount_prefix = ANALYZER_MOUNT + "/"
     per_class = []
     for (file, cls), count in sorted(by_class.items(), key=lambda x: -x[1]):
         rel = file
-        if file.startswith(repo_str):
-            rel = file[len(repo_str):]
+        if file.startswith(mount_prefix):
+            rel = file[len(mount_prefix):]
+        elif file.startswith(host_prefix):
+            rel = file[len(host_prefix):]
         per_class.append({
             "class_name": cls,        # simple name; FQN unavailable from current analyzer
             "class_fqn": None,        # Phase 2 prereq: extend analyzer to emit FQN
@@ -184,9 +227,12 @@ def fmt_pct(p: float) -> str:
 
 
 def main() -> int:
-    if not ANALYZER_DLL.exists():
-        print(f"Analyzer not built: {ANALYZER_DLL}", file=sys.stderr)
-        print("Run: dotnet build StaticCallAnalyzer/StaticCallAnalyzer.csproj -c Release", file=sys.stderr)
+    if not ANALYZER_WRAPPER.exists():
+        print(f"Analyzer wrapper not found: {ANALYZER_WRAPPER}", file=sys.stderr)
+        return 1
+    if shutil.which("docker") is None:
+        print("`docker` is required on PATH to run StaticCallAnalyzer.", file=sys.stderr)
+        print("Install Docker, or build & run the analyzer manually with .NET 8 SDK.", file=sys.stderr)
         return 1
 
     rows_for_csv = []
@@ -268,16 +314,31 @@ def main() -> int:
     print(f"\nWrote {csv_path}")
 
     # Markdown
+    slug = repo_slug()
+    head_sha = _git("rev-parse", "HEAD")
+    # Repos that produced empty/near-empty cobertura — drives the conditional headline + gap.
+    suspicious = [r["Repo"] for r in rows_for_md if r["Lines (total)"] < 100]
+
     md = []
     md.append("# Phase 1 Coverage Baseline")
     md.append("")
     md.append(f"**Date:** {REPORT_DATE}  ")
-    md.append(f"**CI run:** [{RUN_ID}](https://github.com/bradygaster/mocking-static-methods/actions/runs/{RUN_ID}) (workflow: `coverage-orchestrator.yml`, branch `jasper/squad`)  ")
-    md.append(f"**Branch HEAD at run:** `188cb4a95c2162c6db6fdafe6aa3f04f485104aa`")
+    if len(RUN_IDS) == 1:
+        rid = RUN_IDS[0]
+        md.append(f"**CI run:** [{rid}](https://github.com/{slug}/actions/runs/{rid}) (workflow: `coverage-orchestrator.yml`, branch `jasper/squad`)  ")
+    else:
+        links = ", ".join(f"[{rid}](https://github.com/{slug}/actions/runs/{rid})" for rid in RUN_IDS)
+        md.append(f"**CI runs:** {links} (workflow: `coverage-orchestrator.yml`, branch `jasper/squad`)  ")
+    if head_sha:
+        md.append(f"**Branch HEAD at report time:** `{head_sha}`")
     md.append("")
-    md.append("This is the pre-Phase 2 snapshot of test coverage and static-call surface area for the seven .NET OSS repos under study. Coverage data is cobertura XML produced by each repo's CI job (`actions/upload-artifact` → `coverage-xml-<repo>`). Static-call counts come from `StaticCallAnalyzer/` run locally against the pinned source tree of each repo.")
+    md.append("This is the pre-Phase 2 snapshot of test coverage and static-call surface area for the seven .NET OSS repos under study. Coverage data is cobertura XML produced by each repo's CI job (`actions/upload-artifact` → `coverage-xml-<repo>`). Static-call counts come from `StaticCallAnalyzer/` run via Docker against the pinned source tree of each repo.")
     md.append("")
-    md.append("> ⚠️ **Headline finding:** four of seven repos (`abp`, `aspnetcore`, `efcore`, `roslyn`) uploaded 178-byte stub cobertura files with `<packages />` empty — the CI jobs reported success, but no instrumented assemblies were exercised. Only `orleans`, `runtime`, and `semantic-kernel` produced usable coverage data this run. The static-call analysis below is sound for all seven; the line/branch columns must be re-baselined for the four stub repos before Phase 2 can compare \"before\" and \"after\" coverage there.")
+    if suspicious:
+        listed = ", ".join(f"`{r}`" for r in suspicious)
+        md.append(f"> ⚠️ **Headline finding:** {len(suspicious)} of {len(REPOS)} repos ({listed}) produced empty or near-empty cobertura coverage. Re-baseline these before drawing Phase 2 conclusions for them.")
+    else:
+        md.append("> ✅ **Headline:** all seven repos produced real coverage data this run.")
     md.append("")
     md.append("## Pinned target SHAs")
     md.append("")
@@ -332,23 +393,30 @@ def main() -> int:
     md.append("")
     md.append("## Phase 2 readiness — gaps to close")
     md.append("")
-    md.append("1. **StaticCallAnalyzer does NOT emit fully-qualified class names.** It records the simple `Identifier.Text` of the enclosing `ClassDeclarationSyntax` only. Phase 2 needs `Namespace.OuterClass.InnerClass` to join against cobertura's `<class name=\"...\">` entries. The `class_fqn` field in `static_call_classes.json` is currently `null` for every entry. **Action:** extend `StaticCallAnalyzer/Program.cs` to walk `NamespaceDeclarationSyntax` / `FileScopedNamespaceDeclarationSyntax` and parent `ClassDeclarationSyntax` ancestors when assembling the FQN. Owner: Watney.")
-    md.append("2. **Per-class coverage extraction not yet implemented.** Cobertura `<class>` entries hold `line-rate` / `branch-rate`. Phase 2 needs a step that, for each class in `static_call_classes.json`, looks up its coverage in the matching cobertura file and emits a joined record `{repo, class_fqn, file_path, line_rate, branch_rate, static_call_count}`. Owner: Beck (next session).")
-    md.append("3. **Four repos (`abp`, `aspnetcore`, `efcore`, `roslyn`) produced empty cobertura XML.** Each uploaded a 178-byte stub `<coverage line-rate=\"1\" ...><packages /></coverage>`. CI jobs reported success because tests passed and the report step had `continue-on-error: true`; the underlying issue is that no assemblies got instrumented. Likely causes by repo: (a) `abp`/`efcore`/`roslyn` use external `dotnet-coverage collect` — the wrapped `dotnet test` command may not be matching any test projects under the unit-only filter, or `dotnet-coverage` is writing to a different path than the one we upload; (b) `aspnetcore` uses `coverlet.collector` natively, but the test projects under `--all` likely don't reference the collector package — coverlet silently does nothing. **Action:** Vogel/Beck investigate per-repo before declaring any of these four a Phase 2 baseline. Until fixed, only `orleans` / `runtime` / `semantic-kernel` are usable Phase 2 starting points.")
-    md.append("4. **Multi-file repos (orleans, semantic-kernel, ...) sum-double-count code shared between test sessions.** For Phase 2 class-level joins this isn't a problem — we'll merge per-class entries by FQN and take the union of covered lines. But the totals shown above are upper bounds, not de-duplicated unions.")
-    md.append("5. **Analyzer pattern set is fixed at 5 patterns.** If Phase 2 wants broader coverage of static-method usage (e.g. `Path.Combine`, `Environment.*`, `Console.*`), `StaticCallConfig.Patterns` needs extending. This will inflate static-call counts and re-baseline values.")
+    gaps = []
+    gaps.append("**StaticCallAnalyzer does NOT emit fully-qualified class names.** It records the simple `Identifier.Text` of the enclosing `ClassDeclarationSyntax` only. Phase 2 needs `Namespace.OuterClass.InnerClass` to join against cobertura's `<class name=\"...\">` entries. The `class_fqn` field in `static_call_classes.json` is currently `null` for every entry. **Action:** extend `StaticCallAnalyzer/Program.cs` to walk `NamespaceDeclarationSyntax` / `FileScopedNamespaceDeclarationSyntax` and parent `ClassDeclarationSyntax` ancestors when assembling the FQN. Owner: Watney.")
+    gaps.append("**Per-class coverage extraction not yet implemented.** Cobertura `<class>` entries hold `line-rate` / `branch-rate`. Phase 2 needs a step that, for each class in `static_call_classes.json`, looks up its coverage in the matching cobertura file and emits a joined record `{repo, class_fqn, file_path, line_rate, branch_rate, static_call_count}`. Owner: Beck (next session).")
+    if suspicious:
+        listed = ", ".join(f"`{r}`" for r in suspicious)
+        gaps.append(f"**{len(suspicious)} repos ({listed}) produced empty cobertura XML.** Each uploaded a stub `<coverage line-rate=\"1\" ...><packages /></coverage>`. CI jobs reported success because tests passed and the report step had `continue-on-error: true`; the underlying issue is that no assemblies got instrumented. **Action:** Vogel/Beck investigate per-repo before declaring any of these a Phase 2 baseline.")
+    gaps.append("**Multi-file repos (orleans, semantic-kernel, ...) sum-double-count code shared between test sessions.** For Phase 2 class-level joins this isn't a problem — we'll merge per-class entries by FQN and take the union of covered lines. But the totals shown above are upper bounds, not de-duplicated unions.")
+    gaps.append("**Analyzer pattern set is fixed at 5 patterns.** If Phase 2 wants broader coverage of static-method usage (e.g. `Path.Combine`, `Environment.*`, `Console.*`), `StaticCallConfig.Patterns` needs extending. This will inflate static-call counts and re-baseline values.")
+    for i, g in enumerate(gaps, start=1):
+        md.append(f"{i}. {g}")
     md.append("")
     md.append("## Reproducing")
     md.append("")
+    md.append("Host requirements: `python3`, `gh` (GitHub CLI, authenticated), and `docker`. No local .NET install needed — the analyzer is containerized.")
+    md.append("")
     md.append("```bash")
-    md.append("# 1. Download artifacts from the run (90-day retention)")
+    md.append("# 1. Download artifacts from the run(s) (90-day retention)")
     md.append("mkdir -p baseline_artifacts")
     md.append("for repo in abp aspnetcore efcore orleans roslyn runtime semantic-kernel; do")
-    md.append(f"  gh run download {RUN_ID} -n coverage-xml-$repo -D baseline_artifacts/$repo/")
+    for rid in RUN_IDS:
+        md.append(f"  gh run download {rid} -n coverage-xml-$repo -D baseline_artifacts/$repo/ 2>/dev/null || true")
     md.append("done")
     md.append("")
-    md.append("# 2. Build the analyzer (one-time)")
-    md.append("dotnet build StaticCallAnalyzer/StaticCallAnalyzer.csproj -c Release")
+    md.append("# 2. (No analyzer build needed — Docker handles it on first run.)")
     md.append("")
     md.append("# 3. Aggregate")
     md.append("python3 aggregate_baseline.py")

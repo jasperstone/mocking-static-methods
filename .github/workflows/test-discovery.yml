@@ -322,9 +322,13 @@ jobs:
         run: |
           # The coverage workflow runs `dotnet test Orleans.slnx ...` against the
           # whole solution. For diagnostic granularity we enumerate per-csproj
-          # under test/ — same FILTER, same exclusion classes (BVT/SlowBVT/etc).
-          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky&Category!=BVT&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf'
-          mapfile -t PROJECTS < <(find test -name "*.Tests.csproj" 2>/dev/null \
+          # under test/ — same FILTER, same exclusion classes.
+          # 2026-05-07: BVT re-included (was excluding ~159 unit-test files).
+          # SlowBVT/LoadShedding/CorePerf remain excluded (slow/stress/perf).
+          # Glob also catches *.UnitTests.csproj (Orleans.Serialization.UnitTests,
+          # Orleans.Dashboard.UnitTests) which the .Tests.csproj pattern misses.
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf'
+          mapfile -t PROJECTS < <(find test \( -name "*.Tests.csproj" -o -name "*.UnitTests.csproj" \) 2>/dev/null \
             ! -path "*FunctionalTests*" \
             ! -path "*IntegrationTests*" \
             ! -path "*E2E*" \

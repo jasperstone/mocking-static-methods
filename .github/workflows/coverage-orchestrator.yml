@@ -2,6 +2,12 @@
 # Coverage Orchestrator — Containerized, SHA-pinned, reproducible coverage runs
 # =============================================================================
 #
+# ⚠️  ALWAYS DISPATCH WITH repo=all  ⚠️
+#   The 7 jobs run in parallel on independent runners. Single-repo dispatch
+#   saves ZERO wall-clock time and produces a partial artifact set, forcing
+#   a full re-run for aggregation. NEVER trigger a single repo to validate a
+#   fix — re-run the whole thing. Decision: .squad/decisions.md (2026-05-01).
+#
 # STRATEGY:
 #   - Each repo job runs INSIDE a pinned .NET SDK Docker container.
 #     This isolates the build environment per repo without modifying the
@@ -431,8 +437,14 @@ jobs:
         continue-on-error: true
         run: |
           dotnet restore Orleans.slnx
+          # Orleans-specific: BVT ("Build Verification Tests") is the broad
+          # correctness suite — predominantly unit-level (mocks, no silos).
+          # Re-included 2026-05-07 after test-discovery showed only 14/108
+          # tests in ServiceBus.Tests passed the filter (87% excluded), driving
+          # 6.07% coverage. SlowBVT/LoadShedding/CorePerf remain excluded:
+          # heterogeneous-silo upgrades, stress, and perf benchmarks respectively.
           dotnet test Orleans.slnx \
-            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky&Category!=BVT&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf" \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf" \
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 

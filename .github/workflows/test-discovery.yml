@@ -115,6 +115,15 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-abp-raw
+          path: target/framework/_discovery_raw/
+          retention-days: 7
+          if-no-files-found: warn
+
   # ===========================================================================
   # ASP.NET Core
   # ===========================================================================
@@ -196,6 +205,15 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-aspnetcore-raw
+          path: target/_discovery_raw/
+          retention-days: 7
+          if-no-files-found: warn
+
   # ===========================================================================
   # EF Core
   # ===========================================================================
@@ -265,6 +283,15 @@ jobs:
           name: test-discovery-efcore
           path: target/test-discovery-efcore.csv
           retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-efcore-raw
+          path: target/_discovery_raw/
+          retention-days: 7
           if-no-files-found: warn
 
   # ===========================================================================
@@ -349,6 +376,15 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-orleans-raw
+          path: target/_discovery_raw/
+          retention-days: 7
+          if-no-files-found: warn
+
   # ===========================================================================
   # Roslyn
   # ===========================================================================
@@ -423,6 +459,15 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-roslyn-raw
+          path: target/_discovery_raw/
+          retention-days: 7
+          if-no-files-found: warn
+
   # ===========================================================================
   # Semantic Kernel
   # ===========================================================================
@@ -485,6 +530,15 @@ jobs:
           name: test-discovery-semantic-kernel
           path: target/dotnet/test-discovery-semantic-kernel.csv
           retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-semantic-kernel-raw
+          path: target/dotnet/_discovery_raw/
+          retention-days: 7
           if-no-files-found: warn
 
   # ===========================================================================

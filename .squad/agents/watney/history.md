@@ -19,3 +19,5 @@ Build/infra agent. `.devcontainer/` exists. Each repo in `cloned_repos/` has its
 ## Recent Updates
 
 - 2026-04-30 — Workflow audit findings: 6/7 jobs set `dotnet-version: 9.0.x` while their `global.json` requires 10.0.x (aspnetcore 10.0.101, efcore 10.0.102, orleans 10.0.102, roslyn 10.0.100-rc.2, sk 10.0.100). Runtime job has NO `setup-dotnet` step. EF Core sources `activate.sh` but doesn't export `DOTNET_ROOT` to `$GITHUB_ENV` like aspnetcore does — fragile. coverlet.collector is never added to test projects (README requires it for aspnetcore's 137 test projects).
+
+- 2026-05-07 — Team update from Vogel: `StaticCallAnalyzer` is now containerized (multi-stage Dockerfile, SDK 8.0 → runtime 8.0). Use `StaticCallAnalyzer/run.sh` wrapper; `aggregate_baseline.py` invokes it automatically. Eliminates host .NET 8 SDK dependency for the analyzer toolchain. Commit 3d53670 on `jasper/squad`.

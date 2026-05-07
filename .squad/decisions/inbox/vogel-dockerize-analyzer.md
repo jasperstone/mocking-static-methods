@@ -1,5 +1,0 @@
-### 2026-05-07: Containerize StaticCallAnalyzer (eliminate host .NET 8 dependency)
-**By:** Vogel
-**What:** Containerized `StaticCallAnalyzer` via `StaticCallAnalyzer/Dockerfile` (multi-stage `mcr.microsoft.com/dotnet/sdk:8.0` → `runtime:8.0`) and a `StaticCallAnalyzer/run.sh` wrapper. `aggregate_baseline.py` now invokes the wrapper, with a `docker`-on-PATH precheck replacing the prior `ANALYZER_DLL.exists()` check. Mount convention: target source at `/src` (read-only); image tag `static-call-analyzer:local`.
-**Why:** Reproducibility. Any collaborator can now run `python3 aggregate_baseline.py` with only `python3 + gh + docker` on the host — no .NET 8 SDK install. Removed Jasper's blocker (snap-installed dotnet without the .NET 8 runtime).
-**Side fixes:** Conditional headline + Phase-2 gap (driven by `Lines (total) < 100`), CI URL derived from `git remote get-url origin` and cached, multi-run support via `RUN_IDS` list, `Branch HEAD` from `git rev-parse HEAD`. Reproducing section updated to drop the analyzer build step.

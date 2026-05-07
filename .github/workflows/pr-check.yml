@@ -1,0 +1,69 @@
+name: PR Check
+
+# Fast preflight gate for pull requests. Runs in <2 min.
+# Required status check on `main`. Catches typos and broken refactors
+# without waiting on the long Coverage Orchestrator runs.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-build:
+    name: Lint & Build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build StaticCallAnalyzer
+        run: |
+          dotnet restore StaticCallAnalyzer/StaticCallAnalyzer.csproj
+          dotnet build StaticCallAnalyzer/StaticCallAnalyzer.csproj \
+            --no-restore -c Release
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Python syntax check
+        run: |
+          # Compile every committed .py file. Catches syntax errors only;
+          # does not import or execute.
+          fail=0
+          while IFS= read -r f; do
+            python3 -m py_compile "$f" || fail=1
+          done < <(git ls-files '*.py')
+          exit $fail
+
+      - name: Install actionlint
+        run: |
+          bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash) 1.7.7
+          mv actionlint /usr/local/bin/
+
+      - name: Run actionlint
+        run: actionlint -color
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: |
+          # Lint committed shell scripts. Errors only — warnings allowed.
+          fail=0
+          while IFS= read -r f; do
+            shellcheck -S error "$f" || fail=1
+          done < <(git ls-files '*.sh')
+          exit $fail

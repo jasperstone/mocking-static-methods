@@ -114,3 +114,6 @@ is the only repo still missing — it uses `build.sh -subset libs+libs.tests
 Branch: `jasper/squad`. Commit: "tooling: extract per-project test counts
 from coverage logs". Decision file:
 `.squad/decisions/inbox/beck-test-counts-from-logs.md`.
+
+### 2026-05-07 — Test counts refreshed against run 25495265941 (post-BVT-fix)
+Re-ran `tools/test_counts/from_coverage_logs.py 25495265941` after the all-green Orleans BVT run. Headline change: **Orleans 28 / 1,692 → 36 / 10,951** (+8 projects, +9,259 tests) — BVT inclusion landed. Side notes: abp slipped 74 / 1,358 → 73 / 1,346 (one project dropped from logs, likely a flaky-skip change); aspnetcore / efcore / roslyn / semantic-kernel unchanged. New authoritative source = single run 25495265941. Commit 349981e on jasper/squad.

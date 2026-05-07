@@ -428,3 +428,10 @@ FodyWeavers.xsd
 # Squad: SubSquad activation file (local to this machine)
 .squad-workstream
 baseline_artifacts/
+
+# Coverage / test data — regenerable from CI run IDs cited in markdown reports
+baseline_coverage.csv
+test_counts.csv
+test_metrics.csv
+test_discovery_summary.csv
+discovery_artifacts/

@@ -189,9 +189,11 @@ jobs:
           node --version
           npm --version
 
-      - uses: ./.github/actions/install-dotnet-coverage
-        with:
-          version: ${{ env.DOTNET_COVERAGE_VERSION }}
+      - name: Install coverage tools (dotnet-coverage + coverlet.console)
+        shell: bash
+        run: |
+          dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+          dotnet tool install -g coverlet.console --version 6.0.2
 
       - name: Build ASP.NET Core (no tests, no Java)
         working-directory: target
@@ -204,15 +206,15 @@ jobs:
         shell: bash
         working-directory: target
         continue-on-error: true
-        # Run 25455447205: per-csproj loop ran 100+ projects, all tests passed,
-        # zero `Attachments:` produced. ASP's test project asset paths don't
-        # ship the inline "Code Coverage" data collector adapter (unlike ABP/
-        # EF Core/Roslyn). Switch to external instrumentation: wrap each
-        # per-csproj `dotnet test` with `dotnet-coverage collect`, which uses
-        # dotnet-coverage's own bundled collector — no dependency on what
-        # packages each test project happens to reference. Per-csproj sequential
-        # testhosts are a much simpler attach scenario than slnx-wide concurrent
-        # testhosts (which is what failed for us before with collect).
+        # ASP.NET Core test projects don't reference Microsoft.CodeCoverage or
+        # coverlet.collector, so neither --collect "Code Coverage" (inline VSTest
+        # adapter) nor `dotnet-coverage collect` wrapper (CLR profiler attach)
+        # produces real cobertura — they silently emit 178-byte empty stubs.
+        #
+        # Use coverlet.console: a standalone global tool that performs managed
+        # instrumentation via mono.cecil. Independent of test-project references.
+        # Per-csproj sequential testhosts; each instrumented run drops a cobertura
+        # under TestResults/, then dotnet-coverage merges them.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
@@ -237,11 +239,27 @@ jobs:
             base=$(basename "$proj" .csproj)
             out="TestResults/${i}_${base}.cobertura.xml"
             echo "::group::[$i/${#PROJECTS[@]}] $base"
-            dotnet-coverage collect \
+            # coverlet wraps the test invocation and instruments the test assembly.
+            # We need to pass the test assembly path (built DLL), not the csproj.
+            # ASP.NET Core's build outputs land under artifacts/bin/<ProjectName>/Debug/net10.0/<AssemblyName>.dll.
+            # Derive AssemblyName from project name (typically matches basename).
+            asm_dir="artifacts/bin/${base}/Debug/net10.0"
+            asm="${asm_dir}/${base}.dll"
+            if [[ ! -f "$asm" ]]; then
+              # Some projects' AssemblyName differs from csproj name. Find the test DLL.
+              asm=$(find "$asm_dir" -maxdepth 1 \( -name "*.Tests.dll" -o -name "*.Test.dll" \) 2>/dev/null | head -1)
+            fi
+            if [[ -z "$asm" || ! -f "$asm" ]]; then
+              echo "::warning::No built test DLL for $base — skipping"
+              echo "::endgroup::"
+              continue
+            fi
+            coverlet "$asm" \
+              --target "dotnet" \
+              --targetargs "test \"$proj\" --no-build --filter \"$FILTER\"" \
+              --format cobertura \
               --output "$out" \
-              --output-format cobertura \
-              --session-id "asp-$i-$base" \
-              -- dotnet test "$proj" --no-build --filter "$FILTER" \
+              --include-test-assembly \
               || echo "::warning::Tests in $base failed or runner pressure — continuing"
             echo "::endgroup::"
           done
@@ -464,20 +482,20 @@ jobs:
         with:
           version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
-      - name: Restore and build Roslyn (slnx, no tests)
+      - name: Restore and build Roslyn (sln, no tests)
         shell: bash
         working-directory: target
-        # `dotnet test Roslyn.slnx` fails in the rc.2 SDK with MSB1009 — the
-        # test command does not accept slnx. `dotnet build` and `dotnet restore`
-        # DO accept slnx in this SDK, so we build the slnx here and then iterate
-        # csprojs with --no-build for the test step (same shape as EF Core).
+        # Roslyn ships Roslyn.sln (NOT slnx). The rc.2 SDK pinned by Roslyn's
+        # global.json rejects `dotnet test` against any solution file (slnx
+        # OR sln) with MSB1009 in this SHA, so we build the sln here and then
+        # iterate csprojs with --no-build for the test step (same shape as EF Core).
         # eng/build.sh is too heavy for our purposes; plain `dotnet build` is
         # sufficient because we only need the test asset trees populated.
         run: |
-          dotnet restore Roslyn.slnx
-          dotnet build Roslyn.slnx --no-restore -c Debug
+          dotnet restore Roslyn.sln
+          dotnet build Roslyn.sln --no-restore -c Debug
 
-      - name: Run tests with coverage (per-csproj, slnx-incompatible workaround)
+      - name: Run tests with coverage (per-csproj, sln-incompatible workaround)
         shell: bash
         working-directory: target
         continue-on-error: true

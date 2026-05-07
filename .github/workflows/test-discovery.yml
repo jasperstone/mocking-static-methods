@@ -1,0 +1,503 @@
+# =============================================================================
+# Test Discovery — diagnostic counter for `dotnet test --filter` exclusions
+# =============================================================================
+#
+# ⚠️  ALWAYS DISPATCH WITH repo=all  ⚠️
+#   Same standing directive as coverage-orchestrator.yml: the per-repo jobs
+#   run in parallel, single-repo dispatch saves zero wall-clock time and
+#   yields a partial artifact set. Re-run the whole thing.
+#
+# PURPOSE:
+#   For each repo, count how many tests would actually be picked up by the
+#   CI FILTER vs the unfiltered universe. We don't execute tests — only
+#   `dotnet test --no-build --list-tests`, which loads the test assembly
+#   and enumerates discovered tests in 1-3s per project.
+#
+#   This is a DIAGNOSTIC for low-coverage repos (orleans 6%, runtime 10%,
+#   semantic-kernel 12%, efcore 27%) — is the FILTER too aggressive, or
+#   are the included tests genuinely not exercising production code?
+#
+# OUTPUT (per repo): test-discovery-<repo>.csv with columns
+#   repo,project,tests_universe,tests_in_filter,tests_excluded,build_status
+#
+# STRATEGY:
+#   - Same SDK container, same SHA pins, same composite actions, same
+#     build phases as coverage-orchestrator.yml. We diverge only at the
+#     test step: replace `dotnet test ... --collect ...` with two
+#     `dotnet test --no-build --list-tests` invocations per project
+#     (with FILTER and without), counted with awk.
+#   - Runtime is intentionally skipped: it uses `build.sh -subset libs+libs.tests
+#     -test` rather than enumerable per-csproj invocations, so list-tests
+#     against it would require reverse-engineering the subset machinery.
+#     Decision: focus diagnostic on the 6 repos where it directly answers
+#     the filter-aggressiveness question.
+# =============================================================================
+
+name: Test Discovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Target repo (or 'all' for all 6)"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - abp
+          - aspnetcore
+          - efcore
+          - orleans
+          - roslyn
+          - semantic-kernel
+
+permissions:
+  contents: read
+
+env:
+  SDK_IMAGE: "mcr.microsoft.com/dotnet/sdk:10.0-noble"
+
+jobs:
+
+  # ===========================================================================
+  # ABP
+  # ===========================================================================
+  abp:
+    name: "Discovery: ABP"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 180
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'abp'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone ABP at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/abpframework/abp.git target
+          cd target
+          git fetch --depth 1 origin ea4bbb8b517869a9fb735ea5bc05c819c209d0b5
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: abp
+          sha-prefix: ea4bbb8b
+
+      - name: Build ABP framework
+        working-directory: target/framework
+        run: |
+          dotnet restore
+          dotnet build --no-restore
+
+      - name: List tests per project (filter vs universe)
+        shell: bash
+        working-directory: target/framework
+        continue-on-error: true
+        run: |
+          FILTER='FullyQualifiedName!~SkiaSharp&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          mapfile -t PROJECTS < <(find test -name "*.Tests.csproj" 2>/dev/null | sort -u)
+          # ABP framework lives at target/framework but the workflow loop uses framework/test;
+          # at this working-directory `test` is `target/framework/test`.
+          source "$GITHUB_WORKSPACE/.github/scripts/list_tests.sh"
+          run_discovery abp "$FILTER" "${PROJECTS[@]}" > test-discovery-abp.csv
+
+      - name: Upload discovery CSV
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-abp
+          path: target/framework/test-discovery-abp.csv
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # ASP.NET Core
+  # ===========================================================================
+  aspnetcore:
+    name: "Discovery: ASP.NET Core"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 240
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'aspnetcore'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone ASP.NET Core at pinned SHA (with submodules)
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/aspnetcore.git target
+          cd target
+          git fetch --depth 1 origin ecb199c29cbefb6fcb6aa789436de36e44427a78
+          git checkout FETCH_HEAD
+          git submodule update --init --recursive --depth 1
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: aspnetcore
+          sha-prefix: ecb199c2
+
+      - name: Restore SDK & dependencies (./restore.sh + activate.sh)
+        shell: bash
+        working-directory: target
+        run: |
+          chmod +x restore.sh activate.sh eng/build.sh
+          ./restore.sh
+          source ./activate.sh
+          echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
+          echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
+
+      - name: Install Node.js (required for Blazor/WebView JS assets)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends curl ca-certificates gnupg
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y --no-install-recommends nodejs
+
+      - name: Build ASP.NET Core (no tests, no Java)
+        working-directory: target
+        run: ./eng/build.sh --all --no-build-java --no-test
+
+      - name: List tests per project (filter vs universe)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          mapfile -t PROJECTS < <(find src -type f -name "*.Tests.csproj" \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            ! -path "*E2ETest*" \
+            ! -path "*E2E.Tests*" \
+            ! -path "*EndToEnd*" \
+            ! -path "*Stress*" \
+            ! -path "*Performance*" \
+            ! -path "*Benchmarks*" \
+            ! -path "*FunctionalTest*" \
+            ! -path "*HelixTests*" \
+            ! -path "*NonHelixTests*" \
+            | sort -u)
+          source "$GITHUB_WORKSPACE/.github/scripts/list_tests.sh"
+          run_discovery aspnetcore "$FILTER" "${PROJECTS[@]}" > test-discovery-aspnetcore.csv
+
+      - name: Upload discovery CSV
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-aspnetcore
+          path: target/test-discovery-aspnetcore.csv
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # EF Core
+  # ===========================================================================
+  efcore:
+    name: "Discovery: EF Core"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 180
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'efcore'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone EF Core at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/efcore.git target
+          cd target
+          git fetch --depth 1 origin 45e3af0273b71919189367bc152a335b69f443c6
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: efcore
+          sha-prefix: 45e3af02
+
+      - name: Restore SDK & dependencies (./restore.sh + activate.sh)
+        shell: bash
+        working-directory: target
+        run: |
+          chmod +x restore.sh activate.sh
+          ./restore.sh
+          source ./activate.sh
+          echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
+          echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
+
+      - name: Build EF Core
+        shell: bash
+        working-directory: target
+        run: dotnet build EFCore.sln -c Debug --no-restore
+
+      - name: List tests per project (filter vs universe)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          mapfile -t PROJECTS < <(find test -type f \( -name "*.Tests.csproj" -o -name "*.Tests.fsproj" -o -name "*.Tests.vbproj" \) \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            ! -path "*E2E*" \
+            ! -path "*EndToEnd*" \
+            ! -path "*Stress*" \
+            ! -path "*Performance*" \
+            ! -path "*Benchmarks*" \
+            ! -path "*Specification.Tests*" \
+            | sort -u)
+          source "$GITHUB_WORKSPACE/.github/scripts/list_tests.sh"
+          run_discovery efcore "$FILTER" "${PROJECTS[@]}" > test-discovery-efcore.csv
+
+      - name: Upload discovery CSV
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-efcore
+          path: target/test-discovery-efcore.csv
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Orleans
+  # ===========================================================================
+  orleans:
+    name: "Discovery: Orleans"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 180
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'orleans'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Orleans at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/orleans.git target
+          cd target
+          git fetch --depth 1 origin 8024faf860549cb960b4b573c1571b379e283daa
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: orleans
+          sha-prefix: 8024faf8
+
+      - name: Restore and build Orleans
+        working-directory: target
+        run: |
+          dotnet restore Orleans.slnx
+          dotnet build Orleans.slnx --no-restore
+
+      - name: List tests per project (filter vs universe)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          # The coverage workflow runs `dotnet test Orleans.slnx ...` against the
+          # whole solution. For diagnostic granularity we enumerate per-csproj
+          # under test/ — same FILTER, same exclusion classes (BVT/SlowBVT/etc).
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky&Category!=BVT&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf'
+          mapfile -t PROJECTS < <(find test -name "*.Tests.csproj" 2>/dev/null \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            ! -path "*E2E*" \
+            ! -path "*EndToEnd*" \
+            ! -path "*Stress*" \
+            ! -path "*Performance*" \
+            ! -path "*Benchmarks*" \
+            | sort -u)
+          source "$GITHUB_WORKSPACE/.github/scripts/list_tests.sh"
+          run_discovery orleans "$FILTER" "${PROJECTS[@]}" > test-discovery-orleans.csv
+
+      - name: Upload discovery CSV
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-orleans
+          path: target/test-discovery-orleans.csv
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Roslyn
+  # ===========================================================================
+  roslyn:
+    name: "Discovery: Roslyn"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 240
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'roslyn'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Roslyn at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/roslyn.git target
+          cd target
+          git fetch --depth 1 origin 02d301627ed5016a4c18acd1a35e5bbc20ff03f0
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: roslyn
+          sha-prefix: 02d30162
+
+      - name: Install pinned .NET SDK from global.json
+        shell: bash
+        working-directory: target
+        run: |
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --jsonfile global.json --install-dir "$GITHUB_WORKSPACE/.dotnet"
+          echo "DOTNET_ROOT=$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_PATH"
+
+      - name: Restore and build Roslyn (sln, no tests)
+        shell: bash
+        working-directory: target
+        run: |
+          dotnet restore Roslyn.sln
+          dotnet build Roslyn.sln --no-restore -c Debug
+
+      - name: List tests per project (filter vs universe)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          FILTER="FullyQualifiedName!~LanguageServer&FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&TargetFrameworkIdentifier!=.NETFramework&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky"
+          mapfile -t PROJECTS < <(find src -type f \( -name "*.UnitTests.csproj" -o -name "*.Tests.csproj" \) \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            ! -path "*E2E*" \
+            ! -path "*EndToEnd*" \
+            ! -path "*Stress*" \
+            ! -path "*Performance*" \
+            ! -path "*Benchmarks*" \
+            ! -path "*Specification.Tests*" \
+            ! -path "*LanguageServer*" \
+            | sort -u)
+          source "$GITHUB_WORKSPACE/.github/scripts/list_tests.sh"
+          run_discovery roslyn "$FILTER" "${PROJECTS[@]}" > test-discovery-roslyn.csv
+
+      - name: Upload discovery CSV
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-roslyn
+          path: target/test-discovery-roslyn.csv
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Semantic Kernel
+  # ===========================================================================
+  semantic-kernel:
+    name: "Discovery: Semantic Kernel"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 180
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'semantic-kernel'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Semantic Kernel at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/semantic-kernel.git target
+          cd target
+          git fetch --depth 1 origin 0c898161a355b0a845aea48de79cb43e2e9435d2
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: semantic-kernel
+          sha-prefix: 0c898161
+
+      - name: Build Semantic Kernel
+        working-directory: target/dotnet
+        run: dotnet build SK-dotnet.slnx
+
+      - name: List tests per project (filter vs universe)
+        shell: bash
+        working-directory: target/dotnet
+        continue-on-error: true
+        run: |
+          # Coverage workflow runs `dotnet test SK-dotnet.slnx ...` against the
+          # whole solution. For diagnostic granularity we enumerate per-csproj
+          # under test/ matching UnitTests/Tests, with the same FILTER incl.
+          # ConformanceTests exclusion.
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&FullyQualifiedName!~ConformanceTests&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          mapfile -t PROJECTS < <(find . -type f \( -name "*.UnitTests.csproj" -o -name "*.Tests.csproj" \) \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            ! -path "*E2E*" \
+            ! -path "*EndToEnd*" \
+            ! -path "*Stress*" \
+            ! -path "*Performance*" \
+            ! -path "*Benchmarks*" \
+            ! -path "*ConformanceTests*" \
+            | sort -u)
+          source "$GITHUB_WORKSPACE/.github/scripts/list_tests.sh"
+          run_discovery semantic-kernel "$FILTER" "${PROJECTS[@]}" > test-discovery-semantic-kernel.csv
+
+      - name: Upload discovery CSV
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-semantic-kernel
+          path: target/dotnet/test-discovery-semantic-kernel.csv
+          retention-days: 30
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # Summary
+  # ===========================================================================
+  summary:
+    name: "Discovery Summary"
+    runs-on: ubuntu-24.04
+    if: always()
+    needs:
+      - abp
+      - aspnetcore
+      - efcore
+      - orleans
+      - roslyn
+      - semantic-kernel
+    steps:
+      - name: Print summary
+        run: |
+          {
+            echo "## Test Discovery Results"
+            echo ""
+            echo "| Repository | Status |"
+            echo "|---|---|"
+            echo "| ABP Framework      | ${{ needs.abp.result }} |"
+            echo "| ASP.NET Core       | ${{ needs.aspnetcore.result }} |"
+            echo "| EF Core            | ${{ needs.efcore.result }} |"
+            echo "| Orleans            | ${{ needs.orleans.result }} |"
+            echo "| Roslyn             | ${{ needs.roslyn.result }} |"
+            echo "| Semantic Kernel    | ${{ needs.semantic-kernel.result }} |"
+            echo ""
+            echo "Artifacts: test-discovery-<repo> (one CSV each)."
+            echo "Aggregate locally: gh run download <run-id> -p 'test-discovery-*' && python3 tools/test_discovery/aggregate.py"
+          } >> "$GITHUB_STEP_SUMMARY"

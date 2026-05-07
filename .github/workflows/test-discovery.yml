@@ -295,6 +295,20 @@ jobs:
           repo-name: orleans
           sha-prefix: 8024faf8
 
+      - name: Install Node.js (required by Orleans.Dashboard.Frontend.targets)
+        # `dotnet build Orleans.slnx` triggers Orleans.Dashboard's Frontend
+        # targets which call `node --version`. The coverage workflow's
+        # `dotnet test Orleans.slnx` somehow tolerates the failure (Dashboard
+        # is not a test project), but `dotnet build` propagates it as MSB3073
+        # and aborts. Install node 22 so the build completes cleanly.
+        shell: bash
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends curl ca-certificates
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y --no-install-recommends nodejs
+          node --version
+
       - name: Restore and build Orleans
         working-directory: target
         run: |

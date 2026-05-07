@@ -77,6 +77,9 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'abp'
     steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
       - uses: ./.github/actions/setup-workspace
 
       - name: Clone ABP at pinned SHA
@@ -148,6 +151,9 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'aspnetcore'
     steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
       - uses: ./.github/actions/setup-workspace
 
       - name: Clone ASP.NET Core at pinned SHA (with submodules)
@@ -294,6 +300,9 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'efcore'
     steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
       - uses: ./.github/actions/setup-workspace
 
       - name: Clone EF Core at pinned SHA
@@ -396,6 +405,9 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'orleans'
     steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
       - uses: ./.github/actions/setup-workspace
 
       - name: Clone Orleans at pinned SHA
@@ -448,6 +460,9 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'roslyn'
     steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
       - uses: ./.github/actions/setup-workspace
 
       - name: Clone Roslyn at pinned SHA
@@ -561,6 +576,9 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'runtime'
     steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
       - name: Mark workspace as a safe git directory
         # Inlined (not via setup-workspace) so apt-get can run before the
         # disk-usage probe — installing native deps grows /var measurably.
@@ -666,6 +684,9 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'semantic-kernel'
     steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
       - uses: ./.github/actions/setup-workspace
 
       - name: Clone Semantic Kernel at pinned SHA

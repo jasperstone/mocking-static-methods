@@ -1,8 +1,8 @@
 # Phase 1 Coverage Baseline
 
 **Date:** 2026-05-07  
-**CI runs:** [25468601840](https://github.com/jasperstone/mocking-static-methods/actions/runs/25468601840), [25472048463](https://github.com/jasperstone/mocking-static-methods/actions/runs/25472048463) (workflow: `coverage-orchestrator.yml`, branch `jasper/squad`)  
-**Branch HEAD at report time:** `7b45d1f611fe7d08d02e1bd335963335d10160a7`
+**CI run:** [25495265941](https://github.com/jasperstone/mocking-static-methods/actions/runs/25495265941) (workflow: `coverage-orchestrator.yml`, branch `jasper/squad`)  
+**Branch HEAD at report time:** `349981e5d36ed89f5e8654b3cd9f4d807502fccb`
 
 This is the pre-Phase 2 snapshot of test coverage and static-call surface area for the seven .NET OSS repos under study. Coverage data is cobertura XML produced by each repo's CI job (`actions/upload-artifact` → `coverage-xml-<repo>`). Static-call counts come from `StaticCallAnalyzer/` run via Docker against the pinned source tree of each repo.
 
@@ -24,14 +24,14 @@ This is the pre-Phase 2 snapshot of test coverage and static-call surface area f
 
 | Repo | Lines (total) | Lines (covered) | Line coverage % | Branches (total) | Branches (covered) | Branch coverage % | Static call sites | Classes with static calls |
 |------|---:|---:|---:|---:|---:|---:|---:|---:|
-| abp | 129,052 | 54,097 | 41.92% | 42,237 | 7,379 | 17.47% | 126 | 61 |
-| aspnetcore | 574,127 | 348,084 | 60.63% | 104,425 | 43,322 | 41.49% | 155 | 80 |
-| efcore | 978,082 | 264,657 | 27.06% | 158,116 | 47,513 | 30.05% | 39 | 16 |
-| orleans | 4,429,586 | 268,810 | 6.07% | 1,154,700 | 62,523 | 5.41% | 91 | 50 |
-| roslyn | 4,494,731 | 3,425,509 | 76.21% | 641,993 | 198,158 | 30.87% | 117 | 68 |
-| runtime | 230,646 | 23,491 | 10.18% | 92,141 | 11,494 | 12.47% | 613 | 245 |
-| semantic-kernel | 611,211 | 74,074 | 12.12% | 218,717 | 21,386 | 9.78% | 38 | 25 |
-| **TOTAL** | 11,447,435 | 4,458,722 | 38.95% | 2,412,329 | 391,775 | 16.24% | 1,179 | 545 |
+| abp | 129,052 | 54,097 | 41.92% | 42,413 | 7,552 | 17.81% | 126 | 61 |
+| aspnetcore | 573,395 | 347,645 | 60.63% | 104,090 | 43,107 | 41.41% | 155 | 80 |
+| efcore | 978,082 | 264,657 | 27.06% | 158,781 | 48,155 | 30.33% | 39 | 16 |
+| orleans | 4,429,586 | 442,015 | 9.98% | 1,154,700 | 102,110 | 8.84% | 91 | 50 |
+| roslyn | 4,494,731 | 3,425,520 | 76.21% | 638,821 | 194,961 | 30.52% | 117 | 68 |
+| runtime | 230,646 | 23,489 | 10.18% | 92,141 | 11,496 | 12.48% | 613 | 245 |
+| semantic-kernel | 611,211 | 74,074 | 12.12% | 218,717 | 21,385 | 9.78% | 38 | 25 |
+| **TOTAL** | 11,446,703 | 4,631,497 | 40.46% | 2,409,663 | 428,766 | 17.79% | 1,179 | 545 |
 
 Percentages on the TOTAL row are weighted by line/branch volume across all 7 repos.
 
@@ -62,8 +62,7 @@ Host requirements: `python3`, `gh` (GitHub CLI, authenticated), and `docker`. No
 # 1. Download artifacts from the run(s) (90-day retention)
 mkdir -p baseline_artifacts
 for repo in abp aspnetcore efcore orleans roslyn runtime semantic-kernel; do
-  gh run download 25468601840 -n coverage-xml-$repo -D baseline_artifacts/$repo/ 2>/dev/null || true
-  gh run download 25472048463 -n coverage-xml-$repo -D baseline_artifacts/$repo/ 2>/dev/null || true
+  gh run download 25495265941 -n coverage-xml-$repo -D baseline_artifacts/$repo/ 2>/dev/null || true
 done
 
 # 2. (No analyzer build needed — Docker handles it on first run.)

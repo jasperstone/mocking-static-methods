@@ -50,7 +50,7 @@ PINNED_SHAS = {
 
 # CI run IDs that produced the artifacts in baseline_artifacts/. Multiple runs supported
 # (e.g. when one run had to be re-attempted for a subset of repos).
-RUN_IDS = ["25468601840", "25472048463"]
+RUN_IDS = ["25495265941"]
 REPORT_DATE = "2026-05-07"
 
 

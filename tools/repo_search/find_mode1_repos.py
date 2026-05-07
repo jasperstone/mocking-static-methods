@@ -72,7 +72,7 @@ PATTERNS: list[tuple[str, str, str]] = [
 ]
 
 API_BASE = "https://api.github.com"
-SLEEP_BETWEEN_QUERIES = 2.5  # seconds — stay well under 30 req/min
+SLEEP_BETWEEN_QUERIES = 4.0  # seconds — 15 req/min, avoids cascading [rate-limit] backoffs (5s/10s/20s) we saw at 2.5s
 MAX_BACKOFF = 90  # seconds
 
 

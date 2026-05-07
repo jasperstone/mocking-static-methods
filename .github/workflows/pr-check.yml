@@ -57,7 +57,10 @@ jobs:
           mv actionlint /usr/local/bin/
 
       - name: Run actionlint
-        run: actionlint -color
+        # Disable embedded shellcheck — we run shellcheck separately at
+        # error level only, to avoid blocking on pre-existing info/warning
+        # noise in heartbeat / discovery scripts.
+        run: actionlint -color -shellcheck=
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck

@@ -69,3 +69,48 @@ Files: `.github/workflows/coverage-orchestrator.yml` (orleans test step) + `.git
 - Find globs validated against `cloned_repos/`: abp 78, aspnetcore 117, efcore 20, orleans 13, roslyn 54, semantic-kernel 37 projects.
 
 **Pushed** to `jasper/squad` as commit "tooling: add test-discovery workflow + aggregator". Not triggered yet — Jasper will dispatch with `repo=all`.
+
+### 2026-05-07 — Built test-counts-from-coverage-logs parser
+
+Bypassed the broken `--list-tests` path for xunit.v3 repos by reading the
+authoritative per-project `dotnet test` summary lines that already exist in
+Coverage Orchestrator job logs.
+
+**What I built**
+- `tools/test_counts/from_coverage_logs.py` — gh-CLI based; downloads each
+  "Coverage: <repo>" job log, regex-matches `Passed!|Failed!  - Failed: N,
+  Passed: N, Skipped: N, Total: N, Duration: ... - Foo.dll (framework)`,
+  emits per-(repo,project,framework) row. Multi-run merge: most recent
+  source_run_id wins per key. Multi-occurrence in same log: last wins
+  (handles retries). Default behavior with no args: picks most recent
+  successful run via `gh run list ... --status completed --limit 50` and
+  filters for conclusion=success.
+- `tools/test_counts/README.md`.
+- Outputs: `test_counts.csv` + `TEST_COUNTS.md` at repo root.
+
+**Verified results (runs 25468601840 + 25472048463)**
+
+| repo            | projects | total |
+|-----------------|---------:|------:|
+| abp             | 74       | 1,358 |
+| aspnetcore      | 96       | 31,603 |
+| efcore          | 14       | 13,724 (matches hand-count exactly) |
+| orleans         | 28       | 1,692 |
+| roslyn          | 33       | 155,993 |
+| semantic-kernel | 44       | 6,263 |
+
+EF Core / Roslyn / ABP now real (was 0 / 3 / 46 from `--list-tests`). Runtime
+is the only repo still missing — it uses `build.sh -subset libs+libs.tests
+-test` which doesn't emit the parseable per-project line.
+
+**Notes**
+- Coverlet-wrapped runs (aspnetcore, orleans, SK) DO emit the summary line
+  fine. The original task description's worry that they'd be unparseable was
+  wrong — only runtime is genuinely opaque.
+- Job-name → repo-slug map needed `.NET Runtime` → `runtime` (initial run
+  produced `net-runtime` slug from naive lowercase strip).
+- Logs cached at `/tmp/cov_<job_id>.log` so re-runs are free.
+
+Branch: `jasper/squad`. Commit: "tooling: extract per-project test counts
+from coverage logs". Decision file:
+`.squad/decisions/inbox/beck-test-counts-from-logs.md`.

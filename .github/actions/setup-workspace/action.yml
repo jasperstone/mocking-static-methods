@@ -1,0 +1,12 @@
+name: Setup workspace
+description: Mark workspace as a safe git directory and print starting disk usage.
+runs:
+  using: composite
+  steps:
+    - name: Mark workspace as a safe git directory
+      shell: bash
+      run: git config --global --add safe.directory '*'
+
+    - name: Disk usage (start)
+      shell: bash
+      run: df -h

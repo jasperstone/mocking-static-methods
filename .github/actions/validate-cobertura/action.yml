@@ -1,0 +1,49 @@
+name: Validate cobertura
+description: Fail the job if no cobertura was produced or the largest one is too small / has no <class> elements.
+inputs:
+  working-directory:
+    description: Directory containing TestResults/ (e.g. target or target/framework).
+    required: true
+  min-bytes:
+    description: Minimum acceptable size of the largest cobertura file.
+    required: false
+    default: "5120"
+  min-classes:
+    description: Minimum acceptable <class> element count.
+    required: false
+    default: "1"
+runs:
+  using: composite
+  steps:
+    - name: Validate cobertura has real data
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        shopt -s nullglob globstar
+        FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
+        BEST=""
+        BEST_SIZE=0
+        for f in "${FILES[@]}"; do
+          [[ -f "$f" ]] || continue
+          SIZE=$(stat -c%s "$f")
+          if (( SIZE > BEST_SIZE )); then
+            BEST="$f"
+            BEST_SIZE=$SIZE
+          fi
+        done
+        echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
+        if [[ -z "$BEST" ]]; then
+          echo "::error::No cobertura file produced. Coverage collection failed silently."
+          exit 1
+        fi
+        if (( BEST_SIZE < ${{ inputs.min-bytes }} )); then
+          echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
+          exit 1
+        fi
+        CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
+        echo "Class count: $CLASSES"
+        if (( CLASSES < ${{ inputs.min-classes }} )); then
+          echo "::error::Cobertura has zero <class> elements. No real coverage data."
+          exit 1
+        fi
+        echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"

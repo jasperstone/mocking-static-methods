@@ -16,6 +16,10 @@
 #   - Both HTML reports and raw cobertura XML are uploaded as artifacts.
 #   - continue-on-error on test steps so reportgenerator still runs on failures.
 #
+# DUPLICATED STEP BODIES are factored into composite actions under
+# .github/actions/. Each job is now its UNIQUE clone/restore/build/test
+# sequence sandwiched between shared setup + shared report-and-upload calls.
+#
 # ACTION PINS (annotated with the version they came from):
 #   actions/checkout         11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 #   actions/upload-artifact  b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882  # v4.4.3
@@ -73,11 +77,7 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'abp'
     steps:
-      - name: Mark workspace as a safe git directory
-        run: git config --global --add safe.directory '*'
-
-      - name: Disk usage (start)
-        run: df -h
+      - uses: ./.github/actions/setup-workspace
 
       - name: Clone ABP at pinned SHA
         run: |
@@ -86,15 +86,14 @@ jobs:
           git fetch --depth 1 origin ea4bbb8b517869a9fb735ea5bc05c819c209d0b5
           git checkout FETCH_HEAD
 
-      - name: Restore NuGet cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - uses: ./.github/actions/restore-nuget-cache
         with:
-          path: ~/.nuget/packages
-          key: nuget-abp-ea4bbb8b
-          restore-keys: nuget-abp-
+          repo-name: abp
+          sha-prefix: ea4bbb8b
 
-      - name: Install dotnet-coverage
-        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
       - name: Build ABP framework
         working-directory: target/framework
@@ -122,80 +121,21 @@ jobs:
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
-      - name: Validate cobertura has real data
+      - uses: ./.github/actions/validate-cobertura
         if: always()
-        shell: bash
-        working-directory: target/framework
-        run: |
-          shopt -s nullglob globstar
-          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
-          BEST=""
-          BEST_SIZE=0
-          for f in "${FILES[@]}"; do
-            [[ -f "$f" ]] || continue
-            SIZE=$(stat -c%s "$f")
-            if (( SIZE > BEST_SIZE )); then
-              BEST="$f"
-              BEST_SIZE=$SIZE
-            fi
-          done
-          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
-          if [[ -z "$BEST" ]]; then
-            echo "::error::No cobertura file produced. Coverage collection failed silently."
-            exit 1
-          fi
-          if (( BEST_SIZE < 5120 )); then
-            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
-            exit 1
-          fi
-          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
-          echo "Class count: $CLASSES"
-          if (( CLASSES < 1 )); then
-            echo "::error::Cobertura has zero <class> elements. No real coverage data."
-            exit 1
-          fi
-          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+        with:
+          working-directory: target/framework
 
       - name: Disk usage (end)
         if: always()
         run: df -h
 
-      - name: Generate HTML report
+      - uses: ./.github/actions/cobertura-report-and-upload
         if: always()
-        run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
-          export PATH="$PATH:/github/home/.dotnet/tools"
-          reportgenerator \
-            -reports:"target/framework/TestResults/coverage.cobertura.xml" \
-            -targetdir:"CoverageReport" \
-            -reporttypes:Html
-
-      - name: Upload HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: coverage-report-abp
-          path: CoverageReport/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw TestResults tree (forensics)
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-raw-abp
-          path: target/framework/TestResults/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw cobertura XML
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-xml-abp
-          path: target/framework/TestResults/coverage.cobertura.xml
-          retention-days: 90
-          if-no-files-found: warn
+          repo-name: abp
+          working-directory: target/framework
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
   # ASP.NET Core — built-in coverlet.collector
@@ -208,11 +148,7 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'aspnetcore'
     steps:
-      - name: Mark workspace as a safe git directory
-        run: git config --global --add safe.directory '*'
-
-      - name: Disk usage (start)
-        run: df -h
+      - uses: ./.github/actions/setup-workspace
 
       - name: Clone ASP.NET Core at pinned SHA (with submodules)
         run: |
@@ -222,12 +158,10 @@ jobs:
           git checkout FETCH_HEAD
           git submodule update --init --recursive --depth 1
 
-      - name: Restore NuGet cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - uses: ./.github/actions/restore-nuget-cache
         with:
-          path: ~/.nuget/packages
-          key: nuget-aspnetcore-ecb199c2
-          restore-keys: nuget-aspnetcore-
+          repo-name: aspnetcore
+          sha-prefix: ecb199c2
 
       - name: Restore SDK & dependencies (./restore.sh + activate.sh)
         shell: bash
@@ -255,8 +189,9 @@ jobs:
           node --version
           npm --version
 
-      - name: Install dotnet-coverage
-        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
       - name: Build ASP.NET Core (no tests, no Java)
         working-directory: target
@@ -314,80 +249,21 @@ jobs:
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
-      - name: Validate cobertura has real data
+      - uses: ./.github/actions/validate-cobertura
         if: always()
-        shell: bash
-        working-directory: target
-        run: |
-          shopt -s nullglob globstar
-          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
-          BEST=""
-          BEST_SIZE=0
-          for f in "${FILES[@]}"; do
-            [[ -f "$f" ]] || continue
-            SIZE=$(stat -c%s "$f")
-            if (( SIZE > BEST_SIZE )); then
-              BEST="$f"
-              BEST_SIZE=$SIZE
-            fi
-          done
-          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
-          if [[ -z "$BEST" ]]; then
-            echo "::error::No cobertura file produced. Coverage collection failed silently."
-            exit 1
-          fi
-          if (( BEST_SIZE < 5120 )); then
-            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
-            exit 1
-          fi
-          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
-          echo "Class count: $CLASSES"
-          if (( CLASSES < 1 )); then
-            echo "::error::Cobertura has zero <class> elements. No real coverage data."
-            exit 1
-          fi
-          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+        with:
+          working-directory: target
 
       - name: Disk usage (end)
         if: always()
         run: df -h
 
-      - name: Generate HTML report
+      - uses: ./.github/actions/cobertura-report-and-upload
         if: always()
-        run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
-          export PATH="$PATH:/github/home/.dotnet/tools"
-          reportgenerator \
-            -reports:"target/TestResults/coverage.cobertura.xml" \
-            -targetdir:"CoverageReport" \
-            -reporttypes:Html
-
-      - name: Upload HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: coverage-report-aspnetcore
-          path: CoverageReport/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw TestResults tree (forensics)
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-raw-aspnetcore
-          path: target/TestResults/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw cobertura XML
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-xml-aspnetcore
-          path: target/TestResults/coverage.cobertura.xml
-          retention-days: 90
-          if-no-files-found: warn
+          repo-name: aspnetcore
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
   # EF Core — external dotnet-coverage (no coverlet in repo)
@@ -400,11 +276,7 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'efcore'
     steps:
-      - name: Mark workspace as a safe git directory
-        run: git config --global --add safe.directory '*'
-
-      - name: Disk usage (start)
-        run: df -h
+      - uses: ./.github/actions/setup-workspace
 
       - name: Clone EF Core at pinned SHA
         run: |
@@ -413,12 +285,10 @@ jobs:
           git fetch --depth 1 origin 45e3af0273b71919189367bc152a335b69f443c6
           git checkout FETCH_HEAD
 
-      - name: Restore NuGet cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - uses: ./.github/actions/restore-nuget-cache
         with:
-          path: ~/.nuget/packages
-          key: nuget-efcore-45e3af02
-          restore-keys: nuget-efcore-
+          repo-name: efcore
+          sha-prefix: 45e3af02
 
       - name: Restore SDK & dependencies (./restore.sh + activate.sh)
         shell: bash
@@ -430,8 +300,9 @@ jobs:
           echo "DOTNET_ROOT=$DOTNET_ROOT" >> "$GITHUB_ENV"
           echo "$DOTNET_ROOT" >> "$GITHUB_PATH"
 
-      - name: Install dotnet-coverage
-        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
       - name: Build EF Core
         shell: bash
@@ -480,80 +351,21 @@ jobs:
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
-      - name: Validate cobertura has real data
+      - uses: ./.github/actions/validate-cobertura
         if: always()
-        shell: bash
-        working-directory: target
-        run: |
-          shopt -s nullglob globstar
-          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
-          BEST=""
-          BEST_SIZE=0
-          for f in "${FILES[@]}"; do
-            [[ -f "$f" ]] || continue
-            SIZE=$(stat -c%s "$f")
-            if (( SIZE > BEST_SIZE )); then
-              BEST="$f"
-              BEST_SIZE=$SIZE
-            fi
-          done
-          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
-          if [[ -z "$BEST" ]]; then
-            echo "::error::No cobertura file produced. Coverage collection failed silently."
-            exit 1
-          fi
-          if (( BEST_SIZE < 5120 )); then
-            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
-            exit 1
-          fi
-          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
-          echo "Class count: $CLASSES"
-          if (( CLASSES < 1 )); then
-            echo "::error::Cobertura has zero <class> elements. No real coverage data."
-            exit 1
-          fi
-          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+        with:
+          working-directory: target
 
       - name: Disk usage (end)
         if: always()
         run: df -h
 
-      - name: Generate HTML report
+      - uses: ./.github/actions/cobertura-report-and-upload
         if: always()
-        run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
-          export PATH="$PATH:/github/home/.dotnet/tools"
-          reportgenerator \
-            -reports:"target/TestResults/coverage.cobertura.xml" \
-            -targetdir:"CoverageReport" \
-            -reporttypes:Html
-
-      - name: Upload HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: coverage-report-efcore
-          path: CoverageReport/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw TestResults tree (forensics)
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-raw-efcore
-          path: target/TestResults/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw cobertura XML
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-xml-efcore
-          path: target/TestResults/coverage.cobertura.xml
-          retention-days: 90
-          if-no-files-found: warn
+          repo-name: efcore
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
   # Orleans — built-in coverlet.collector
@@ -566,11 +378,7 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'orleans'
     steps:
-      - name: Mark workspace as a safe git directory
-        run: git config --global --add safe.directory '*'
-
-      - name: Disk usage (start)
-        run: df -h
+      - uses: ./.github/actions/setup-workspace
 
       - name: Clone Orleans at pinned SHA
         run: |
@@ -579,12 +387,10 @@ jobs:
           git fetch --depth 1 origin 8024faf860549cb960b4b573c1571b379e283daa
           git checkout FETCH_HEAD
 
-      - name: Restore NuGet cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - uses: ./.github/actions/restore-nuget-cache
         with:
-          path: ~/.nuget/packages
-          key: nuget-orleans-8024faf8
-          restore-keys: nuget-orleans-
+          repo-name: orleans
+          sha-prefix: 8024faf8
 
       - name: Run tests with coverage
         working-directory: target
@@ -596,80 +402,22 @@ jobs:
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 
-      - name: Validate cobertura has real data
+      - uses: ./.github/actions/validate-cobertura
         if: always()
-        shell: bash
-        working-directory: target
-        run: |
-          shopt -s nullglob globstar
-          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
-          BEST=""
-          BEST_SIZE=0
-          for f in "${FILES[@]}"; do
-            [[ -f "$f" ]] || continue
-            SIZE=$(stat -c%s "$f")
-            if (( SIZE > BEST_SIZE )); then
-              BEST="$f"
-              BEST_SIZE=$SIZE
-            fi
-          done
-          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
-          if [[ -z "$BEST" ]]; then
-            echo "::error::No cobertura file produced. Coverage collection failed silently."
-            exit 1
-          fi
-          if (( BEST_SIZE < 5120 )); then
-            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
-            exit 1
-          fi
-          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
-          echo "Class count: $CLASSES"
-          if (( CLASSES < 1 )); then
-            echo "::error::Cobertura has zero <class> elements. No real coverage data."
-            exit 1
-          fi
-          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+        with:
+          working-directory: target
 
       - name: Disk usage (end)
         if: always()
         run: df -h
 
-      - name: Generate HTML report
+      - uses: ./.github/actions/cobertura-report-and-upload
         if: always()
-        run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
-          export PATH="$PATH:/github/home/.dotnet/tools"
-          reportgenerator \
-            -reports:"target/TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"CoverageReport" \
-            -reporttypes:Html
-
-      - name: Upload HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: coverage-report-orleans
-          path: CoverageReport/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw TestResults tree (forensics)
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-raw-orleans
-          path: target/TestResults/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw cobertura XML
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-xml-orleans
-          path: target/TestResults/*/coverage.cobertura.xml
-          retention-days: 90
-          if-no-files-found: warn
+          repo-name: orleans
+          working-directory: target
+          cobertura-glob: TestResults/*/coverage.cobertura.xml
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
   # Roslyn — external dotnet-coverage (no coverlet in repo)
@@ -682,11 +430,7 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'roslyn'
     steps:
-      - name: Mark workspace as a safe git directory
-        run: git config --global --add safe.directory '*'
-
-      - name: Disk usage (start)
-        run: df -h
+      - uses: ./.github/actions/setup-workspace
 
       - name: Clone Roslyn at pinned SHA
         run: |
@@ -695,12 +439,10 @@ jobs:
           git fetch --depth 1 origin 02d301627ed5016a4c18acd1a35e5bbc20ff03f0
           git checkout FETCH_HEAD
 
-      - name: Restore NuGet cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - uses: ./.github/actions/restore-nuget-cache
         with:
-          path: ~/.nuget/packages
-          key: nuget-roslyn-02d30162
-          restore-keys: nuget-roslyn-
+          repo-name: roslyn
+          sha-prefix: 02d30162
 
       - name: Install pinned .NET SDK from global.json
         # Roslyn's global.json pins SDK 10.0.100-rc.2.25502.107 but the
@@ -718,8 +460,9 @@ jobs:
           echo "DOTNET_ROOT=$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_ENV"
           echo "$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_PATH"
 
-      - name: Install dotnet-coverage
-        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
       - name: Restore and build Roslyn (slnx, no tests)
         shell: bash
@@ -773,80 +516,21 @@ jobs:
             -o TestResults/coverage.cobertura.xml \
             "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
-      - name: Validate cobertura has real data
+      - uses: ./.github/actions/validate-cobertura
         if: always()
-        shell: bash
-        working-directory: target
-        run: |
-          shopt -s nullglob globstar
-          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
-          BEST=""
-          BEST_SIZE=0
-          for f in "${FILES[@]}"; do
-            [[ -f "$f" ]] || continue
-            SIZE=$(stat -c%s "$f")
-            if (( SIZE > BEST_SIZE )); then
-              BEST="$f"
-              BEST_SIZE=$SIZE
-            fi
-          done
-          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
-          if [[ -z "$BEST" ]]; then
-            echo "::error::No cobertura file produced. Coverage collection failed silently."
-            exit 1
-          fi
-          if (( BEST_SIZE < 5120 )); then
-            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
-            exit 1
-          fi
-          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
-          echo "Class count: $CLASSES"
-          if (( CLASSES < 1 )); then
-            echo "::error::Cobertura has zero <class> elements. No real coverage data."
-            exit 1
-          fi
-          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+        with:
+          working-directory: target
 
       - name: Disk usage (end)
         if: always()
         run: df -h
 
-      - name: Generate HTML report
+      - uses: ./.github/actions/cobertura-report-and-upload
         if: always()
-        run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
-          export PATH="$PATH:/github/home/.dotnet/tools"
-          reportgenerator \
-            -reports:"target/TestResults/coverage.cobertura.xml" \
-            -targetdir:"CoverageReport" \
-            -reporttypes:Html
-
-      - name: Upload HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: coverage-report-roslyn
-          path: CoverageReport/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw TestResults tree (forensics)
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-raw-roslyn
-          path: target/TestResults/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw cobertura XML
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-xml-roslyn
-          path: target/TestResults/coverage.cobertura.xml
-          retention-days: 90
-          if-no-files-found: warn
+          repo-name: roslyn
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
   # .NET Runtime — external dotnet-coverage + native build deps
@@ -860,6 +544,8 @@ jobs:
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'runtime'
     steps:
       - name: Mark workspace as a safe git directory
+        # Inlined (not via setup-workspace) so apt-get can run before the
+        # disk-usage probe — installing native deps grows /var measurably.
         run: git config --global --add safe.directory '*'
 
       - name: Install native build dependencies
@@ -881,15 +567,14 @@ jobs:
           git fetch --depth 1 origin 9ffface2f3fa6fbbb427793c3230b1626a1fdd84
           git checkout FETCH_HEAD
 
-      - name: Restore NuGet cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - uses: ./.github/actions/restore-nuget-cache
         with:
-          path: ~/.nuget/packages
-          key: nuget-runtime-9ffface2
-          restore-keys: nuget-runtime-
+          repo-name: runtime
+          sha-prefix: 9ffface2
 
-      - name: Install dotnet-coverage
-        run: dotnet tool install -g dotnet-coverage --version ${{ env.DOTNET_COVERAGE_VERSION }}
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
       - name: Build & test runtime libraries (with coverage)
         working-directory: target
@@ -908,6 +593,10 @@ jobs:
         if: always()
         run: df -h
 
+      # Runtime keeps custom report+upload steps because its cobertura paths
+      # are multi-rooted (TestResults/ + artifacts/**) and the artifact also
+      # ships TRX files. The shared composite assumes a single
+      # working-directory + glob pair, which doesn't fit.
       - name: Generate HTML report (best-effort)
         if: always()
         shell: bash
@@ -959,11 +648,7 @@ jobs:
     timeout-minutes: 360
     if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'semantic-kernel'
     steps:
-      - name: Mark workspace as a safe git directory
-        run: git config --global --add safe.directory '*'
-
-      - name: Disk usage (start)
-        run: df -h
+      - uses: ./.github/actions/setup-workspace
 
       - name: Clone Semantic Kernel at pinned SHA
         run: |
@@ -972,12 +657,10 @@ jobs:
           git fetch --depth 1 origin 0c898161a355b0a845aea48de79cb43e2e9435d2
           git checkout FETCH_HEAD
 
-      - name: Restore NuGet cache
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      - uses: ./.github/actions/restore-nuget-cache
         with:
-          path: ~/.nuget/packages
-          key: nuget-semantic-kernel-0c898161
-          restore-keys: nuget-semantic-kernel-
+          repo-name: semantic-kernel
+          sha-prefix: 0c898161
 
       - name: Build Semantic Kernel
         working-directory: target/dotnet
@@ -992,80 +675,22 @@ jobs:
             --collect:"XPlat Code Coverage" \
             --results-directory ./TestResults
 
-      - name: Validate cobertura has real data
+      - uses: ./.github/actions/validate-cobertura
         if: always()
-        shell: bash
-        working-directory: target/dotnet
-        run: |
-          shopt -s nullglob globstar
-          FILES=( TestResults/coverage.cobertura.xml TestResults/**/coverage.cobertura.xml )
-          BEST=""
-          BEST_SIZE=0
-          for f in "${FILES[@]}"; do
-            [[ -f "$f" ]] || continue
-            SIZE=$(stat -c%s "$f")
-            if (( SIZE > BEST_SIZE )); then
-              BEST="$f"
-              BEST_SIZE=$SIZE
-            fi
-          done
-          echo "Largest cobertura: ${BEST:-<none>} ($BEST_SIZE bytes)"
-          if [[ -z "$BEST" ]]; then
-            echo "::error::No cobertura file produced. Coverage collection failed silently."
-            exit 1
-          fi
-          if (( BEST_SIZE < 5120 )); then
-            echo "::error::Cobertura file is suspiciously small ($BEST_SIZE bytes). Likely empty stub — collector did not attach."
-            exit 1
-          fi
-          CLASSES=$(grep -c '<class ' "$BEST" || echo 0)
-          echo "Class count: $CLASSES"
-          if (( CLASSES < 1 )); then
-            echo "::error::Cobertura has zero <class> elements. No real coverage data."
-            exit 1
-          fi
-          echo "✅ Cobertura validation passed: $BEST_SIZE bytes, $CLASSES classes"
+        with:
+          working-directory: target/dotnet
 
       - name: Disk usage (end)
         if: always()
         run: df -h
 
-      - name: Generate HTML report
+      - uses: ./.github/actions/cobertura-report-and-upload
         if: always()
-        run: |
-          dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ env.REPORTGENERATOR_VERSION }}
-          export PATH="$PATH:/github/home/.dotnet/tools"
-          reportgenerator \
-            -reports:"target/dotnet/TestResults/*/coverage.cobertura.xml" \
-            -targetdir:"CoverageReport" \
-            -reporttypes:Html
-
-      - name: Upload HTML coverage report
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
-          name: coverage-report-semantic-kernel
-          path: CoverageReport/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw TestResults tree (forensics)
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-raw-semantic-kernel
-          path: target/dotnet/TestResults/
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Upload raw cobertura XML
-        if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
-        with:
-          name: coverage-xml-semantic-kernel
-          path: target/dotnet/TestResults/*/coverage.cobertura.xml
-          retention-days: 90
-          if-no-files-found: warn
+          repo-name: semantic-kernel
+          working-directory: target/dotnet
+          cobertura-glob: TestResults/*/coverage.cobertura.xml
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
   # Summary — runs after all repo jobs (success or failure)

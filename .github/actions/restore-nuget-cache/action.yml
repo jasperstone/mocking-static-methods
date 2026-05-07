@@ -1,0 +1,18 @@
+name: Restore NuGet cache
+description: Restore ~/.nuget/packages keyed by repo + sha-prefix.
+inputs:
+  repo-name:
+    description: Short repo identifier (e.g. efcore).
+    required: true
+  sha-prefix:
+    description: First 8 chars of the pinned SHA.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Restore NuGet cache
+      uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+      with:
+        path: ~/.nuget/packages
+        key: nuget-${{ inputs.repo-name }}-${{ inputs.sha-prefix }}
+        restore-keys: nuget-${{ inputs.repo-name }}-

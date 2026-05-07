@@ -1,6 +1,6 @@
 # Test Counts (from coverage workflow logs)
 
-_Generated: 2026-05-07 from runs 25468601840, 25472048463_
+_Generated: 2026-05-07 from runs 25495265941_
 
 Per-project test counts extracted from `dotnet test` summary lines in Coverage Orchestrator job logs. Bypasses the broken `--list-tests` path for xunit.v3 repos.
 
@@ -8,10 +8,10 @@ Per-project test counts extracted from `dotnet test` summary lines in Coverage O
 
 | repo | projects | total | passed | failed | skipped |
 |---|---:|---:|---:|---:|---:|
-| abp | 74 | 1358 | 1351 | 0 | 7 |
+| abp | 73 | 1346 | 1339 | 0 | 7 |
 | aspnetcore | 96 | 31603 | 31210 | 11 | 382 |
 | efcore | 14 | 13724 | 13702 | 0 | 22 |
-| orleans | 28 | 1692 | 759 | 115 | 818 |
+| orleans | 36 | 10951 | 9881 | 134 | 936 |
 | roslyn | 33 | 155993 | 144293 | 10378 | 1322 |
 | semantic-kernel | 44 | 6263 | 5610 | 636 | 17 |
 
@@ -117,31 +117,31 @@ Per-project test counts extracted from `dotnet test` summary lines in Coverage O
 
 | project | framework | total | passed | failed | skipped |
 |---|---|---:|---:|---:|---:|
+| Orleans.Serialization.UnitTests | net10.0 | 3415 | 3415 | 0 | 0 |
+| Orleans.Serialization.UnitTests | net8.0 | 3414 | 3397 | 17 | 0 |
+| NonSilo.Tests | net8.0 | 389 | 389 | 0 | 0 |
+| NonSilo.Tests | net10.0 | 389 | 389 | 0 | 0 |
+| DefaultCluster.Tests | net8.0 | 354 | 343 | 0 | 11 |
+| DefaultCluster.Tests | net10.0 | 354 | 343 | 0 | 11 |
 | Orleans.Transactions.Azure.Tests | net10.0 | 268 | 0 | 25 | 243 |
 | Orleans.Transactions.Azure.Tests | net8.0 | 268 | 0 | 25 | 243 |
-| Orleans.Transactions.Tests | net10.0 | 162 | 162 | 0 | 0 |
-| Orleans.Transactions.Tests | net8.0 | 162 | 162 | 0 | 0 |
-| Tester.AdoNet | net8.0 | 122 | 7 | 0 | 115 |
-| Tester.AdoNet | net10.0 | 122 | 7 | 0 | 115 |
-| Orleans.Serialization.UnitTests | net8.0 | 116 | 116 | 0 | 0 |
-| Orleans.Serialization.UnitTests | net10.0 | 116 | 116 | 0 | 0 |
-| AWSUtils.Tests | net8.0 | 34 | 1 | 0 | 33 |
-| AWSUtils.Tests | net10.0 | 34 | 1 | 0 | 33 |
+| Tester | net8.0 | 253 | 246 | 3 | 4 |
+| Tester | net10.0 | 253 | 249 | 0 | 4 |
 
 **Bottom 10 projects by test count** (⚠️ = 0 tests, suspect)
 
 | project | framework | total | passed | failed | skipped |
 |---|---|---:|---:|---:|---:|
-| DefaultCluster.Tests | net8.0 | 3 | 3 | 0 | 0 |
-| DefaultCluster.Tests | net10.0 | 3 | 3 | 0 | 0 |
-| ServiceBus.Tests | net8.0 | 7 | 0 | 7 | 0 |
-| ServiceBus.Tests | net10.0 | 7 | 0 | 7 | 0 |
-| Orleans.Journaling.Tests | net8.0 | 8 | 8 | 0 | 0 |
-| Orleans.Journaling.Tests | net10.0 | 8 | 8 | 0 | 0 |
-| Tester | net10.0 | 12 | 12 | 0 | 0 |
-| Tester | net8.0 | 12 | 11 | 1 | 0 |
-| TesterInternal | net8.0 | 12 | 7 | 0 | 5 |
-| TesterInternal | net10.0 | 12 | 7 | 0 | 5 |
+| Orleans.Connections.Security.Tests | net8.0 | 1 | 1 | 0 | 0 |
+| Orleans.Connections.Security.Tests | net10.0 | 1 | 1 | 0 | 0 |
+| Consul.Tests | net8.0 | 5 | 5 | 0 | 0 |
+| Consul.Tests | net10.0 | 5 | 5 | 0 | 0 |
+| Tester.Cassandra | net8.0 | 12 | 0 | 12 | 0 |
+| Tester.Cassandra | net10.0 | 12 | 0 | 12 | 0 |
+| ServiceBus.Tests | net10.0 | 16 | 8 | 7 | 1 |
+| ServiceBus.Tests | net8.0 | 16 | 8 | 7 | 1 |
+| Orleans.Serialization.FSharp.Tests | net8.0 | 18 | 18 | 0 | 0 |
+| Orleans.Serialization.FSharp.Tests | net10.0 | 18 | 18 | 0 | 0 |
 
 ### roslyn
 

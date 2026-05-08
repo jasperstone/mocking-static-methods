@@ -1,9 +1,9 @@
 # Project Context
 
 - **Project:** mocking-static-methods
-- **User:** Jasper
+- **User:** Jasper (Brady is also active 2026-05-08+)
 - **Created:** 2026-04-30
-- **Goal:** Parallel coverage workflow across 7 .NET OSS repos on GitHub-hosted runners.
+- **Goal:** Parallel coverage workflow across 7 .NET OSS repos on GitHub-hosted runners (expanded to 15 in Phase 2).
 
 ## Core Context
 
@@ -14,171 +14,44 @@ CI/CD agent. `.github/` directory exists in repo. User wants parallelization via
 - Pin commit SHAs in workflow inputs to lock the experiment.
 - Use `actions/checkout@<sha>` with `ref: <commit-sha>` and `submodules: recursive` for aspnetcore.
 - Cache `~/.nuget/packages` keyed on `**/packages.lock.json` or `global.json`.
+- Default workflow dispatch is `repo=all` (parallel jobs, no time savings from per-repo, lose drift/timing/infra signal).
+- VSTest "Code Coverage" data collector adapter only attaches against project/sln targets — never built `.dll`. Always iterate `*.Tests.csproj`.
+- Container-bundled SDKs may not satisfy `global.json` pins. Install pinned SDK via `dotnet-install.sh --jsonfile global.json`. **Conditional**, not universal — MAUI's global.json declares only workload manifests (no `sdk.version`), which makes `--jsonfile` exit nonzero. Always check shape before applying.
+- `|| true` on test steps + no validation = silent green. Always include the cobertura validation gate (file present, ≥ 5 KB, ≥ 1 `<class>` element) BEFORE Generate HTML report.
+- Always upload raw `TestResults/` for forensics (`coverage-raw-<repo>` artifact).
+- `.squad/decisions/inbox/` is gitignored — drop files there for Scribe.
+- MTP + `--collect "Code Coverage;Format=cobertura"` is silent-no-op. When global.json sets MTP runner OR `MSTest.Sdk`/exe-style hosts are in play, reach for coverlet.console (mono.cecil, runner-agnostic). Canonical form: `coverlet "$asm" --target dotnet --targetargs "test <proj>"`.
+- `dotnet workload install maui` is Linux-incompatible (umbrella manifest declares iOS+Mac SDKs). Use `maui-android` for cross-platform MAUI tests on Linux.
+- NEVER `dotnet restore <whole.sln>` when the solution mixes test/server/utility/mobile/wasm projects. Workload manifests evaluate the WHOLE graph at restore time, not lazily. Per-csproj restore of just the test projects is the safe default.
+- Local-clone inspection (`grep -l ... cloned_repos/<repo>/**/*.csproj`) beats CI iteration for scope questions.
+- `mcr.microsoft.com/dotnet/sdk:10.0-noble` runs **mawk**, not gawk. The 3-arg `match($0, /re/, arr)` form silently degrades. Use grep+sed for regex-with-captures inside this container.
+- StaticCallAnalyzer is containerized (`StaticCallAnalyzer/Dockerfile` + `run.sh`) — `aggregate_baseline.py` invokes the wrapper. Host needs only python3 + gh + docker.
+- Pin-by-API pattern: for repos NOT in `cloned_repos/`, use `gh api /repos/<owner>/<name>/commits/<branch> --jq .sha` to get HEAD without cloning.
+- For test counts in xunit.v3 repos, `--list-tests` is broken (returns 0/3/46). Authoritative source is `tools/test_counts/from_coverage_logs.py` parsing `Passed!  - Failed: N, Passed: N, ... - Foo.dll` summary lines from coverage workflow logs.
 
 ## Recent Updates
 
-- 2026-04-30 — Workflow audit findings: All actions tag-ref'd (`@v4`), need SHA pins. `ubuntu-latest` should pin to `ubuntu-24.04`. ZERO caching for NuGet/tools. No `timeout-minutes` on any job (default 6h is loose; aspnetcore/runtime should be 120, others 60-90). No `concurrency:` block — duplicate pushes spawn parallel runs. No `permissions:` block (default-permissive). 7 hand-rolled jobs duplicate same 4 setup steps — candidate for composite action `.github/actions/setup-coverage/`.
-- 2026-05-01 — Default workflow dispatch is repo=all (parallel jobs, no time savings from per-repo, but lose drift/timing/infra signal).
+(Entries before 2026-05-08 archived to `history-archive.md`. One-line index below.)
 
-### 2026-05-06 — Silent empty-cobertura fix (commit 7885485)
-- **VSTest "Code Coverage" data collector adapter only attaches against project/sln targets.** Invoking `dotnet test <foo.dll> --collect "Code Coverage"` runs the tests but silently produces zero `Attachments:`. Always iterate `*.Tests.csproj` (not built .dll) for the per-assembly loop pattern.
-- **Container-bundled SDKs may not satisfy `global.json` pins.** Roslyn pins `10.0.100-rc.2.25502.107`; the `mcr.microsoft.com/dotnet/sdk:10.0-noble` image carries `10.0.203`. Install pinned SDK via `dotnet-install.sh --jsonfile global.json --install-dir $GITHUB_WORKSPACE/.dotnet` for repos that lack their own restore.sh.
-- **`|| true` on test steps + no validation = silent green.** The "real coverage" gate (file present, ≥ 5 KB, ≥ 1 `<class>` element) catches all three failure modes from run 25451789359 unambiguously. Place it BEFORE Generate HTML report; HTML can succeed against an empty stub and mask the real problem.
-- **Always upload raw `TestResults/` for forensics.** `coverage-raw-<repo>` artifact lets us diagnose collector failures (missing attachments, profiler errors) post-hoc without re-running a 6-hour build.
-- **`.squad/decisions/inbox/` is gitignored in this repo.** Drop files there for Scribe; they don't get committed.
+- **2026-05-06 commit 7885485** — Silent empty-cobertura fix: VSTest data collector against csproj only; container SDK vs global.json pin; validation gate; raw forensics upload.
+- **2026-05-07** — Containerized StaticCallAnalyzer; `aggregate_baseline.py` host-deps reduced to python3 + gh + docker.
+- **2026-05-07** — Test discovery counter rewritten for multi-shape adapter output (max-of-three heuristics; `-v normal`; raw artifact upload). mawk-vs-gawk gotcha.
+- **2026-05-07 commit 0318b56** — Orchestrator expanded 7→14 repos (Avalonia, duplicati, eShop, garnet, jellyfin, maui, server). Per-repo build patterns + risks documented.
+- **2026-05-07 commit 05b60b4 (round-1)** — 4 of 5 failures fixed from run 25527102157: Avalonia + eShop per-csproj restore (workload-bound graph), MAUI dotnet-install removed, Server NuGetAudit=false. Garnet was transient (MCR rate-limit).
+- **2026-05-07 (round-2)** — 4 of 4 remaining: Avalonia + eShop → coverlet.console (MTP silent-no-op); Server → per-csproj test build (sidesteps RustSdk in Seeder.csproj); MAUI → `maui-android` workload.
 
-## Recent Updates
-
-### 2026-05-07 — Containerized StaticCallAnalyzer
-
-**Problem:** `aggregate_baseline.py` invoked `dotnet StaticCallAnalyzer.dll` directly. Jasper's system `dotnet` (snap install) lacks .NET 8 runtime, breaking the local aggregation step. Same hit any collaborator without .NET 8 SDK.
-
-**What I shipped:**
-- `StaticCallAnalyzer/Dockerfile` — multi-stage SDK 8.0 build → runtime 8.0; ENTRYPOINT `dotnet /app/StaticCallAnalyzer.dll`, default CMD `/src`.
-- `StaticCallAnalyzer/run.sh` — wrapper that auto-builds image `static-call-analyzer:local` if missing, then `docker run --rm -v <abs>:/src:ro …`. Build output redirected to stderr so stdout stays JSON-clean.
-- `StaticCallAnalyzer/.dockerignore` — keep `bin/` and `obj/` out of the build context.
-
-**aggregate_baseline.py fixes:**
-- `run_static_analyzer()` now invokes the bash wrapper (no `dotnet` on host required).
-- `main()` precheck swapped: `shutil.which("docker")` + wrapper existence; removed ANALYZER_DLL check.
-- Path stripping in `aggregate_static()` now handles `/src/` mount prefix (with legacy host-path fallback).
-- Headline + gap #3 are now CONDITIONAL — derived from `rows_for_md` (`Lines (total)` < 100). All 7 real this run → green headline, gap omitted.
-- CI URL: derived from `git remote get-url origin`, cached. `RUN_ID` → `RUN_IDS` list, one link per run.
-- Branch HEAD: `git rev-parse HEAD` at report time.
-- Reproducing section updated: docker is the only host requirement besides python3 + gh.
-
-**Gotcha:** Docker emits file paths as `/src/<...>` instead of host paths, so `aggregate_static`'s prefix-strip logic needed both prefixes. Verified all 7 repos report static-call counts > 0 (abp 126, aspnetcore 155, efcore 39, orleans 91, roslyn 117, runtime 613, semantic-kernel 38).
-
-### 2026-05-07 — Test discovery: adapter + parser fragility
-
-**Symptom (Run 25490696770):** test-discovery workflow reported `universe=0
-filter=0 status=ok` for nearly every project. EF Core: 0/17 had any tests.
-Roslyn: 1/49 (3 tests). ABP: 1/78 (46 tests). The actual coverage runs from
-the same SHAs execute thousands of tests in those repos — so discovery is
-silently under-reporting, not the filter.
-
-**Root cause (best-supported by evidence, not yet bottom-confirmed):**
-The legacy `_count_listed_tests` in `list_tests.sh` only matched indented
-FQN lines under the VSTest header `"The following Tests are available:"`.
-The `status=ok` flag is set whenever that header appears in stdout, which
-is true for many shapes that do *not* follow the "indented per-line FQN"
-format the awk expected (e.g., MTP / xunit.v3 enumerators, MSBuild minimal
-verbosity stripping nested logger output, multi-TFM projects where one TFM
-errors on `net481` under Linux). Header found → status=ok; counter sees
-zero indented lines → reports 0. The script captured raw output silently,
-so the actual emitted format was un-debuggable from the workflow logs.
-
-**What I shipped:**
-- `.github/scripts/list_tests.sh` — three counting heuristics (max wins):
-  (a) indented FQNs under VSTest header (legacy);
-  (b) `Test Name:` prefixed lines (vstest direct mode / MTP);
-  (c) `Total tests: N` summary value (xunit.v3 / MTP discovery summary).
-  Added `_discovery_ran` predicate that recognises empty-discovery markers
-  ("No test is available", "Found 0 tests") so they classify as
-  `status=ok, count=0` instead of `<error>`.
-- `dotnet test` calls now include `-v normal`, so the MSBuild logger
-  doesn't drop adapter-emitted enumeration lines on the default `minimal`.
-- Per-project raw stdout/stderr saved to `./_discovery_raw/` (relative to
-  each repo's working directory). New artifact `test-discovery-<repo>-raw`
-  uploaded with 7-day retention so the next run gives us actual evidence.
-- `_count_total_summary` rewritten with grep+sed (mawk-portable; the SDK
-  container is Ubuntu Noble with mawk, which lacks gawk's 3-arg `match()`).
-
-**Did NOT touch:** Orleans test step or its FILTER (Beck's territory), the
-coverage orchestrator workflow, or the aggregate.py CSV schema (columns
-unchanged).
-
-**Verified:** YAML parses; bash syntax-checks; all four counter shapes pass
-on synthetic inputs locally (3, 3, 42, 0).
-
-**Not verified:** Does the new counter actually produce non-zero universe
-values for EF Core / Roslyn? That requires Jasper to dispatch the workflow
-with `repo=all` and inspect the new raw-log artifact. If the new run still
-reports 0s, the raw logs will tell us the *actual* output shape and we
-can add a fourth heuristic.
-
-**Gotcha for future agents:**
-- `mcr.microsoft.com/dotnet/sdk:10.0-noble` ships mawk, not gawk. Do NOT
-  use `match($0, /re/, arr)` (gawk-only 3-arg form) in scripts that run
-  inside this container — use grep+sed or `match() == 0` style.
-- The `status=ok` heuristic in this script only proves "discovery emitted
-  *some* recognised marker", not "discovery succeeded". If you see
-  `status=ok` with `universe=0`, check the raw-log artifact before
-  blaming the filter.
-
-### 2026-05-07 — Orchestrator expansion 7→14 repos (commit 0318b56)
-
-Added 7 jobs (Avalonia, duplicati, eShop, garnet, jellyfin, maui, server) to `.github/workflows/coverage-orchestrator.yml`. SHAs resolved from local `cloned_repos/<repo>` HEADs. Per-repo build patterns:
-
-- **jellyfin** — `Jellyfin.sln`, all 16 test csprojs reference coverlet.collector → sln-level `dotnet test --collect:"XPlat Code Coverage"`. global.json pins `10.0.0` `latestMinor` → noble container's `10.0.203` satisfies it. Easiest of the seven.
-- **garnet** — `Garnet.slnx`, NO coverlet anywhere. Tests don't follow `*.Tests.csproj` naming (`Garnet.test`, `Garnet.test.cluster`, `Garnet.fuzz`). Scoped to `test/Garnet.test/Garnet.test.csproj` only — cluster needs multi-node setup, fuzz is non-deterministic. Standard `--collect "Code Coverage;Format=cobertura"` + merge.
-- **maui** — `Microsoft.Maui.sln`, only the Controls/tests/*.UnitTests subset has coverlet. Scoped find filter excludes TestCases.* (device tests). global.json pins RTM preview SDK `10.0.100-rtm.25523.113` → install via `dotnet-install.sh --jsonfile global.json` (Roslyn pattern). **Requires `dotnet workload install maui`** — pulls Android SDK ~2GB. The 360-min job timeout is generous enough; expect ~5–10 min just for the workload pull. If it becomes a runner pressure issue, follow-up patches should consider scoping further or switching to `maui-mobile`-only workload.
-- **server (bitwarden)** — `bitwarden-server.sln`, all `*.Test` projects reference coverlet (21 csprojs found). global.json pins SDK `8.0.100` `latestFeature` → container's .NET 10 won't satisfy. Install .NET 8 SDK via `dotnet-install.sh --jsonfile global.json`. Note: local clone is bitwarden/server, not microsoft/sqltoolsservice (the directory was named "server" during cloning). Job header documents the discrepancy.
-- **eShop** — `eShop.slnx`, NO coverlet. Tests use `MSTest.Sdk` + Microsoft.Testing.Platform (exe-style entry points). Only 3 unit-test csprojs (Ordering / Basket / ClientApp). Scoped per-csproj. **Aspire is NuGet-only in .NET 10** — no workload install needed (was needed in .NET 8/9, but the SDK pin here is 10.0.100). Risk: MTP's interaction with `--collect "Code Coverage;Format=cobertura"` is untested in this stack; if the data collector silently no-ops (like it did for ABP/aspnetcore historically), follow-up needs `--coverage` MTP flag or coverlet.console adapter.
-- **duplicati** — `Duplicati.slnx`, only `Duplicati/UnitTest/` has coverlet (1 project). NO global.json — falls back to container SDK. Build only that one csproj (Browser.Test needs Playwright; LiveTests/Backend.Tests need cloud creds — both excluded by name). Cleanest of the seven.
-- **Avalonia** — `Avalonia.slnx`, NO coverlet. global.json sets `test.runner=Microsoft.Testing.Platform`. SDK `10.0.201` `latestFeature` → container OK. 12 `*.UnitTests.csproj` under tests/. Scoped per-csproj, excluding RenderTests/LeakTests/Designer/Browser (need GPU/X server/Playwright). Same MTP-vs-collector risk as eShop.
-
-**Gotchas captured for future agents:**
-- **Naming convention skew:** Garnet uses `Garnet.test.csproj` (lowercase, no plural), not `*.Tests.csproj`. Always inspect test/ directory contents before applying a generic `find -name "*.Tests.csproj"`.
-- **MTP runner + Code Coverage data collector** is an untested interaction in this codebase. eShop and Avalonia are the canaries. If both produce empty cobertura on first run, the failure pattern is well-documented (decisions.md 2026-05-01) and the fix is to switch to coverlet.console (the ASP.NET Core path).
-- **MAUI workload install** is the slowest step in the matrix (~10 min, ~2GB disk). Validates that the 360-min timeout is the right choice (decisions.md 2026-04-30 set this for runtime; turns out maui needs it too).
-- **Bitwarden/server is .NET 8**, not .NET 10. First job in the matrix that pins to a different major SDK. The `dotnet-install.sh --jsonfile global.json` pattern (originally Roslyn-only for the rc.2 SDK) generalizes cleanly — both maui and server use it now.
-- **Cross-repo SHA resolution:** all 7 SHAs came from `git -C cloned_repos/<repo> log -1 --format=%H` against local depth-1 clones. This freezes the experiment to whatever was on disk at clone time. If Jasper re-clones with a deeper tree (e.g., for tag-based pinning), the SHAs will need re-resolution.
-
-Did NOT trigger the workflow run (per Coordinator instructions). Pushed as commit 0318b56 on jasper/phase2.
-
-### 2026-05-07 — Orchestrator round-1 fixes (4 of 5 failures from run 25527102157)
-
-Run 25527102157 expanded the matrix to 14 repos. 9 succeeded (original 7 + jellyfin + duplicati). 5 failed; 4 had real bugs, 1 was transient.
-
-**Surgical edits to `.github/workflows/coverage-orchestrator.yml`:**
-
-- **Avalonia (~+22 / −9 lines):** Replaced two slnx-level steps (`Restore Avalonia.slnx`, `Build Avalonia.slnx`) with one `Restore + build UnitTests projects` step that does per-csproj restore+build using the same `find tests -name "*.UnitTests.csproj"` filter the test step already uses. The slnx graph includes `src/Android/Avalonia.Android` and `samples/ControlCatalog.{Browser,iOS}` which trigger `NETSDK1147` (android / wasm-tools).
-- **eShop (~+15 / −12 lines):** Dropped `Restore eShop.slnx` step; rewrote `Build unit-test projects only` to a `Restore + build server unit-test projects` step that restores+builds Ordering and Basket only. Removed `ClientApp.UnitTests` from both the build and test loops (it's a MAUI client, needs `maui-tizen` workload). Test loop now iterates 2 csprojs, not 3.
-- **MAUI (−12 lines):** Deleted the `Install pinned .NET SDK from global.json` step entirely. MAUI's `global.json` declares only workload manifests, no `sdk.version`, which makes `dotnet-install.sh --jsonfile` exit nonzero. The noble container's preinstalled 10.0.203 SDK is sufficient. Workload install step still runs.
-- **Server (~+8 / −2 lines):** Restore and Build commands now pass `-p:NuGetAudit=false -p:WarningsNotAsErrors=NU1902`. bitwarden-server has `TreatWarningsAsErrors=true` plus NuGet audit enabled, so MailKit 4.14.0's NU1902 moderate advisory was failing restore. Both flags applied to belt-and-suspenders the audit promotion.
-- **Garnet (no change):** Container init was blocked at MCR docker pull (sporadic egress rate-limit). No code-level remedy; coordinator re-runs the matrix.
-
-**Pattern captured for next time:** `dotnet restore <whole.slnx>` is unsafe when the solution mixes server projects with mobile/MAUI/wasm/Tizen projects. Workload manifests are evaluated at restore time for the WHOLE graph — they are not lazy. Default to per-csproj restore + build for the specific test projects we plan to invoke. The `.slnx`-level restore convenience step costs more than it saves once any solution contains a workload-bound project.
-
-**Bitwarden's strict warning posture is repo-policy, not bug:** They genuinely want to fail their CI on moderate CVEs. Our coverage orchestrator is downstream and just needs tests to compile and run. Disabling `NuGetAudit` for our job does not affect their pipeline.
-
-**MAUI dotnet-install pattern is conditional, not universal:** Roslyn ships a real `sdk.version` and benefits from `--jsonfile` install. Server (bitwarden) ships SDK 8.0.100 latestFeature and benefits. MAUI ships only manifest declarations and breaks. Always check the `global.json` shape before assuming the Roslyn pattern transfers.
-
-**Validated:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/coverage-orchestrator.yml'))"` returns OK. Did NOT dispatch the workflow — Coordinator owns dispatch.
-
-### 2026-05-07 — Orchestrator round-2 fixes (4 of 4 remaining failures)
-
-After round-1 (commit 05b60b4): garnet recovered (transient); Avalonia, eShop, Server, MAUI still failing. Round-2 surgical edits to `.github/workflows/coverage-orchestrator.yml` (+135 / −45 lines):
-
-- **Avalonia (~+50 / −18):** Switched to coverlet.console pattern (mirrors aspnetcore job). Added `Install coverlet.console` step (`coverlet.console 6.0.2`). Test loop now invokes `coverlet "$asm" --target dotnet --targetargs "test \"$proj\" --no-build --filter ..."` per csproj, with the test DLL discovered under `<proj_dir>/bin/Debug/<tfm>/`. Restore+build step unchanged.
-- **eShop (~+30 / −12):** Same coverlet.console swap as Avalonia. Restore+build step unchanged (still Ordering + Basket only).
-- **Server (~+45 / −22):** Replaced sln-level `restore/build/test bitwarden-server.sln` with per-csproj loop over `test/*.Test.csproj` (excluding `*.IntegrationTest.csproj`, `Common.csproj`, `IntegrationTestCommon.csproj`). RustSdk is referenced ONLY by `util/Seeder/Seeder.csproj` (verified locally with `grep -l RustSdk cloned_repos/server/**/*.csproj`); scoping to test projects sidesteps it without installing Rust toolchain. Belt-and-suspenders `-p:NuGetAudit=false -p:WarningsNotAsErrors=NU1902` preserved. coverlet.collector is referenced transitively via `test/Common.csproj`, so XPlat Code Coverage works without coverlet.console here.
-- **MAUI (~+10 / −8):** Workload `maui` → `maui-android`. The umbrella `maui` workload manifest declares iOS+Mac SDKs ("Workload ID maui isn't supported on this platform" on Linux). `maui-android` is the Linux-supported subset that ships the same MAUI cross-platform manifests the 4 `Controls/*.UnitTests.csproj` projects need (their `$(_MauiDotNetTfm)` resolves once any maui-* workload is installed). Disk drops ~2GB → ~1.5GB.
-
-**New patterns captured (for future agents):**
-
-- **MTP + `--collect "Code Coverage;Format=cobertura"` is silent-no-op.** Tests run, exit 0, cobertura is a 169-byte stub. validate-cobertura is the only gate that catches it. When global.json sets MTP as test runner OR `MSTest.Sdk`/exe-style hosts are in play, reach for `coverlet.console` (mono.cecil instrumentation, runner-agnostic). The `--target dotnet --targetargs "test <proj>"` form is the canonical MTP-compatible invocation.
-- **`dotnet workload install maui` is Linux-incompatible.** Use `maui-android` for cross-platform MAUI tests on Linux runners. Same manifests, no iOS/Mac bits.
-- **Local-clone inspection beats CI iteration.** RustSdk's tiny dependency footprint (1 csproj) was found in 2 grep commands. One `grep -l` round saved a CI cycle that would have either installed Rust or chased a phantom workaround.
-- **NEVER `dotnet restore <whole.sln>` for solutions that mix test/server/utility projects.** Workload manifests evaluate the whole graph at restore time. Per-csproj restore of just the test projects is the safe default. This is the third repo to need this treatment (Avalonia, eShop, Server) — it's the rule, not the exception.
-
-**Validated:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/coverage-orchestrator.yml'))"` returns OK. Did NOT dispatch — Coordinator owns dispatch.
-
-### 2026-05-08 — MAUI removed; OpenRA + StockSharp added (Phase 2 baseline)
+### 2026-05-08 — MAUI removed; OpenRA + StockSharp added (Phase 2 baseline) — commit d3689e0
 
 Removed the deferred `coverage-maui` job entirely (workflow + choices + summary + README row). 4 rounds of remediation hit increasingly internal MS-CI assumptions; per Brady, the data didn't justify the drag.
 
 Added 2 new jobs:
 
-- **OpenRA** (SHA `8f2138c7`, bleed HEAD) — `net8.0`, NUnit 4 + NUnit3TestAdapter, no coverlet in `OpenRA.Test/OpenRA.Test.csproj`. Strategy: data-collector path (`--collect "Code Coverage;Format=cobertura"` + `dotnet-coverage merge`), same as abp/efcore/roslyn/runtime. Side-installs .NET 8 SDK via `dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet` because the noble container ships only .NET 10 and OpenRA has no `global.json` to pin against. Per-csproj restore+build+test of the single test project — no slnx-level invocation (pattern from round-1 lesson: never restore mixed-graph slns).
+- **OpenRA** (SHA `8f2138c7`, bleed HEAD) — `net8.0`, NUnit 4 + NUnit3TestAdapter, no coverlet in `OpenRA.Test/OpenRA.Test.csproj`. Strategy: data-collector path (`--collect "Code Coverage;Format=cobertura"` + `dotnet-coverage merge`), same as abp/efcore/roslyn/runtime. Side-installs .NET 8 SDK via `dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet` because the noble container ships only .NET 10 and OpenRA has no `global.json` to pin against. Per-csproj restore+build+test of the single test project — no slnx-level invocation.
 
-- **StockSharp** (SHA `a26ce597`, master HEAD) — `net10.0` (resolved via `common_target_tests.props` → `common_target_net.props` → `NetVer=10` in `common_versions.props`), MSTest 4.x, no coverlet. Strategy: same data-collector path. Per-csproj restore+build of `Tests/Tests.csproj` only (the `StockSharp_Tests.slnx` pulls 22 projects; targeted restore is safer). No `NuGet.config`/`nuget.config` in the repo so default nuget.org feed pulls Ecng.* packages. Risk: `Tests/Tests.csproj` references `Microsoft.Data.SqlClient` + `Ecng.Data.SqlServer` — individual test cases that hit a SQL server will fail in isolation (and should be filtered by Category=Integration); discover/build should be unaffected.
+- **StockSharp** (SHA `a26ce597`, master HEAD) — `net10.0` (resolved via `common_target_tests.props` → `common_target_net.props` → `NetVer=10` in `common_versions.props`), MSTest 4.x, no coverlet. Strategy: same data-collector path. Per-csproj restore+build of `Tests/Tests.csproj` only (the `StockSharp_Tests.slnx` pulls 22 projects; targeted restore is safer). No `NuGet.config` so default nuget.org feed pulls Ecng.* packages. Risk: `Tests/Tests.csproj` references `Microsoft.Data.SqlClient` + `Ecng.Data.SqlServer` — individual test cases hitting SQL will fail in isolation (filterable by Category=Integration); discover/build unaffected.
 
-**Skipped PowerToys + Files:** both are Windows-only at the SDK/TFM level, not just at the framework level. Files mandates `net10.0-windows10.0.26100.0` in root `Directory.Build.props`; PowerToys' UnitTest projects all hang off `src/modules/<windows-only>/` chains. Documented in README Phase 2 rows with concrete blockers (manifest files, TFM strings) instead of "Mode #1 footprint too low" which had been the previous handwave.
+**Skipped PowerToys + Files:** both Windows-only at the SDK/TFM level, not just framework. Files mandates `net10.0-windows10.0.26100.0` in root `Directory.Build.props`; PowerToys' UnitTest projects all hang off `src/modules/<windows-only>/` chains. Documented in README Phase 2 rows with concrete blockers.
 
-**Validation:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/coverage-orchestrator.yml'))"` returns OK. Did NOT predict success rates — both new repos may need 1–2 rounds of remediation per the established pattern (Avalonia/eShop/Server were 2-round; first attempt's job is to surface the actual failure mode, not be perfect).
+**Validation:** YAML safe-load OK. Active matrix: **15 repos**. Triggered runs: OpenRA=25552129165, StockSharp=25552132370.
 
-**Choice rationale (per repo):** The deciding factor for both new repos was the absence of `coverlet.collector` in their test csproj. With coverlet absent, the MTP/data-collector silent-no-op (decisions.md 2026-05-01) and the coverlet.console fallback (Avalonia/eShop pattern) are both options, but the data-collector path with cobertura output is the simpler and currently-known-good choice for vstest-host MSTest/NUnit projects. If either job produces an empty cobertura on first run, the round-2 fix is the coverlet.console swap (no .csproj edits, just runner change).
-
-**Pin-by-API-not-clone pattern:** This is the first time we pinned SHAs for repos that don't exist in `cloned_repos/`. `gh api /repos/<owner>/<name>/commits/<default_branch> --jq .sha` is the right tool — no need to clone locally just to read HEAD. The workflow's clone step pulls the pinned SHA at run time. Generalizes cleanly to any future Phase N additions.
+**Pin-by-API-not-clone pattern:** First time pinning SHAs for repos that don't exist in `cloned_repos/`. `gh api /repos/<owner>/<name>/commits/<default_branch> --jq .sha` is the right tool — generalizes cleanly to any future Phase N additions.

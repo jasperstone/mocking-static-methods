@@ -26,3 +26,7 @@ Lead for build/CI/coverage reproducibility work.
 - README.md is the consolidated docs target for this repo. Auxiliary root-level .md files accumulated during PoC iterations are disposable.
 - Comprehensive documentation refresh is a post-CI-stable task; do not block on it.
 - Default-discard policy applies to scratch/legacy .md files unless they hold unique operational facts.
+
+### 2026-05-08 — Phase 2 baseline matrix change (informational)
+
+Vogel removed MAUI from `coverage-orchestrator.yml` (authorized by Brady after 4 failed remediation rounds — net-negative vs MAUI's 329 Mode #1 sites). Added OpenRA (`8f2138c7`) and StockSharp (`a26ce597`). Skipped Files + PowerToys (Windows-only TFMs / WinUI 3 throughout — won't build on noble Linux container). Active matrix is now **15 repos**. Commit `d3689e0` on `jasper/phase2`. Runs in flight: OpenRA=25552129165, StockSharp=25552132370.

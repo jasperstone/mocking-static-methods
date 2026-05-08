@@ -117,3 +117,7 @@ from coverage logs". Decision file:
 
 ### 2026-05-07 — Test counts refreshed against run 25495265941 (post-BVT-fix)
 Re-ran `tools/test_counts/from_coverage_logs.py 25495265941` after the all-green Orleans BVT run. Headline change: **Orleans 28 / 1,692 → 36 / 10,951** (+8 projects, +9,259 tests) — BVT inclusion landed. Side notes: abp slipped 74 / 1,358 → 73 / 1,346 (one project dropped from logs, likely a flaky-skip change); aspnetcore / efcore / roslyn / semantic-kernel unchanged. New authoritative source = single run 25495265941. Commit 349981e on jasper/squad.
+
+### 2026-05-08 — Baseline matrix update (heads up)
+
+Coverage matrix changed: MAUI removed (4 failed remediation rounds), OpenRA + StockSharp added, Files + PowerToys skipped (Windows-only). Once OpenRA (run 25552129165) and StockSharp (run 25552132370) finish, the next baseline + test-counts refresh covers 15 repos. Both new repos use the external `dotnet-coverage` data-collector path; expect potentially 1–2 rounds of remediation per established pattern. OpenRA targets `net8.0` (side-installs .NET 8 SDK in noble container); StockSharp resolves to `net10.0`.

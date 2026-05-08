@@ -251,3 +251,102 @@ Runtime job left untouched (it uses `./build.sh -test` and Beck's baseline alrea
 **What:** Containerized `StaticCallAnalyzer` via `StaticCallAnalyzer/Dockerfile` (multi-stage `mcr.microsoft.com/dotnet/sdk:8.0` → `runtime:8.0`) and a `StaticCallAnalyzer/run.sh` wrapper. `aggregate_baseline.py` now invokes the wrapper, with a `docker`-on-PATH precheck replacing the prior `ANALYZER_DLL.exists()` check. Mount convention: target source at `/src` (read-only); image tag `static-call-analyzer:local`.
 **Why:** Reproducibility. Any collaborator can now run `python3 aggregate_baseline.py` with only `python3 + gh + docker` on the host — no .NET 8 SDK install. Removed Jasper's blocker (snap-installed dotnet without the .NET 8 runtime).
 **Side fixes:** Conditional headline + Phase-2 gap (driven by `Lines (total) < 100`), CI URL derived from `git remote get-url origin` and cached, multi-run support via `RUN_IDS` list, `Branch HEAD` from `git rev-parse HEAD`. Reproducing section updated to drop the analyzer build step.
+
+### 2026-05-07: Test discovery diagnostic — built and pushed
+**By:** Beck (requested by Jasper)
+**What:** Added `.github/workflows/test-discovery.yml` (6 parallel jobs: abp/aspnetcore/efcore/orleans/roslyn/semantic-kernel) reusing the coverage orchestrator's build phases but replacing test execution with `dotnet test --no-build --list-tests` per project (with FILTER and without). Shared `.github/scripts/list_tests.sh` provides `run_discovery` + `_count_listed_tests`. Per-repo CSV artifacts `test-discovery-<repo>.csv` (columns: repo, project, tests_universe, tests_in_filter, tests_excluded, build_status). Local aggregator `tools/test_discovery/aggregate.py` → `TEST_DISCOVERY.md` + `test_discovery_summary.csv`.
+**Why:** Capture filter-vs-universe deltas in CI to distinguish "filter is too aggressive" from "tests are genuinely shallow." Independent of coverage orchestrator (separate workflow/dispatch/artifacts). runtime intentionally skipped (uses `build.sh -subset libs+libs.tests -test`, not enumerable per-csproj).
+**Status:** Pushed to `jasper/squad`. Awaiting Jasper review then `repo=all` dispatch.
+
+### 2026-05-07: Coverage orchestrator expanded from 7 to 14 repos
+**By:** Vogel (CI/CD), requested by Jasper via Coordinator
+**What:** `.github/workflows/coverage-orchestrator.yml` now runs 14 parallel jobs. Added: Avalonia, duplicati, eShop, garnet, jellyfin, maui, server (bitwarden). Commit `0318b56` on `jasper/phase2`.
+**Selection:** Mode #1 footprint × Linux-buildability. The 7 new repos cover ~6,800 of 6,879 detected Mode #1 sites (99%+) on top of original 7. Top contributors: jellyfin (1,206), garnet (745), maui (329).
+**Pinned SHAs (resolved 2026-05-07 from local depth-1 clones):** Avalonia `dcb60717`, duplicati `4afa374d`, eShop `9b4f9434`, garnet `38cac99c`, jellyfin `e1e18e8d`, maui `b71adea6`, server `ea233580` (bitwarden/server, NOT microsoft/sqltoolsservice).
+**Coverage strategy:** Coverlet group (XPlat) — jellyfin, maui (UnitTests subset), server, duplicati. External data-collector group — Avalonia, eShop, garnet.
+**Risks called out:** MTP + `--collect "Code Coverage;Format=cobertura"` untested combo (eShop, Avalonia) — fall back to coverlet.console if empty; MAUI workload install ~10min / ~2GB; Bitwarden's SDK 8.0 install path is new.
+
+### 2026-05-07: Coverage orchestrator round-1 fixes (run 25527102157)
+**By:** Vogel (CI/CD)
+**Context:** Run 25527102157 ran 14 jobs. Original 7 succeeded, 2 of 7 new succeeded (jellyfin, duplicati), 5 failed. Surgical fixes to 4; Garnet was transient.
+**Fixes:**
+1. **Garnet** — TRANSIENT, no fix. MCR rate-limit on docker pull; needs only re-run.
+2. **Avalonia** — `dotnet restore Avalonia.slnx` pulled workload-bound projects (Android, Browser/iOS samples → NETSDK1147). Dropped slnx-level Restore+Build; added per-csproj loop using `find tests -name "*.UnitTests.csproj"`.
+3. **Server (Bitwarden)** — NU1902 MailKit moderate audit promoted to error (TreatWarningsAsErrors=true + audit). Added `-p:NuGetAudit=false -p:WarningsNotAsErrors=NU1902` to Restore + Build.
+4. **MAUI** — `dotnet-install.sh --jsonfile global.json` aborted ("Unable to find SDK:version node"). MAUI's global.json declares only workload manifests. Removed the install step; container's preinstalled 10.0.203 is sufficient.
+5. **eShop** — `dotnet restore eShop.slnx` pulled `tests/ClientApp.UnitTests` (MAUI client → maui-tizen workload). Dropped slnx-level restore; per-csproj for Ordering.UnitTests + Basket.UnitTests only.
+**Cross-cutting lesson:** `dotnet restore <whole.sln>` is unsafe when solutions mix server/desktop with mobile/wasm/MAUI projects — workload manifests are read at restore for the whole graph, not lazily.
+
+### 2026-05-07: Coverage orchestrator round-2 fixes (4 of 4 remaining)
+**By:** Vogel (CI/CD)
+**What:** Surgical edits to the 4 jobs still failing after round-1 (commit 05b60b4):
+- **Avalonia & eShop** — switched to coverlet.console pattern (mirrors aspnetcore). Both drive tests through Microsoft.Testing.Platform; under MTP the legacy `--collect "Code Coverage;Format=cobertura"` is silently ignored (tests pass, exit 0, 169-byte stub cobertura). Install `coverlet.console 6.0.2` global tool, find built test DLL under `<proj>/bin/Debug/<tfm>/`, invoke `coverlet "$asm" --target dotnet --targetargs "test ..."` per project. mono.cecil instrumentation is runner-agnostic.
+- **Server (Bitwarden) — Option A (per-csproj test build).** RustSdk PreBuild target invokes `cargo build --release`; SDK container has no Rust. Local-clone grep showed RustSdk is referenced by exactly one csproj: `util/Seeder/Seeder.csproj` (not a test project). Replaced sln-level restore/build/test with per-csproj loop over `test/*.Test.csproj` excluding `*.IntegrationTest.csproj`, `Common.csproj`, `IntegrationTestCommon.csproj`. Sidesteps RustSdk graph entirely without installing Rust (~3min savings) and without modifying the cloned repo.
+- **MAUI** — switched workload from `maui` to `maui-android`. Umbrella `maui` declares iOS+Mac SDKs unsupported on Linux ("Workload ID maui isn't supported on this platform"). `maui-android` is the Linux-supported subset; ships same MAUI cross-platform manifests (`$(_MauiDotNetTfm)` resolves once any maui-* workload is installed). Disk drops ~2GB → ~1.5GB.
+**Patterns captured:**
+- MTP + `--collect "Code Coverage;Format=cobertura"` is silent-no-op. Use coverlet.console when global.json sets MTP runner OR `MSTest.Sdk`/exe-style hosts are in play.
+- `dotnet workload install maui` is Linux-incompatible. Use `maui-android`.
+- Local-clone inspection beats workflow trial-and-error.
+- NEVER `dotnet restore <whole.sln>` when the solution mixes test/server/utility projects.
+
+### 2026-05-07: Re-include Orleans BVT category in coverage filter
+**By:** Beck (Test & Coverage Engineer), requested by Jasper
+**Context:** Test-discovery showed Orleans `ServiceBus.Tests` had 108 universe tests but only 14 passing FILTER (87% excluded). Orleans coverage was 6.07% — lowest of 7 repos. Traced to four Orleans-specific category exclusions added 2026-05-01: `Category!=BVT&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf`.
+**Verdicts after evidence review (Orleans pinned SHA `8024faf8`):** **BVT (54 occurrences across 159 files) — RE-INCLUDE** (classic unit tests; Orleans tradition: BVT = Build Verification = broad correctness). **SlowBVT (40 occurrences) — KEEP EXCLUDING** (heterogeneous-silo upgrade, integration-flavored). **LoadShedding (2) — KEEP EXCLUDING** (stress). **CorePerf (6) — KEEP EXCLUDING** (perf benchmarks).
+**Cross-check:** Orleans defines `[TestCategory(string)]` in `test/TestInfrastructure/TestExtensions/TestCategory.cs` which emits `Category=<name>` xunit trait. So `Category!=BVT` filter does match `[TestCategory("BVT")]` — exclusion was working as intended, just over-broad.
+**Project-glob gap:** Diagnostic's `find test -name "*.Tests.csproj"` missed `Orleans.Serialization.UnitTests` and `Orleans.Dashboard.UnitTests` (`.UnitTests.csproj` suffix). Coverage workflow uses `dotnet test Orleans.slnx` so those DID run during coverage — gap was only in per-project diagnostic CSV. Fixed by extending glob to `\( -name "*.Tests.csproj" -o -name "*.UnitTests.csproj" \)`.
+**Files changed:** `.github/workflows/coverage-orchestrator.yml` (orleans `--filter`: removed `&Category!=BVT`); `.github/workflows/test-discovery.yml` (same FILTER + glob expansion).
+**Expected impact:** Orleans coverage rises substantially from 6.07%; ServiceBus.Tests 14/108 → grows.
+
+### 2026-05-07: Test counts derived from coverage workflow logs
+**By:** Beck
+**Context:** `tools/test_discovery/` (the `--list-tests` path) returns garbage for xunit.v3 repos (EF Core 0, Roslyn 3, ABP 46). The xunit.v3 VSTest adapter emits "No test is available" under `--list-tests` even when same projects execute thousands at runtime.
+**Decision:** Authoritative per-project test counts now come from parsing the **Coverage Orchestrator workflow logs**. Every per-project `dotnet test` run emits `Passed!  - Failed: N, Passed: N, ... - Foo.dll (framework)` — unambiguous, not dependent on discovery API.
+**New tool:** `tools/test_counts/from_coverage_logs.py` → `test_counts.csv` + `TEST_COUNTS.md`.
+**Verified results (runs 25468601840 + 25472048463):** abp 74/1,358; aspnetcore 96/31,603; efcore 14/13,724; orleans 28/1,692; roslyn 33/155,993; semantic-kernel 44/6,263. EF Core's 14/13,724 matches hand-count exactly.
+**Still missing:** runtime (uses `build.sh -subset libs+libs.tests -test`; summary lines not parseable shape — documented).
+**Implication:** `tools/test_discovery/` still useful for non-xunit.v3 repos but NOT authoritative. `tools/test_counts/` is source of truth going forward.
+
+### 2026-05-07: test-discovery counter rewritten for multi-shape adapter output
+**By:** Vogel (CI/CD), requested by Jasper
+**Context:** Run 25490696770 reported `tests_universe=0 status=ok` for ~200 of ~311 enumerated test projects across 6 repos. Coverage runs from same SHAs (run 25468601840) execute thousands — discovery numbers were obviously wrong, not a filter signal.
+**Root cause:** `_count_listed_tests` only matched VSTest's MSBuild-logger shape (`"The following Tests are available:"` header + indented FQNs). `build_status=ok` was set whenever that header appeared, which the .NET 10 SDK driver emits even when the actual list is rendered differently (MTP `Test Name:` lines, xunit.v3 `Total tests: N` summaries) or stripped by MSBuild's default `minimal` verbosity. Header found → status=ok; awk saw zero indented lines → reported 0. Raw stdout never persisted, so failure was undebuggable from workflow logs.
+**Fix:** Three surgical changes (architecture preserved):
+1. Counter is now max-of-three heuristics: VSTest indented FQNs, `Test Name:` prefixed, `Total tests: N` summary.
+2. Verbosity bumped to `-v normal` so MSBuild logger doesn't strip enumeration lines.
+3. Per-project raw output persisted to `./_discovery_raw/`, uploaded as `test-discovery-<repo>-raw` (7-day retention).
+**Did NOT touch:** Orleans test step / FILTER (Beck's domain), coverage orchestrator, `tools/test_discovery/aggregate.py` (CSV schema unchanged).
+**Gotcha:** `mcr.microsoft.com/dotnet/sdk:10.0-noble` runs **mawk**, not gawk. The gawk-only 3-arg `match($0, /re/, arr)` form silently degrades on mawk and captures are empty. Use grep+sed for regex-with-captures inside this container.
+
+### 2026-05-07T13:00Z: Phase 1 baseline refreshed against run 25495265941
+**By:** Watney (requested by Jasper)
+**What:** `BASELINE_COVERAGE.md`, `baseline_coverage.csv`, and per-repo `baseline_artifacts/<repo>/static_call_classes.json` regenerated from CI run 25495265941 (commit `99c79c9`, all 7 jobs green, includes Orleans BVT fix). `aggregate_baseline.py` `RUN_IDS` constant updated to `["25495265941"]`.
+**Why:** Prior baseline (runs 25468601840 + 25472048463) had a known issue in Orleans coverage collection. New run reflects corrected pipeline: Orleans line coverage rose from 6.07% to **9.98%**. Other repos within rounding: abp 41.92%, aspnetcore 60.63%, efcore 27.06%, roslyn 76.21%, runtime 10.18%, semantic-kernel 12.12%. **TOTAL: 40.46% lines / 17.79% branches across 11.4M lines / 2.4M branches.** No headline warning — every repo emitted real cobertura.
+**Authoritative source run for Phase 1 going forward:** `25495265941`. Earlier run IDs are superseded.
+
+### 2026-05-07T13:00Z: Authoritative test-counts source advanced to run 25495265941
+**By:** Beck (requested by Jasper)
+**What:** `TEST_COUNTS.md` and `test_counts.csv` regenerated from the all-green run 25495265941 (commit 99c79c9, includes Orleans BVT fix). Previous source (runs 25468601840 + 25472048463) is superseded. Pushed as commit 349981e on `jasper/squad`.
+**Headline deltas vs previous publication:** abp 74/1,358 → 73/1,346 (-1/-12); aspnetcore unchanged (96/31,603); efcore unchanged (14/13,724); **orleans 28/1,692 → 36/10,951 (+8/+9,259, BVT inclusion)**; roslyn unchanged (33/155,993); semantic-kernel unchanged (44/6,263); runtime n/a (coverlet log shape).
+
+### 2026-05-08: MAUI removed from coverage matrix
+**By:** Vogel (CI/CD), authorized by Brady
+**What:** Deleted `coverage-maui` job from `.github/workflows/coverage-orchestrator.yml`. Removed `maui` from `repo` input choices. README Phase 2 row updated to ❌ Removed (was deferred).
+**Why:** After 4 rounds of remediation (runs 25527102157, 25531117370, 25532666443, 25549163113), each fix surfaced another layer of MS-internal-CI assumption — custom global.json shape, `maui-android` workload subset, in-tree `Microsoft.Maui.BuildTasks` MSBuild prerequisite, then `net10.0-android36.0` TFMs in `Resizetizer/Core/Controls.Core` requiring the Android SDK on top of the workload. Carrying these workarounds was net-negative against MAUI's 329 Mode #1 sites.
+
+### 2026-05-08: Phase 2 baseline additions — OpenRA + StockSharp
+**By:** Vogel (CI/CD), requested by Brady
+**What:** Added 2 jobs to `.github/workflows/coverage-orchestrator.yml`:
+- `OpenRA` pinned at `8f2138c71106aaffd8a288b56d1c9ef6013700ba` (bleed HEAD, OpenRA/OpenRA)
+- `StockSharp` pinned at `a26ce597cab73fe07949e0cc3845216342d33484` (master HEAD, StockSharp/StockSharp)
+Both use the external `dotnet-coverage` data-collector path (`--collect "Code Coverage;Format=cobertura"` + `dotnet-coverage merge`) — neither references `coverlet.collector`. OpenRA additionally installs .NET 8 SDK alongside the noble container's .NET 10 (its tree pins `net8.0` in `Directory.Build.props`); StockSharp resolves to `net10.0` via `common_target_*.props` so the container SDK is sufficient.
+Active matrix: **15 repos** (was 14 with MAUI deferred; -1 MAUI, +2 new = 15). Triggered runs: OpenRA=25552129165, StockSharp=25552132370. Commit d3689e0 pushed to `jasper/phase2`.
+
+### 2026-05-08: Skipped Phase 2 candidates — PowerToys, Files
+**By:** Vogel (CI/CD)
+**What:** Did NOT add `microsoft/PowerToys` or `files-community/Files` to the workflow. README Phase 2 rows updated with concrete blockers.
+**Why:**
+- **Files** — `Directory.Build.props` mandates `WindowsTargetFramework=net10.0-windows10.0.26100.0`; `tests/Files.App.UITests/` carries `Package.appxmanifest` and `MainWindow.xaml`. Pure UWP/WinUI 3 stack, Windows-only TFMs throughout.
+- **PowerToys** — All `*UnitTests*.csproj` discovered live under `src/modules/<windows-only-module>/` (colorPicker, fancyzones, registrypreview, AdvancedPaste, launcher plugins, previewpane handlers) and pull WinUI 3/WPF references transitively. None buildable in noble Linux container.
+
+A coverage job that can't run isn't useful baseline data. Excluded.

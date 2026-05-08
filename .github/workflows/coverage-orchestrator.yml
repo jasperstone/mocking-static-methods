@@ -1521,29 +1521,36 @@ jobs:
           dotnet restore Tests/Tests.csproj
           dotnet build Tests/Tests.csproj -c Release --no-restore
 
-      - name: Run tests with coverage (dotnet-coverage collect)
+      - name: Run tests with coverage (in-process data collector)
         shell: bash
         working-directory: target
         continue-on-error: true
-        # 3 rounds of coverlet.console produced 0% Module table (silent no-op
-        # — runs 25552132370 / 25562087626 / 25562855588). Switching to the
-        # dotnet-coverage CLR-profiler approach used by abp/efcore/roslyn/
-        # runtime, which attaches at process-start and follows child runners
-        # regardless of MTP/MSTest.Sdk indirection.
+        # R5 (2026-05-08): switch to in-process `dotnet test --collect "Code
+        # Coverage;Format=cobertura"`, matching the proven abp/efcore/roslyn
+        # pattern. Tests.csproj uses Microsoft.NET.Test.Sdk + MSTest.TestAdapter
+        # (classic vstest, not MTP — confirmed in common_target_tests.props),
+        # so the built-in Microsoft.CodeCoverage data collector loads inside
+        # testhost at startup and avoids the wrap-mode CLR-profiler-attach
+        # failure that produced 178-byte stubs in R1 / R4 (runs 25552132370,
+        # 25577060633) and the empty-Module bug in R2 / R3 with coverlet.
         #
-        # Flaky-test exclusions retained from round-2 fix: AsyncExtensionsTests
-        # / ConnectorBasketTests fire off-by-one event-count assertions on
-        # hosted Linux runners; PathsTests asserts on host paths;
-        # ReportTests compares byte-exact .xml/.csv; TransactionIdStorageTests
-        # InMemory case is timing-sensitive.
+        # Flaky-test exclusions retained from R2: AsyncExtensionsTests /
+        # ConnectorBasketTests fire off-by-one event-count assertions on hosted
+        # Linux runners; PathsTests asserts on host paths; ReportTests compares
+        # byte-exact .xml/.csv; TransactionIdStorageTests InMemory case is
+        # timing-sensitive.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&FullyQualifiedName!~AsyncExtensionsTests&FullyQualifiedName!~ConnectorBasketTests&FullyQualifiedName!~PathsTests&FullyQualifiedName!~ReportTests&FullyQualifiedName!~TransactionIdStorageTests&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
-          dotnet-coverage collect \
-            "dotnet test Tests/Tests.csproj --no-build -c Release --filter \"$FILTER\"" \
-            -f cobertura -o TestResults/coverage.cobertura.xml \
+          dotnet test Tests/Tests.csproj --no-build -c Release \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&FullyQualifiedName!~AsyncExtensionsTests&FullyQualifiedName!~ConnectorBasketTests&FullyQualifiedName!~PathsTests&FullyQualifiedName!~ReportTests&FullyQualifiedName!~TransactionIdStorageTests&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults \
             || echo "::warning::Tests in StockSharp.Tests failed or runner pressure — continuing"
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" "TestResults/**/*.cobertura.xml" \
+            || echo "merge produced no output"
 
       - uses: ./.github/actions/validate-cobertura
         if: always()

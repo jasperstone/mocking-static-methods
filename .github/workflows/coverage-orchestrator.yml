@@ -805,17 +805,39 @@ jobs:
         with:
           version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
-      - name: Install coverlet.console
-        # Avalonia uses Microsoft.Testing.Platform (global.json sets
-        # test.runner=Microsoft.Testing.Platform). Under MTP, the legacy
-        # `--collect "Code Coverage;Format=cobertura"` data collector is
-        # silently ignored — tests run cleanly but cobertura output is a
-        # 169-byte empty stub. Use coverlet.console (mono.cecil-based managed
-        # instrumentation, runner-independent) instead. Same pattern as the
-        # aspnetcore job. Run 25495265941 / Avalonia: empty cobertura.
+      - name: Write coverlet.runsettings
+        # R6 (2026-05-08): coverlet.console (R5) was also a silent no-op on
+        # .NET 10 MTP-mode hosts — produced empty Module stubs. Switch to
+        # `dotnet test --collect:"XPlat Code Coverage" --settings
+        # coverlet.runsettings`. The XPlat collector ships with coverlet and
+        # works through MTP because it instruments via the test SDK pipeline,
+        # not via vstest's CLR profiler attach. coverlet.collector is restored
+        # transitively by Microsoft.NET.Test.Sdk-bearing test projects; if
+        # absent it's a runtime no-op (which we'll detect at validate).
         shell: bash
+        working-directory: target
         run: |
-          dotnet tool install -g coverlet.console --version 6.0.2
+          cat > coverlet.runsettings <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <RunSettings>
+            <DataCollectionRunSettings>
+              <DataCollectors>
+                <DataCollector friendlyName="XPlat code coverage">
+                  <Configuration>
+                    <Format>cobertura</Format>
+                    <Include>[Avalonia*]*</Include>
+                    <Exclude>[*Tests]*,[*UnitTests]*,[xunit*]*,[Moq*]*,[NSubstitute*]*</Exclude>
+                    <SingleHit>false</SingleHit>
+                    <UseSourceLink>true</UseSourceLink>
+                    <IncludeTestAssembly>false</IncludeTestAssembly>
+                    <SkipAutoProps>true</SkipAutoProps>
+                    <DeterministicReport>false</DeterministicReport>
+                  </Configuration>
+                </DataCollector>
+              </DataCollectors>
+            </DataCollectionRunSettings>
+          </RunSettings>
+          EOF
 
       # Per-csproj restore+build instead of `dotnet restore Avalonia.slnx`.
       # The slnx pulls in src/Android/Avalonia.Android (needs `android` workload)
@@ -846,11 +868,10 @@ jobs:
             echo "::endgroup::"
           done
 
-      # MTP-aware test invocation via coverlet.console. coverlet wraps dotnet
-      # test, instruments the test assembly DLL via mono.cecil, and emits a
-      # real cobertura report independent of which test runner runs inside.
-      # Find the built test DLL for each csproj under bin/Debug/<tfm>/, then
-      # invoke `coverlet "$asm" --target dotnet --targetargs "test ..."`.
+      # XPlat Code Coverage via coverlet.collector + runsettings. Works under
+      # MTP because the collector hooks the test SDK pipeline (not vstest CLR
+      # profiler attach). We loop per-project to keep crash isolation, then
+      # merge cobertura outputs.
       - name: Run tests with coverage (per-csproj, UnitTests subset)
         shell: bash
         working-directory: target
@@ -872,32 +893,26 @@ jobs:
           for proj in "${PROJECTS[@]}"; do
             i=$((i+1))
             base=$(basename "$proj" .csproj)
-            proj_dir=$(dirname "$proj")
-            out="TestResults/${i}_${base}.cobertura.xml"
             echo "::group::[$i/${#PROJECTS[@]}] $base"
-            # Locate the built test DLL under <proj_dir>/bin/Debug/<tfm>/.
-            # Avalonia projects' AssemblyName usually matches the csproj base.
-            asm=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 2 -name "${base}.dll" 2>/dev/null | head -1 || true)
-            if [[ -z "$asm" || ! -f "$asm" ]]; then
-              asm=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 2 \( -name "*.UnitTests.dll" -o -name "*.Tests.dll" \) 2>/dev/null | head -1 || true)
-            fi
-            if [[ -z "$asm" || ! -f "$asm" ]]; then
-              echo "::warning::No built test DLL for $base — skipping"
-              echo "::endgroup::"
-              continue
-            fi
-            coverlet "$asm" \
-              --target "dotnet" \
-              --targetargs "test \"$proj\" --no-build --filter \"$FILTER\"" \
-              --format cobertura \
-              --output "$out" \
-              --include-test-assembly \
+            dotnet test "$proj" \
+              --no-build \
+              --filter "$FILTER" \
+              --collect:"XPlat Code Coverage" \
+              --settings coverlet.runsettings \
+              --results-directory "TestResults/${i}_${base}" \
               || echo "::warning::Tests in $base failed or runner pressure — continuing"
             echo "::endgroup::"
           done
-          dotnet-coverage merge -r -f cobertura \
-            -o TestResults/coverage.cobertura.xml \
-            "TestResults/*.cobertura.xml" || echo "merge produced no output"
+          # XPlat collector emits coverage.cobertura.xml under a GUID dir per
+          # project. Flatten + merge them.
+          shopt -s globstar nullglob
+          mapfile -t REPORTS < <(find TestResults -type f -name 'coverage.cobertura.xml' 2>/dev/null)
+          echo "Found ${#REPORTS[@]} cobertura files"
+          if [ "${#REPORTS[@]}" -gt 0 ]; then
+            dotnet-coverage merge -r -f cobertura \
+              -o TestResults/coverage.cobertura.xml \
+              "${REPORTS[@]}" || echo "merge produced no output"
+          fi
 
       - uses: ./.github/actions/validate-cobertura
         if: always()

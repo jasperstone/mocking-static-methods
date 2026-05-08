@@ -164,3 +164,21 @@ After round-1 (commit 05b60b4): garnet recovered (transient); Avalonia, eShop, S
 - **NEVER `dotnet restore <whole.sln>` for solutions that mix test/server/utility projects.** Workload manifests evaluate the whole graph at restore time. Per-csproj restore of just the test projects is the safe default. This is the third repo to need this treatment (Avalonia, eShop, Server) — it's the rule, not the exception.
 
 **Validated:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/coverage-orchestrator.yml'))"` returns OK. Did NOT dispatch — Coordinator owns dispatch.
+
+### 2026-05-08 — MAUI removed; OpenRA + StockSharp added (Phase 2 baseline)
+
+Removed the deferred `coverage-maui` job entirely (workflow + choices + summary + README row). 4 rounds of remediation hit increasingly internal MS-CI assumptions; per Brady, the data didn't justify the drag.
+
+Added 2 new jobs:
+
+- **OpenRA** (SHA `8f2138c7`, bleed HEAD) — `net8.0`, NUnit 4 + NUnit3TestAdapter, no coverlet in `OpenRA.Test/OpenRA.Test.csproj`. Strategy: data-collector path (`--collect "Code Coverage;Format=cobertura"` + `dotnet-coverage merge`), same as abp/efcore/roslyn/runtime. Side-installs .NET 8 SDK via `dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet` because the noble container ships only .NET 10 and OpenRA has no `global.json` to pin against. Per-csproj restore+build+test of the single test project — no slnx-level invocation (pattern from round-1 lesson: never restore mixed-graph slns).
+
+- **StockSharp** (SHA `a26ce597`, master HEAD) — `net10.0` (resolved via `common_target_tests.props` → `common_target_net.props` → `NetVer=10` in `common_versions.props`), MSTest 4.x, no coverlet. Strategy: same data-collector path. Per-csproj restore+build of `Tests/Tests.csproj` only (the `StockSharp_Tests.slnx` pulls 22 projects; targeted restore is safer). No `NuGet.config`/`nuget.config` in the repo so default nuget.org feed pulls Ecng.* packages. Risk: `Tests/Tests.csproj` references `Microsoft.Data.SqlClient` + `Ecng.Data.SqlServer` — individual test cases that hit a SQL server will fail in isolation (and should be filtered by Category=Integration); discover/build should be unaffected.
+
+**Skipped PowerToys + Files:** both are Windows-only at the SDK/TFM level, not just at the framework level. Files mandates `net10.0-windows10.0.26100.0` in root `Directory.Build.props`; PowerToys' UnitTest projects all hang off `src/modules/<windows-only>/` chains. Documented in README Phase 2 rows with concrete blockers (manifest files, TFM strings) instead of "Mode #1 footprint too low" which had been the previous handwave.
+
+**Validation:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/coverage-orchestrator.yml'))"` returns OK. Did NOT predict success rates — both new repos may need 1–2 rounds of remediation per the established pattern (Avalonia/eShop/Server were 2-round; first attempt's job is to surface the actual failure mode, not be perfect).
+
+**Choice rationale (per repo):** The deciding factor for both new repos was the absence of `coverlet.collector` in their test csproj. With coverlet absent, the MTP/data-collector silent-no-op (decisions.md 2026-05-01) and the coverlet.console fallback (Avalonia/eShop pattern) are both options, but the data-collector path with cobertura output is the simpler and currently-known-good choice for vstest-host MSTest/NUnit projects. If either job produces an empty cobertura on first run, the round-2 fix is the coverlet.console swap (no .csproj edits, just runner change).
+
+**Pin-by-API-not-clone pattern:** This is the first time we pinned SHAs for repos that don't exist in `cloned_repos/`. `gh api /repos/<owner>/<name>/commits/<default_branch> --jq .sha` is the right tool — no need to clone locally just to read HEAD. The workflow's clone step pulls the pinned SHA at run time. Generalizes cleanly to any future Phase N additions.

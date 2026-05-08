@@ -132,13 +132,13 @@ To grow the sample set from 7 to a more meaningful 13–15 repositories, we ran 
 | eShop | [dotnet/eShop](https://github.com/dotnet/eShop) | 94 | ✅ Included | Microsoft reference architecture; `tests/ClientApp.UnitTests` excluded (requires `maui-tizen` workload) |
 | duplicati | [duplicati/duplicati](https://github.com/duplicati/duplicati) | 34 | ✅ Included | Cross-platform backup tool, standard .NET test layout |
 | Avalonia | [AvaloniaUI/Avalonia](https://github.com/AvaloniaUI/Avalonia) | 9 | ✅ Included | Cross-platform UI; restore scoped to `tests/*.UnitTests.csproj` to avoid Android/iOS/wasm sample projects |
-| MAUI | [dotnet/maui](https://github.com/dotnet/maui) | 329 | ⚠️ Deferred | In-tree build resolves projects targeting `net10.0-android36.0`, requiring the **Android SDK** (~3-5 GB) on top of the `maui-android` workload. Three rounds of remediation each uncovered another layer of MS-internal-CI assumption. Deferred — job body retained in the workflow but the `if:` gate keeps it dormant unless explicitly dispatched |
-| Files | [files-community/Files](https://github.com/files-community/Files) | 163 | ❌ Excluded | WinUI3 / Windows-only — cannot build in Linux container |
-| PowerToys | [microsoft/PowerToys](https://github.com/microsoft/PowerToys) | 66 | ❌ Excluded | WPF / Windows-only — cannot build in Linux container |
-| OpenRA | [OpenRA/OpenRA](https://github.com/OpenRA/OpenRA) | 13 | ❌ Excluded | Mode #1 footprint too low to affect coverage signal |
-| StockSharp | [StockSharp/StockSharp](https://github.com/StockSharp/StockSharp) | 3 | ❌ Excluded | Mode #1 footprint too low to affect coverage signal |
+| MAUI | [dotnet/maui](https://github.com/dotnet/maui) | 329 | ❌ Removed (was deferred) | Removed after 4 rounds of remediation. The MAUI build presumes MS-internal CI conventions (`Build.Tasks.slnf` prerequisite, then projects target `net10.0-android36.0` directly). Carrying these workarounds added more drag than the data justified |
+| Files | [files-community/Files](https://github.com/files-community/Files) | 163 | ❌ Excluded | UWP/WinUI 3, Windows-only TFMs throughout (`Directory.Build.props` mandates `net10.0-windows10.0.26100.0`); UI tests carry `Package.appxmanifest`. Cannot build in Linux container |
+| PowerToys | [microsoft/PowerToys](https://github.com/microsoft/PowerToys) | 66 | ❌ Excluded | WPF/WinUI 3, Windows-only. UnitTest projects all hang off `src/modules/<windows-only-module>/` and pull WinUI references transitively. Cannot build in Linux container |
+| OpenRA | [OpenRA/OpenRA](https://github.com/OpenRA/OpenRA) | 13 | ✅ Included | Cross-platform (`net8.0`, NUnit 4). .NET 8 SDK side-installed in the .NET 10 container; `OpenRA.Test` uses external `dotnet-coverage` (no coverlet in repo) |
+| StockSharp | [StockSharp/StockSharp](https://github.com/StockSharp/StockSharp) | 3 | ✅ Included | Cross-platform (`net10.0`, MSTest 4). Single `Tests/Tests.csproj`; external `dotnet-coverage` data-collector path |
 
-**Result:** 13 repos in the active matrix (7 original + 6 added), covering ~6,500 of 6,879 detected Mode #1 sites (94%).
+**Result:** 15 repos in the active matrix (7 original + 8 added in Phase 2), covering ~6,500 of 6,879 detected Mode #1 sites (94%).
 
 ### Containerized Builds
 

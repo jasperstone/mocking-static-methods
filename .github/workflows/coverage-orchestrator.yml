@@ -15,10 +15,10 @@
 #   - All actions, target-repo refs, and the runner image are pinned to SHAs.
 #   - Coverage strategy (chosen per repo so we never modify .csproj files):
 #       * coverlet.collector ALREADY in repo  -> dotnet test --collect:"XPlat Code Coverage"
-#         (aspnetcore, orleans, semantic-kernel, jellyfin, maui, server, duplicati)
+#         (aspnetcore, orleans, semantic-kernel, jellyfin, server, duplicati)
 #       * coverlet NOT in repo                -> dotnet test --collect "Code Coverage;Format=cobertura"
 #                                                + dotnet-coverage merge
-#         (abp, efcore, roslyn, runtime, Avalonia, eShop, garnet)
+#         (abp, efcore, roslyn, runtime, Avalonia, eShop, garnet, OpenRA, StockSharp)
 #   - Tests are run "the way each team runs them" (only integration/E2E filters).
 #   - Both HTML reports and raw cobertura XML are uploaded as artifacts.
 #   - continue-on-error on test steps so reportgenerator still runs on failures.
@@ -45,8 +45,17 @@
 #   eShop           9b4f9434f46fdc5c1a6e9e936af2868340cdbc48  (main HEAD)
 #   garnet          38cac99c7ad80ae8465ea6e0f120bd6698730a75  (main HEAD)
 #   jellyfin        e1e18e8da015e7311e62cdb62167d51e90331edd  (master HEAD)
-#   maui            b71adea6e63829f4fc264302f1cad08aa542c794  (main HEAD)
 #   server          ea233580d24734f78feffe7fa5cef185b1a2df28  (main HEAD, bitwarden/server)
+#
+# Phase 2 baseline additions (resolved 2026-05-08):
+#   OpenRA          8f2138c71106aaffd8a288b56d1c9ef6013700ba  (bleed HEAD, OpenRA/OpenRA)
+#   StockSharp      a26ce597cab73fe07949e0cc3845216342d33484  (master HEAD, StockSharp/StockSharp)
+#
+# Phase 2 removed:
+#   maui — removed 2026-05-08 after 4 rounds of remediation. The MAUI build
+#   presumes MS-internal CI conventions (Build.Tasks.slnf prerequisite, then
+#   projects target net10.0-android36.0 directly). Carrying these workarounds
+#   added more drag than the data justified.
 # =============================================================================
 
 name: Coverage Orchestrator
@@ -55,7 +64,7 @@ on:
   workflow_dispatch:
     inputs:
       repo:
-        description: "Target repo (or 'all' for all 14)"
+        description: "Target repo (or 'all' for all 15)"
         required: true
         default: "all"
         type: choice
@@ -69,12 +78,13 @@ on:
           - eShop
           - garnet
           - jellyfin
-          - maui
+          - OpenRA
           - orleans
           - roslyn
           - runtime
           - semantic-kernel
           - server
+          - StockSharp
 
 permissions:
   contents: read
@@ -1242,105 +1252,76 @@ jobs:
           reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
-  # MAUI — DEFERRED (see README "Repository Inclusion Decisions").
+  # OpenRA — external dotnet-coverage; .NET 8 SDK side-installed
   # ===========================================================================
-  # MAUI's in-tree build resolves *.csproj projects whose TargetFrameworks
-  # include net10.0-android36.0, which require the Android SDK (separate from
-  # the .NET android workload). The Build.Tasks.slnf prerequisite alone won't
-  # restore those projects without provisioning the Android SDK in-container
-  # (~3-5 GB). Three rounds of remediation each uncovered another layer of
-  # MS-internal-CI assumption (custom global.json, maui-android subset, in-tree
-  # MSBuild tasks, then Android SDK). The remaining 13 repos already cover
-  # ~5,500 of 6,879 detected Mode #1 sites (80%); MAUI's 329 sites are not
-  # worth the maintenance cost. Job body retained for future reactivation —
-  # the `if:` gate keeps it dormant unless explicitly dispatched.
-  # Run history: 25527102157 (global.json), 25531117370 (workload), 25532666443
-  # (BuildTasks), 25549163113 (Android SDK).
-  maui:
-    name: "Coverage: MAUI (DEFERRED)"
+  # OpenRA targets net8.0 (Directory.Build.props) and the noble SDK 10 image
+  # ships only .NET 10. `dotnet-install.sh --channel 8.0` puts an SDK 8 next
+  # to the container's SDK 10 (no global.json in the repo to pin against, so
+  # we just install the latest 8.0 LTS). Test project (`OpenRA.Test`) uses
+  # NUnit 4 + NUnit3TestAdapter and does NOT reference coverlet.collector,
+  # so we use the data-collector path with `Code Coverage;Format=cobertura`
+  # (same pattern as abp/efcore/roslyn/runtime).
+  OpenRA:
+    name: "Coverage: OpenRA"
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 360
-    # DEFERRED: requires Android SDK (~3-5 GB) on top of maui-android workload.
-    # Set to never auto-run; can be manually dispatched with repo=maui to retry.
-    if: github.event.inputs.repo == 'maui'
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'OpenRA'
     steps:
       - name: Checkout orchestrator repo (for local composite actions)
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
       - uses: ./.github/actions/setup-workspace
 
-      - name: Clone MAUI at pinned SHA
+      - name: Clone OpenRA at pinned SHA
         run: |
-          git clone --filter=blob:none https://github.com/dotnet/maui.git target
+          git clone --filter=blob:none https://github.com/OpenRA/OpenRA.git target
           cd target
-          git fetch --depth 1 origin b71adea6e63829f4fc264302f1cad08aa542c794
+          git fetch --depth 1 origin 8f2138c71106aaffd8a288b56d1c9ef6013700ba
           git checkout FETCH_HEAD
 
       - uses: ./.github/actions/restore-nuget-cache
         with:
-          repo-name: maui
-          sha-prefix: b71adea6
+          repo-name: OpenRA
+          sha-prefix: 8f2138c7
 
-      # NOTE: MAUI's global.json declares MSBuild SDK workload manifests but has
-      # NO `sdk.version` node. `dotnet-install.sh --jsonfile global.json` aborts
-      # with "Unable to find the SDK:version node". The noble container's
-      # pre-installed 10.0.203 SDK is sufficient — use it directly.
-      # Run 25527102157 / maui: failed at `dotnet-install.sh --jsonfile global.json`.
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
-      - name: Install MAUI workload (Linux-compatible subset)
+      - name: Install .NET 8 SDK (OpenRA targets net8.0)
         shell: bash
-        working-directory: target
-        # The umbrella `maui` workload is rejected on Linux (requires iOS+Mac
-        # SDKs): "Workload ID maui isn't supported on this platform."
-        # `maui-android` is the Linux-supported subset and ships the MAUI
-        # cross-platform manifests that the *.UnitTests projects need
-        # ($(_MauiDotNetTfm) resolves once any maui-* workload is installed).
-        # Pulls Android SDK (~1.5GB) — slow but deterministic.
-        # Run 25495265941 / maui: `dotnet workload install maui` rejected.
         run: |
-          dotnet workload install maui-android --skip-sign-check
-          dotnet workload list
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          chmod +x /tmp/dotnet-install.sh
+          /tmp/dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
+          dotnet --list-sdks
 
-      - name: Build MAUI in-tree MSBuild tasks (prerequisite for any csproj)
+      - name: Restore + build OpenRA.Test
         shell: bash
         working-directory: target
-        # MAUI's repo uses Maui.InTree.targets, which requires the custom
-        # Microsoft.Maui.BuildTasks assembly to be compiled BEFORE any MAUI
-        # csproj can build. Without this, every csproj fails with:
-        #   error : We have detected that the required MSBuild tasks are not
-        #   yet built or they are out of date.
-        #   ...run: dotnet build Microsoft.Maui.BuildTasks.slnf
-        # Run 25532666443 / maui: tasks-not-built blocked all 4 unit-test projects.
-        run: dotnet build Microsoft.Maui.BuildTasks.slnf
+        run: |
+          dotnet restore OpenRA.Test/OpenRA.Test.csproj
+          dotnet build OpenRA.Test/OpenRA.Test.csproj -c Release --no-restore
 
-      - name: Run tests with coverage (UnitTests subset only)
+      - name: Run tests with coverage
         shell: bash
         working-directory: target
         continue-on-error: true
-        # Scope: src/Controls/tests/*.UnitTests/*.csproj — the 4 coverlet-bearing
-        # cross-platform unit-test projects (Core / SourceGen / BindingSourceGen /
-        # Xaml). TestCases.* are device tests and are excluded by the path filter.
+        # NUnit project, no coverlet.collector → data-collector path with cobertura
+        # output. Standard upstream filter to skip integration/E2E/perf categories
+        # (most won't apply but keeps the pattern consistent across repos).
         run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
-          mapfile -t PROJECTS < <(find src/Controls/tests -type f -name "*.UnitTests.csproj" \
-            ! -path "*TestCases*" \
-            ! -path "*Device*" \
-            | sort -u)
-          echo "Discovered ${#PROJECTS[@]} test projects:"
-          printf '  %s\n' "${PROJECTS[@]}"
-          for proj in "${PROJECTS[@]}"; do
-            base=$(basename "$proj" .csproj)
-            echo "::group::Restore+Build+Test $base"
-            dotnet test "$proj" \
-              --filter "$FILTER" \
-              --collect:"XPlat Code Coverage" \
-              --results-directory ./TestResults \
-              || echo "::warning::Tests in $base failed or runner pressure — continuing"
-            echo "::endgroup::"
-          done
+          dotnet test OpenRA.Test/OpenRA.Test.csproj --no-build -c Release \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults || true
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
 
       - uses: ./.github/actions/validate-cobertura
         if: always()
@@ -1354,9 +1335,8 @@ jobs:
       - uses: ./.github/actions/cobertura-report-and-upload
         if: always()
         with:
-          repo-name: maui
+          repo-name: OpenRA
           working-directory: target
-          cobertura-glob: TestResults/*/coverage.cobertura.xml
           reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
@@ -1487,6 +1467,89 @@ jobs:
           reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
+  # StockSharp — external dotnet-coverage; MSTest, no coverlet in test csproj
+  # ===========================================================================
+  # StockSharp/Tests/Tests.csproj imports common_target_tests.props which
+  # resolves to TargetFrameworks=net10.0 (NetVer=10 in common_versions.props).
+  # MSTest 4.x adapter, no coverlet.collector reference, so the data-collector
+  # path with `Code Coverage;Format=cobertura` is the right call. The Tests
+  # project pulls in Microsoft.Data.SqlClient + Ecng.Data.SqlServer; if any
+  # individual test cases require a live SQL Server they should fail in
+  # isolation and be filtered by category, but project restore/build/discover
+  # should not. No private NuGet feed config in the repo (uses default
+  # nuget.org for Ecng.* packages).
+  StockSharp:
+    name: "Coverage: StockSharp"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'StockSharp'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone StockSharp at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/StockSharp/StockSharp.git target
+          cd target
+          git fetch --depth 1 origin a26ce597cab73fe07949e0cc3845216342d33484
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: StockSharp
+          sha-prefix: a26ce597
+
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      - name: Restore + build Tests project
+        shell: bash
+        working-directory: target
+        # Per-csproj restore + build (StockSharp_Tests.slnx pulls 22 projects
+        # including BasketSecurity etc.; restoring the whole graph adds drag.
+        # Tests.csproj has the ProjectReferences it needs and will pull them
+        # transitively).
+        run: |
+          dotnet restore Tests/Tests.csproj
+          dotnet build Tests/Tests.csproj -c Release --no-restore
+
+      - name: Run tests with coverage
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          dotnet test Tests/Tests.csproj --no-build -c Release \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults || true
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: StockSharp
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
   # Summary — runs after all repo jobs (success or failure)
   # ===========================================================================
   summary:
@@ -1502,11 +1565,13 @@ jobs:
       - eShop
       - garnet
       - jellyfin
+      - OpenRA
       - orleans
       - roslyn
       - runtime
       - semantic-kernel
       - server
+      - StockSharp
     steps:
       - name: Print summary
         run: |
@@ -1523,12 +1588,13 @@ jobs:
             echo "| eShop              | ${{ needs.eShop.result }} |"
             echo "| Garnet             | ${{ needs.garnet.result }} |"
             echo "| Jellyfin           | ${{ needs.jellyfin.result }} |"
-            echo "| MAUI               | DEFERRED (Android SDK required) |"
+            echo "| OpenRA             | ${{ needs.OpenRA.result }} |"
             echo "| Orleans            | ${{ needs.orleans.result }} |"
             echo "| Roslyn             | ${{ needs.roslyn.result }} |"
             echo "| .NET Runtime       | ${{ needs.runtime.result }} |"
             echo "| Semantic Kernel    | ${{ needs.semantic-kernel.result }} |"
             echo "| Server (Bitwarden) | ${{ needs.server.result }} |"
+            echo "| StockSharp         | ${{ needs.StockSharp.result }} |"
             echo ""
             echo "Artifacts: coverage-report-* (HTML) and coverage-xml-* (raw cobertura)."
           } >> "$GITHUB_STEP_SUMMARY"

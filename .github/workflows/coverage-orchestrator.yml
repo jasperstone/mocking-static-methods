@@ -1558,12 +1558,15 @@ jobs:
             asm=$(set +o pipefail; find Tests/bin/Release -maxdepth 2 -name "*.Tests.dll" 2>/dev/null | head -1 || true)
           fi
           echo "Instrumenting: $asm"
+          ls -la "$(dirname "$asm")" | head -40
           coverlet "$asm" \
             --target "dotnet" \
             --targetargs "test Tests/Tests.csproj --no-build -c Release --filter \"$FILTER\"" \
             --format cobertura \
             --output "TestResults/coverage.cobertura.xml" \
             --include-test-assembly \
+            --include "[StockSharp*]*" \
+            --include "[Ecng*]*" \
             || echo "::warning::Tests in StockSharp.Tests failed or runner pressure — continuing"
 
       - uses: ./.github/actions/validate-cobertura

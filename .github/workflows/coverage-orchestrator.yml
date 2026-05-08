@@ -1558,7 +1558,6 @@ jobs:
             asm=$(set +o pipefail; find Tests/bin/Release -maxdepth 2 -name "*.Tests.dll" 2>/dev/null | head -1 || true)
           fi
           echo "Instrumenting: $asm"
-          ls -la "$(dirname "$asm")" | head -40
           coverlet "$asm" \
             --target "dotnet" \
             --targetargs "test Tests/Tests.csproj --no-build -c Release --filter \"$FILTER\"" \

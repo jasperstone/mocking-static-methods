@@ -795,15 +795,34 @@ jobs:
         with:
           version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
-      - name: Restore Avalonia.slnx
+      # Per-csproj restore+build instead of `dotnet restore Avalonia.slnx`.
+      # The slnx pulls in src/Android/Avalonia.Android (needs `android` workload)
+      # and samples/ControlCatalog.{Browser,iOS} (need `wasm-tools`/iOS workload),
+      # which fail with NETSDK1147 on the noble SDK container. Restoring only the
+      # *.UnitTests.csproj projects we actually run avoids the workload-bound
+      # graph entirely. Run 25527102157 / Avalonia: failed at slnx restore.
+      - name: Restore + build UnitTests projects
         shell: bash
         working-directory: target
-        run: dotnet restore Avalonia.slnx
-
-      - name: Build Avalonia.slnx
-        shell: bash
-        working-directory: target
-        run: dotnet build Avalonia.slnx -c Debug --no-restore
+        run: |
+          mapfile -t PROJECTS < <(find tests -type f -name "*.UnitTests.csproj" \
+            ! -path "*RenderTests*" \
+            ! -path "*LeakTests*" \
+            ! -path "*Designer*" \
+            ! -path "*Browser*" \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            | sort -u)
+          echo "Discovered ${#PROJECTS[@]} test projects:"
+          printf '  %s\n' "${PROJECTS[@]}"
+          for proj in "${PROJECTS[@]}"; do
+            echo "::group::Restore+Build $(basename "$proj")"
+            dotnet restore "$proj" \
+              || echo "::warning::Restore of $proj failed — continuing"
+            dotnet build "$proj" -c Debug --no-restore \
+              || echo "::warning::Build of $proj failed — continuing"
+            echo "::endgroup::"
+          done
 
       # Avalonia is UI framework; render/leak/integration tests need X server or
       # GPU. Scope to *.UnitTests.csproj under tests/, exclude RenderTests / LeakTests
@@ -958,32 +977,31 @@ jobs:
         with:
           version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
-      # eShop's tests/ contains only 3 unit-test csprojs (Ordering / Basket /
+      # eShop's tests/ contains 3 unit-test csprojs (Ordering / Basket /
       # ClientApp). They use MSTest.Sdk + Microsoft.Testing.Platform — exe-style
-      # entry points, not standard vstest hosts. Their src/ project refs pull in
-      # Aspire NuGets, but Aspire is no longer a workload in .NET 10 (just packages),
-      # so no `dotnet workload install` is needed.
-      - name: Restore eShop.slnx
+      # entry points, not standard vstest hosts.
+      #
+      # ClientApp.UnitTests is a MAUI client and requires the `maui-tizen`
+      # workload to restore (NETSDK1147). We deliberately skip it — Ordering and
+      # Basket are the server-side unit suites that align with the rest of the
+      # matrix. Restoring eShop.slnx as a whole also pulls ClientApp into the
+      # graph, so we restore+build per-csproj instead.
+      # Run 25527102157 / eShop: failed at `dotnet restore eShop.slnx`.
+      - name: Restore + build server unit-test projects
         shell: bash
         working-directory: target
-        run: dotnet restore eShop.slnx
-
-      - name: Build unit-test projects only
-        shell: bash
-        working-directory: target
-        # Build only the three UnitTests csprojs (and their transitive deps) to
-        # avoid the AppHost/orchestrator build path which targets Aspire dashboards.
         run: |
           for proj in tests/Ordering.UnitTests/Ordering.UnitTests.csproj \
-                      tests/Basket.UnitTests/Basket.UnitTests.csproj \
-                      tests/ClientApp.UnitTests/ClientApp.UnitTests.csproj; do
-            echo "::group::Build $proj"
+                      tests/Basket.UnitTests/Basket.UnitTests.csproj; do
+            echo "::group::Restore+Build $proj"
+            dotnet restore "$proj" \
+              || echo "::warning::Restore of $proj failed — continuing"
             dotnet build "$proj" -c Debug --no-restore \
               || echo "::warning::Build of $proj failed — continuing"
             echo "::endgroup::"
           done
 
-      - name: Run tests with coverage (per-csproj, UnitTests only)
+      - name: Run tests with coverage (per-csproj, server UnitTests only)
         shell: bash
         working-directory: target
         continue-on-error: true
@@ -992,8 +1010,7 @@ jobs:
           mkdir -p TestResults
           FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
           for proj in tests/Ordering.UnitTests/Ordering.UnitTests.csproj \
-                      tests/Basket.UnitTests/Basket.UnitTests.csproj \
-                      tests/ClientApp.UnitTests/ClientApp.UnitTests.csproj; do
+                      tests/Basket.UnitTests/Basket.UnitTests.csproj; do
             echo "::group::Running $(basename "$proj")"
             dotnet test "$proj" --no-build \
               --filter "$FILTER" \
@@ -1205,18 +1222,11 @@ jobs:
           repo-name: maui
           sha-prefix: b71adea6
 
-      - name: Install pinned .NET SDK from global.json
-        # MAUI's global.json pins an RTM preview SDK (10.0.100-rtm.25523.113)
-        # that the noble container does not satisfy. Same pattern as Roslyn:
-        # install via dotnet-install.sh --jsonfile, then prepend to PATH.
-        shell: bash
-        working-directory: target
-        run: |
-          curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-          chmod +x dotnet-install.sh
-          ./dotnet-install.sh --jsonfile global.json --install-dir "$GITHUB_WORKSPACE/.dotnet"
-          echo "DOTNET_ROOT=$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_ENV"
-          echo "$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_PATH"
+      # NOTE: MAUI's global.json declares MSBuild SDK workload manifests but has
+      # NO `sdk.version` node. `dotnet-install.sh --jsonfile global.json` aborts
+      # with "Unable to find the SDK:version node". The noble container's
+      # pre-installed 10.0.203 SDK is sufficient — use it directly.
+      # Run 25527102157 / maui: failed at `dotnet-install.sh --jsonfile global.json`.
 
       - name: Install MAUI workload
         shell: bash
@@ -1318,15 +1328,26 @@ jobs:
           echo "$GITHUB_WORKSPACE/.dotnet" >> "$GITHUB_PATH"
           dotnet --list-sdks
 
+      # bitwarden/server sets TreatWarningsAsErrors=true and enables NuGet audit,
+      # so any moderate-or-higher CVE in a transitive package (e.g. MailKit 4.14.0
+      # NU1902) fails restore. We disable NuGet audit for this job and explicitly
+      # remove NU1902 from the warnings-as-errors set as a belt-and-suspenders.
+      # Run 25527102157 / server: failed at `dotnet restore bitwarden-server.sln`.
       - name: Restore bitwarden-server.sln
         shell: bash
         working-directory: target
-        run: dotnet restore bitwarden-server.sln
+        run: |
+          dotnet restore bitwarden-server.sln \
+            -p:NuGetAudit=false \
+            -p:WarningsNotAsErrors=NU1902
 
       - name: Build bitwarden-server.sln
         shell: bash
         working-directory: target
-        run: dotnet build bitwarden-server.sln -c Debug --no-restore
+        run: |
+          dotnet build bitwarden-server.sln -c Debug --no-restore \
+            -p:NuGetAudit=false \
+            -p:WarningsNotAsErrors=NU1902
 
       # Test projects under test/ split into *.Test (unit) and *.IntegrationTest
       # (need real DB / external services). FILTER excludes IntegrationTests by

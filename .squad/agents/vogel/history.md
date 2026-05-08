@@ -105,3 +105,44 @@ can add a fourth heuristic.
   *some* recognised marker", not "discovery succeeded". If you see
   `status=ok` with `universe=0`, check the raw-log artifact before
   blaming the filter.
+
+### 2026-05-07 — Orchestrator expansion 7→14 repos (commit 0318b56)
+
+Added 7 jobs (Avalonia, duplicati, eShop, garnet, jellyfin, maui, server) to `.github/workflows/coverage-orchestrator.yml`. SHAs resolved from local `cloned_repos/<repo>` HEADs. Per-repo build patterns:
+
+- **jellyfin** — `Jellyfin.sln`, all 16 test csprojs reference coverlet.collector → sln-level `dotnet test --collect:"XPlat Code Coverage"`. global.json pins `10.0.0` `latestMinor` → noble container's `10.0.203` satisfies it. Easiest of the seven.
+- **garnet** — `Garnet.slnx`, NO coverlet anywhere. Tests don't follow `*.Tests.csproj` naming (`Garnet.test`, `Garnet.test.cluster`, `Garnet.fuzz`). Scoped to `test/Garnet.test/Garnet.test.csproj` only — cluster needs multi-node setup, fuzz is non-deterministic. Standard `--collect "Code Coverage;Format=cobertura"` + merge.
+- **maui** — `Microsoft.Maui.sln`, only the Controls/tests/*.UnitTests subset has coverlet. Scoped find filter excludes TestCases.* (device tests). global.json pins RTM preview SDK `10.0.100-rtm.25523.113` → install via `dotnet-install.sh --jsonfile global.json` (Roslyn pattern). **Requires `dotnet workload install maui`** — pulls Android SDK ~2GB. The 360-min job timeout is generous enough; expect ~5–10 min just for the workload pull. If it becomes a runner pressure issue, follow-up patches should consider scoping further or switching to `maui-mobile`-only workload.
+- **server (bitwarden)** — `bitwarden-server.sln`, all `*.Test` projects reference coverlet (21 csprojs found). global.json pins SDK `8.0.100` `latestFeature` → container's .NET 10 won't satisfy. Install .NET 8 SDK via `dotnet-install.sh --jsonfile global.json`. Note: local clone is bitwarden/server, not microsoft/sqltoolsservice (the directory was named "server" during cloning). Job header documents the discrepancy.
+- **eShop** — `eShop.slnx`, NO coverlet. Tests use `MSTest.Sdk` + Microsoft.Testing.Platform (exe-style entry points). Only 3 unit-test csprojs (Ordering / Basket / ClientApp). Scoped per-csproj. **Aspire is NuGet-only in .NET 10** — no workload install needed (was needed in .NET 8/9, but the SDK pin here is 10.0.100). Risk: MTP's interaction with `--collect "Code Coverage;Format=cobertura"` is untested in this stack; if the data collector silently no-ops (like it did for ABP/aspnetcore historically), follow-up needs `--coverage` MTP flag or coverlet.console adapter.
+- **duplicati** — `Duplicati.slnx`, only `Duplicati/UnitTest/` has coverlet (1 project). NO global.json — falls back to container SDK. Build only that one csproj (Browser.Test needs Playwright; LiveTests/Backend.Tests need cloud creds — both excluded by name). Cleanest of the seven.
+- **Avalonia** — `Avalonia.slnx`, NO coverlet. global.json sets `test.runner=Microsoft.Testing.Platform`. SDK `10.0.201` `latestFeature` → container OK. 12 `*.UnitTests.csproj` under tests/. Scoped per-csproj, excluding RenderTests/LeakTests/Designer/Browser (need GPU/X server/Playwright). Same MTP-vs-collector risk as eShop.
+
+**Gotchas captured for future agents:**
+- **Naming convention skew:** Garnet uses `Garnet.test.csproj` (lowercase, no plural), not `*.Tests.csproj`. Always inspect test/ directory contents before applying a generic `find -name "*.Tests.csproj"`.
+- **MTP runner + Code Coverage data collector** is an untested interaction in this codebase. eShop and Avalonia are the canaries. If both produce empty cobertura on first run, the failure pattern is well-documented (decisions.md 2026-05-01) and the fix is to switch to coverlet.console (the ASP.NET Core path).
+- **MAUI workload install** is the slowest step in the matrix (~10 min, ~2GB disk). Validates that the 360-min timeout is the right choice (decisions.md 2026-04-30 set this for runtime; turns out maui needs it too).
+- **Bitwarden/server is .NET 8**, not .NET 10. First job in the matrix that pins to a different major SDK. The `dotnet-install.sh --jsonfile global.json` pattern (originally Roslyn-only for the rc.2 SDK) generalizes cleanly — both maui and server use it now.
+- **Cross-repo SHA resolution:** all 7 SHAs came from `git -C cloned_repos/<repo> log -1 --format=%H` against local depth-1 clones. This freezes the experiment to whatever was on disk at clone time. If Jasper re-clones with a deeper tree (e.g., for tag-based pinning), the SHAs will need re-resolution.
+
+Did NOT trigger the workflow run (per Coordinator instructions). Pushed as commit 0318b56 on jasper/phase2.
+
+### 2026-05-07 — Orchestrator round-1 fixes (4 of 5 failures from run 25527102157)
+
+Run 25527102157 expanded the matrix to 14 repos. 9 succeeded (original 7 + jellyfin + duplicati). 5 failed; 4 had real bugs, 1 was transient.
+
+**Surgical edits to `.github/workflows/coverage-orchestrator.yml`:**
+
+- **Avalonia (~+22 / −9 lines):** Replaced two slnx-level steps (`Restore Avalonia.slnx`, `Build Avalonia.slnx`) with one `Restore + build UnitTests projects` step that does per-csproj restore+build using the same `find tests -name "*.UnitTests.csproj"` filter the test step already uses. The slnx graph includes `src/Android/Avalonia.Android` and `samples/ControlCatalog.{Browser,iOS}` which trigger `NETSDK1147` (android / wasm-tools).
+- **eShop (~+15 / −12 lines):** Dropped `Restore eShop.slnx` step; rewrote `Build unit-test projects only` to a `Restore + build server unit-test projects` step that restores+builds Ordering and Basket only. Removed `ClientApp.UnitTests` from both the build and test loops (it's a MAUI client, needs `maui-tizen` workload). Test loop now iterates 2 csprojs, not 3.
+- **MAUI (−12 lines):** Deleted the `Install pinned .NET SDK from global.json` step entirely. MAUI's `global.json` declares only workload manifests, no `sdk.version`, which makes `dotnet-install.sh --jsonfile` exit nonzero. The noble container's preinstalled 10.0.203 SDK is sufficient. Workload install step still runs.
+- **Server (~+8 / −2 lines):** Restore and Build commands now pass `-p:NuGetAudit=false -p:WarningsNotAsErrors=NU1902`. bitwarden-server has `TreatWarningsAsErrors=true` plus NuGet audit enabled, so MailKit 4.14.0's NU1902 moderate advisory was failing restore. Both flags applied to belt-and-suspenders the audit promotion.
+- **Garnet (no change):** Container init was blocked at MCR docker pull (sporadic egress rate-limit). No code-level remedy; coordinator re-runs the matrix.
+
+**Pattern captured for next time:** `dotnet restore <whole.slnx>` is unsafe when the solution mixes server projects with mobile/MAUI/wasm/Tizen projects. Workload manifests are evaluated at restore time for the WHOLE graph — they are not lazy. Default to per-csproj restore + build for the specific test projects we plan to invoke. The `.slnx`-level restore convenience step costs more than it saves once any solution contains a workload-bound project.
+
+**Bitwarden's strict warning posture is repo-policy, not bug:** They genuinely want to fail their CI on moderate CVEs. Our coverage orchestrator is downstream and just needs tests to compile and run. Disabling `NuGetAudit` for our job does not affect their pipeline.
+
+**MAUI dotnet-install pattern is conditional, not universal:** Roslyn ships a real `sdk.version` and benefits from `--jsonfile` install. Server (bitwarden) ships SDK 8.0.100 latestFeature and benefits. MAUI ships only manifest declarations and breaks. Always check the `global.json` shape before assuming the Roslyn pattern transfers.
+
+**Validated:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/coverage-orchestrator.yml'))"` returns OK. Did NOT dispatch the workflow — Coordinator owns dispatch.

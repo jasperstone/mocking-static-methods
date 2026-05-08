@@ -146,3 +146,21 @@ Run 25527102157 expanded the matrix to 14 repos. 9 succeeded (original 7 + jelly
 **MAUI dotnet-install pattern is conditional, not universal:** Roslyn ships a real `sdk.version` and benefits from `--jsonfile` install. Server (bitwarden) ships SDK 8.0.100 latestFeature and benefits. MAUI ships only manifest declarations and breaks. Always check the `global.json` shape before assuming the Roslyn pattern transfers.
 
 **Validated:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/coverage-orchestrator.yml'))"` returns OK. Did NOT dispatch the workflow — Coordinator owns dispatch.
+
+### 2026-05-07 — Orchestrator round-2 fixes (4 of 4 remaining failures)
+
+After round-1 (commit 05b60b4): garnet recovered (transient); Avalonia, eShop, Server, MAUI still failing. Round-2 surgical edits to `.github/workflows/coverage-orchestrator.yml` (+135 / −45 lines):
+
+- **Avalonia (~+50 / −18):** Switched to coverlet.console pattern (mirrors aspnetcore job). Added `Install coverlet.console` step (`coverlet.console 6.0.2`). Test loop now invokes `coverlet "$asm" --target dotnet --targetargs "test \"$proj\" --no-build --filter ..."` per csproj, with the test DLL discovered under `<proj_dir>/bin/Debug/<tfm>/`. Restore+build step unchanged.
+- **eShop (~+30 / −12):** Same coverlet.console swap as Avalonia. Restore+build step unchanged (still Ordering + Basket only).
+- **Server (~+45 / −22):** Replaced sln-level `restore/build/test bitwarden-server.sln` with per-csproj loop over `test/*.Test.csproj` (excluding `*.IntegrationTest.csproj`, `Common.csproj`, `IntegrationTestCommon.csproj`). RustSdk is referenced ONLY by `util/Seeder/Seeder.csproj` (verified locally with `grep -l RustSdk cloned_repos/server/**/*.csproj`); scoping to test projects sidesteps it without installing Rust toolchain. Belt-and-suspenders `-p:NuGetAudit=false -p:WarningsNotAsErrors=NU1902` preserved. coverlet.collector is referenced transitively via `test/Common.csproj`, so XPlat Code Coverage works without coverlet.console here.
+- **MAUI (~+10 / −8):** Workload `maui` → `maui-android`. The umbrella `maui` workload manifest declares iOS+Mac SDKs ("Workload ID maui isn't supported on this platform" on Linux). `maui-android` is the Linux-supported subset that ships the same MAUI cross-platform manifests the 4 `Controls/*.UnitTests.csproj` projects need (their `$(_MauiDotNetTfm)` resolves once any maui-* workload is installed). Disk drops ~2GB → ~1.5GB.
+
+**New patterns captured (for future agents):**
+
+- **MTP + `--collect "Code Coverage;Format=cobertura"` is silent-no-op.** Tests run, exit 0, cobertura is a 169-byte stub. validate-cobertura is the only gate that catches it. When global.json sets MTP as test runner OR `MSTest.Sdk`/exe-style hosts are in play, reach for `coverlet.console` (mono.cecil instrumentation, runner-agnostic). The `--target dotnet --targetargs "test <proj>"` form is the canonical MTP-compatible invocation.
+- **`dotnet workload install maui` is Linux-incompatible.** Use `maui-android` for cross-platform MAUI tests on Linux runners. Same manifests, no iOS/Mac bits.
+- **Local-clone inspection beats CI iteration.** RustSdk's tiny dependency footprint (1 csproj) was found in 2 grep commands. One `grep -l` round saved a CI cycle that would have either installed Rust or chased a phantom workaround.
+- **NEVER `dotnet restore <whole.sln>` for solutions that mix test/server/utility projects.** Workload manifests evaluate the whole graph at restore time. Per-csproj restore of just the test projects is the safe default. This is the third repo to need this treatment (Avalonia, eShop, Server) — it's the rule, not the exception.
+
+**Validated:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/coverage-orchestrator.yml'))"` returns OK. Did NOT dispatch — Coordinator owns dispatch.

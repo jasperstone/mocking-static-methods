@@ -795,6 +795,18 @@ jobs:
         with:
           version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
+      - name: Install coverlet.console
+        # Avalonia uses Microsoft.Testing.Platform (global.json sets
+        # test.runner=Microsoft.Testing.Platform). Under MTP, the legacy
+        # `--collect "Code Coverage;Format=cobertura"` data collector is
+        # silently ignored — tests run cleanly but cobertura output is a
+        # 169-byte empty stub. Use coverlet.console (mono.cecil-based managed
+        # instrumentation, runner-independent) instead. Same pattern as the
+        # aspnetcore job. Run 25495265941 / Avalonia: empty cobertura.
+        shell: bash
+        run: |
+          dotnet tool install -g coverlet.console --version 6.0.2
+
       # Per-csproj restore+build instead of `dotnet restore Avalonia.slnx`.
       # The slnx pulls in src/Android/Avalonia.Android (needs `android` workload)
       # and samples/ControlCatalog.{Browser,iOS} (need `wasm-tools`/iOS workload),
@@ -824,12 +836,11 @@ jobs:
             echo "::endgroup::"
           done
 
-      # Avalonia is UI framework; render/leak/integration tests need X server or
-      # GPU. Scope to *.UnitTests.csproj under tests/, exclude RenderTests / LeakTests
-      # / Designer / Browser. Per-csproj keeps a single broken assembly from
-      # killing the whole loop. global.json sets test runner to MTP, so dotnet test
-      # uses Microsoft.Testing.Platform; --collect "Code Coverage;Format=cobertura"
-      # is honored by MTP via the standard collector adapter.
+      # MTP-aware test invocation via coverlet.console. coverlet wraps dotnet
+      # test, instruments the test assembly DLL via mono.cecil, and emits a
+      # real cobertura report independent of which test runner runs inside.
+      # Find the built test DLL for each csproj under bin/Debug/<tfm>/, then
+      # invoke `coverlet "$asm" --target dotnet --targetargs "test ..."`.
       - name: Run tests with coverage (per-csproj, UnitTests subset)
         shell: bash
         working-directory: target
@@ -846,15 +857,32 @@ jobs:
             ! -path "*FunctionalTests*" \
             ! -path "*IntegrationTests*" \
             | sort -u)
-          echo "Discovered ${#PROJECTS[@]} test projects:"
-          printf '  %s\n' "${PROJECTS[@]}"
+          echo "Discovered ${#PROJECTS[@]} test projects"
+          i=0
           for proj in "${PROJECTS[@]}"; do
-            echo "::group::Running $(basename "$proj")"
-            dotnet test "$proj" --no-build \
-              --filter "$FILTER" \
-              --collect "Code Coverage;Format=cobertura" \
-              --results-directory TestResults \
-              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
+            i=$((i+1))
+            base=$(basename "$proj" .csproj)
+            proj_dir=$(dirname "$proj")
+            out="TestResults/${i}_${base}.cobertura.xml"
+            echo "::group::[$i/${#PROJECTS[@]}] $base"
+            # Locate the built test DLL under <proj_dir>/bin/Debug/<tfm>/.
+            # Avalonia projects' AssemblyName usually matches the csproj base.
+            asm=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 2 -name "${base}.dll" 2>/dev/null | head -1 || true)
+            if [[ -z "$asm" || ! -f "$asm" ]]; then
+              asm=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 2 \( -name "*.UnitTests.dll" -o -name "*.Tests.dll" \) 2>/dev/null | head -1 || true)
+            fi
+            if [[ -z "$asm" || ! -f "$asm" ]]; then
+              echo "::warning::No built test DLL for $base — skipping"
+              echo "::endgroup::"
+              continue
+            fi
+            coverlet "$asm" \
+              --target "dotnet" \
+              --targetargs "test \"$proj\" --no-build --filter \"$FILTER\"" \
+              --format cobertura \
+              --output "$out" \
+              --include-test-assembly \
+              || echo "::warning::Tests in $base failed or runner pressure — continuing"
             echo "::endgroup::"
           done
           dotnet-coverage merge -r -f cobertura \
@@ -977,6 +1005,15 @@ jobs:
         with:
           version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
+      - name: Install coverlet.console
+        # eShop uses MSTest.Sdk + Microsoft.Testing.Platform. Same MTP-vs-data-
+        # collector silent-no-op as Avalonia: --collect produces a 169-byte
+        # empty stub. Use coverlet.console (mono.cecil-based, runner-agnostic).
+        # Run 25495265941 / eShop: empty cobertura.
+        shell: bash
+        run: |
+          dotnet tool install -g coverlet.console --version 6.0.2
+
       # eShop's tests/ contains 3 unit-test csprojs (Ordering / Basket /
       # ClientApp). They use MSTest.Sdk + Microsoft.Testing.Platform — exe-style
       # entry points, not standard vstest hosts.
@@ -1009,14 +1046,33 @@ jobs:
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
           FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
-          for proj in tests/Ordering.UnitTests/Ordering.UnitTests.csproj \
-                      tests/Basket.UnitTests/Basket.UnitTests.csproj; do
-            echo "::group::Running $(basename "$proj")"
-            dotnet test "$proj" --no-build \
-              --filter "$FILTER" \
-              --collect "Code Coverage;Format=cobertura" \
-              --results-directory TestResults \
-              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
+          PROJECTS=( \
+            "tests/Ordering.UnitTests/Ordering.UnitTests.csproj" \
+            "tests/Basket.UnitTests/Basket.UnitTests.csproj" \
+          )
+          i=0
+          for proj in "${PROJECTS[@]}"; do
+            i=$((i+1))
+            base=$(basename "$proj" .csproj)
+            proj_dir=$(dirname "$proj")
+            out="TestResults/${i}_${base}.cobertura.xml"
+            echo "::group::[$i/${#PROJECTS[@]}] $base"
+            asm=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 2 -name "${base}.dll" 2>/dev/null | head -1 || true)
+            if [[ -z "$asm" || ! -f "$asm" ]]; then
+              asm=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 2 -name "*.UnitTests.dll" 2>/dev/null | head -1 || true)
+            fi
+            if [[ -z "$asm" || ! -f "$asm" ]]; then
+              echo "::warning::No built test DLL for $base — skipping"
+              echo "::endgroup::"
+              continue
+            fi
+            coverlet "$asm" \
+              --target "dotnet" \
+              --targetargs "test \"$proj\" --no-build --filter \"$FILTER\"" \
+              --format cobertura \
+              --output "$out" \
+              --include-test-assembly \
+              || echo "::warning::Tests in $base failed or runner pressure — continuing"
             echo "::endgroup::"
           done
           dotnet-coverage merge -r -f cobertura \
@@ -1228,13 +1284,18 @@ jobs:
       # pre-installed 10.0.203 SDK is sufficient — use it directly.
       # Run 25527102157 / maui: failed at `dotnet-install.sh --jsonfile global.json`.
 
-      - name: Install MAUI workload
+      - name: Install MAUI workload (Linux-compatible subset)
         shell: bash
         working-directory: target
-        # Pulls Android SDK (~2GB) — slow but deterministic. Without it,
-        # multi-targeted Controls.Core.csproj refuses to restore.
+        # The umbrella `maui` workload is rejected on Linux (requires iOS+Mac
+        # SDKs): "Workload ID maui isn't supported on this platform."
+        # `maui-android` is the Linux-supported subset and ships the MAUI
+        # cross-platform manifests that the *.UnitTests projects need
+        # ($(_MauiDotNetTfm) resolves once any maui-* workload is installed).
+        # Pulls Android SDK (~1.5GB) — slow but deterministic.
+        # Run 25495265941 / maui: `dotnet workload install maui` rejected.
         run: |
-          dotnet workload install maui --skip-sign-check
+          dotnet workload install maui-android --skip-sign-check
           dotnet workload list
 
       - name: Run tests with coverage (UnitTests subset only)
@@ -1333,34 +1394,63 @@ jobs:
       # NU1902) fails restore. We disable NuGet audit for this job and explicitly
       # remove NU1902 from the warnings-as-errors set as a belt-and-suspenders.
       # Run 25527102157 / server: failed at `dotnet restore bitwarden-server.sln`.
-      - name: Restore bitwarden-server.sln
+      #
+      # APPROACH: Per-csproj restore+build of test/*.Test.csproj (unit suites
+      # only, IntegrationTest excluded). The sln pulls in `util/Seeder` which
+      # references `util/RustSdk/RustSdk.csproj`; RustSdk has a PreBuild target
+      # invoking `cargo build --release` — the SDK container has no Rust toolchain
+      # (MSB3073, exit 127). Since RustSdk is referenced by Seeder ONLY (verified
+      # against the local clone at cloned_repos/server) and Seeder is not a test
+      # project, scoping to the test/*.Test.csproj graph entirely sidesteps it.
+      # Run 25495265941 / server: RustSdk.csproj cargo build failure.
+      - name: Restore + build unit-test projects
         shell: bash
         working-directory: target
         run: |
-          dotnet restore bitwarden-server.sln \
-            -p:NuGetAudit=false \
-            -p:WarningsNotAsErrors=NU1902
+          mapfile -t PROJECTS < <(find test -type f -name "*.Test.csproj" \
+            ! -name "*.IntegrationTest.csproj" \
+            ! -name "Common.csproj" \
+            ! -name "IntegrationTestCommon.csproj" \
+            | sort -u)
+          echo "Discovered ${#PROJECTS[@]} test projects:"
+          printf '  %s\n' "${PROJECTS[@]}"
+          for proj in "${PROJECTS[@]}"; do
+            echo "::group::Restore+Build $(basename "$proj")"
+            dotnet restore "$proj" \
+              -p:NuGetAudit=false \
+              -p:WarningsNotAsErrors=NU1902 \
+              || echo "::warning::Restore of $proj failed — continuing"
+            dotnet build "$proj" -c Debug --no-restore \
+              -p:NuGetAudit=false \
+              -p:WarningsNotAsErrors=NU1902 \
+              || echo "::warning::Build of $proj failed — continuing"
+            echo "::endgroup::"
+          done
 
-      - name: Build bitwarden-server.sln
-        shell: bash
-        working-directory: target
-        run: |
-          dotnet build bitwarden-server.sln -c Debug --no-restore \
-            -p:NuGetAudit=false \
-            -p:WarningsNotAsErrors=NU1902
-
-      # Test projects under test/ split into *.Test (unit) and *.IntegrationTest
-      # (need real DB / external services). FILTER excludes IntegrationTests by
-      # FQN; sln-level invocation with coverlet adapter loads all *.Test DLLs.
+      # Per-csproj test invocation. coverlet.collector is referenced by every
+      # *.Test.csproj transitively via test/Common.csproj, so XPlat Code Coverage
+      # works in-process without coverlet.console.
       - name: Run tests with coverage
         shell: bash
         working-directory: target
         continue-on-error: true
         run: |
-          dotnet test bitwarden-server.sln --no-build \
-            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTest&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
-            --collect:"XPlat Code Coverage" \
-            --results-directory ./TestResults
+          mkdir -p TestResults
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTest&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          mapfile -t PROJECTS < <(find test -type f -name "*.Test.csproj" \
+            ! -name "*.IntegrationTest.csproj" \
+            ! -name "Common.csproj" \
+            ! -name "IntegrationTestCommon.csproj" \
+            | sort -u)
+          for proj in "${PROJECTS[@]}"; do
+            echo "::group::Running $(basename "$proj")"
+            dotnet test "$proj" --no-build \
+              --filter "$FILTER" \
+              --collect:"XPlat Code Coverage" \
+              --results-directory ./TestResults \
+              || echo "::warning::Tests in $(basename "$proj") failed or runner pressure — continuing"
+            echo "::endgroup::"
+          done
 
       - uses: ./.github/actions/validate-cobertura
         if: always()

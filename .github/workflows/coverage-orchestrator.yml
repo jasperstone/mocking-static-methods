@@ -1242,24 +1242,29 @@ jobs:
           reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
 
   # ===========================================================================
-  # MAUI — built-in coverlet.collector; SCOPED to non-device UnitTests only.
+  # MAUI — DEFERRED (see README "Repository Inclusion Decisions").
   # ===========================================================================
-  # Scope rationale: MAUI's full test set requires Android/iOS workloads and
-  # device emulators. The coverlet-instrumented test set under
-  # src/Controls/tests/*.UnitTests/ targets net10.0 host-side and exercises the
-  # cross-platform Controls/Core/Xaml surface — which is what Mode #1 sites in
-  # MAUI predominantly live in (logger/configuration/static helpers). Device
-  # tests (TestCases.iOS/Mac/Android, TemplatedView native tests) are excluded.
-  # `dotnet workload install maui` is required because Controls.Core.csproj is
-  # a multi-targeted workload-bound project; without it `dotnet build` on the
-  # UnitTests csproj fails to resolve TFM tooling.
+  # MAUI's in-tree build resolves *.csproj projects whose TargetFrameworks
+  # include net10.0-android36.0, which require the Android SDK (separate from
+  # the .NET android workload). The Build.Tasks.slnf prerequisite alone won't
+  # restore those projects without provisioning the Android SDK in-container
+  # (~3-5 GB). Three rounds of remediation each uncovered another layer of
+  # MS-internal-CI assumption (custom global.json, maui-android subset, in-tree
+  # MSBuild tasks, then Android SDK). The remaining 13 repos already cover
+  # ~5,500 of 6,879 detected Mode #1 sites (80%); MAUI's 329 sites are not
+  # worth the maintenance cost. Job body retained for future reactivation —
+  # the `if:` gate keeps it dormant unless explicitly dispatched.
+  # Run history: 25527102157 (global.json), 25531117370 (workload), 25532666443
+  # (BuildTasks), 25549163113 (Android SDK).
   maui:
-    name: "Coverage: MAUI"
+    name: "Coverage: MAUI (DEFERRED)"
     runs-on: ubuntu-24.04
     container:
       image: mcr.microsoft.com/dotnet/sdk:10.0-noble
     timeout-minutes: 360
-    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'maui'
+    # DEFERRED: requires Android SDK (~3-5 GB) on top of maui-android workload.
+    # Set to never auto-run; can be manually dispatched with repo=maui to retry.
+    if: github.event.inputs.repo == 'maui'
     steps:
       - name: Checkout orchestrator repo (for local composite actions)
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
@@ -1497,7 +1502,6 @@ jobs:
       - eShop
       - garnet
       - jellyfin
-      - maui
       - orleans
       - roslyn
       - runtime
@@ -1519,7 +1523,7 @@ jobs:
             echo "| eShop              | ${{ needs.eShop.result }} |"
             echo "| Garnet             | ${{ needs.garnet.result }} |"
             echo "| Jellyfin           | ${{ needs.jellyfin.result }} |"
-            echo "| MAUI               | ${{ needs.maui.result }} |"
+            echo "| MAUI               | DEFERRED (Android SDK required) |"
             echo "| Orleans            | ${{ needs.orleans.result }} |"
             echo "| Roslyn             | ${{ needs.roslyn.result }} |"
             echo "| .NET Runtime       | ${{ needs.runtime.result }} |"

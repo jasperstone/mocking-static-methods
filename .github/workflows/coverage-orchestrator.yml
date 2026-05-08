@@ -1298,6 +1298,18 @@ jobs:
           dotnet workload install maui-android --skip-sign-check
           dotnet workload list
 
+      - name: Build MAUI in-tree MSBuild tasks (prerequisite for any csproj)
+        shell: bash
+        working-directory: target
+        # MAUI's repo uses Maui.InTree.targets, which requires the custom
+        # Microsoft.Maui.BuildTasks assembly to be compiled BEFORE any MAUI
+        # csproj can build. Without this, every csproj fails with:
+        #   error : We have detected that the required MSBuild tasks are not
+        #   yet built or they are out of date.
+        #   ...run: dotnet build Microsoft.Maui.BuildTasks.slnf
+        # Run 25532666443 / maui: tasks-not-built blocked all 4 unit-test projects.
+        run: dotnet build Microsoft.Maui.BuildTasks.slnf
+
       - name: Run tests with coverage (UnitTests subset only)
         shell: bash
         working-directory: target

@@ -55,3 +55,27 @@ Added 2 new jobs:
 **Validation:** YAML safe-load OK. Active matrix: **15 repos**. Triggered runs: OpenRA=25552129165, StockSharp=25552132370.
 
 **Pin-by-API-not-clone pattern:** First time pinning SHAs for repos that don't exist in `cloned_repos/`. `gh api /repos/<owner>/<name>/commits/<default_branch> --jq .sha` is the right tool — generalizes cleanly to any future Phase N additions.
+
+### 2026-05-08 — StockSharp coverlet.console fix — commit d3c765d
+
+Run 25552132370 confirmed the flagged risk: 178-byte cobertura stub while 4239 of 4263 tests actually passed. **MSTest 4.x = MSTest.Sdk = routes through MTP**, even when the project doesn't reference coverlet.collector. The data-collector silent-no-op is not just an MTP-runner-explicit issue (Avalonia/eShop): it's also triggered by the SDK choice. Heuristic update: `MSTest.Sdk` in `<Project Sdk="MSTest.Sdk">` OR `MSTest 4.x` package version → assume MTP routing → use coverlet.console. Don't trust `--collect` for any MSTest-4.x-or-newer repo.
+
+Swapped to canonical coverlet.console wrap (same shape as Avalonia/eShop). Single test project so no per-csproj loop — direct `coverlet "$asm" --target dotnet --targetargs "test Tests/Tests.csproj ..."`. Built assembly is `StockSharp.Tests.dll` (not `Tests.dll` — `RootNamespace` from `common_target_tests.props` overrides). New run: 25556051863. The 13 failing tests (Paths/Report/InMemory/AsyncExtensions/ConnectorBasket) are env-dependent assertions — coverlet doesn't care; instrumentation runs regardless.
+
+### 2026-05-08 — StockSharp flaky-test filter (partial); coverlet+MTP empty-modules blocker — commits 4d07fc1, a89d57e, f82c22d
+
+User asked for `FullyQualifiedName!~ClassName` exclusions targeting the timing/event-count flaky classes. Pulled the FQNs from run 25556051863 with `gh run view --log-failed | grep -oE "StockSharp\.Tests\.[A-Za-z_.]+"`. Five classes covered the failure set: `AsyncExtensionsTests`, `ConnectorBasketTests`, `PathsTests`, `ReportTests`, `TransactionIdStorageTests`.
+
+**Filter worked perfectly** — run 25562087626 went from ~50 failures to **0 failures / 4096 passed / 11 skipped / 4107 total** in 4m26s. **But validate-cobertura still failed: 231-byte report, empty Module table.** Coverlet ran, tests ran under it, but it instrumented zero modules. Despite ~80 DLLs (StockSharp.*, Ecng.*) sitting in `Tests/bin/Release/net10.0/`, the report has no `<class>` elements.
+
+**Round 2** (run 25562607958) added explicit `--include "[StockSharp*]*"` + `--include "[Ecng*]*"`. Self-inflicted bug: a diagnostic `ls -la | head -40` line caused **SIGPIPE → exit 141** under `bash -e -o pipefail`, killing the step before coverlet started. Reverted the `ls|head` line in `f82c22d`. The `--include` patterns are still in the workflow but unproven.
+
+**Stopped at 2 attempts per task instruction.** Full diagnosis in `.squad/decisions/inbox/vogel-stocksharp-flaky-filter.md`.
+
+**Learnings:**
+- `FullyQualifiedName!~ClassName` exclusion: confirmed working syntax for coverlet's `--filter` (it pipes through to `dotnet test`'s `--filter`). `&` is the AND separator. Works for any MSTest class name suffix.
+- Pulling failing class names: `gh run view <id> --log-failed 2>&1 | grep -oE "<Repo>\.Tests\.[A-Za-z_.]+" | sort -u` is the cleanest way — avoids OOM from full-log fetches and groups failures by class.
+- **`bash -e -o pipefail` + `ls | head` = step death (exit 141 SIGPIPE)** in GitHub Actions. Never use `head`/`tail` on output you might want short for diagnostic logging — use `awk 'NR<=40'` or `2>&1 | sed -n '1,40p'` instead. Or just drop `pipefail` for that line.
+- **Coverlet.console under MSTest.Sdk + MTP can pass tests but emit an empty Module table.** New failure mode separate from the 178-byte MTP-no-op shape. Tests run successfully against the instrumented test assembly, but dependency assemblies aren't instrumented despite being present and loaded. Likely cause: MTP child-process probe path differs from coverlet's pre-instrumented path. `--include-test-assembly` alone is insufficient; explicit `--include "[<asm>*]*"` patterns may be needed (untested due to attempt cap). Future fix paths: explicit include patterns, direct MTP exec via `dotnet exec $asm --treenode-filter`, or `dotnet-coverage collect` (in-proc, MTP-aware).
+- Filter exclusions and instrumentation success are **orthogonal problems**. Solving test failures does not guarantee `<class>` elements appear. Always verify the cobertura Module table, not just the test pass count.
+

@@ -121,3 +121,37 @@ Re-ran `tools/test_counts/from_coverage_logs.py 25495265941` after the all-green
 ### 2026-05-08 — Baseline matrix update (heads up)
 
 Coverage matrix changed: MAUI removed (4 failed remediation rounds), OpenRA + StockSharp added, Files + PowerToys skipped (Windows-only). Once OpenRA (run 25552129165) and StockSharp (run 25552132370) finish, the next baseline + test-counts refresh covers 15 repos. Both new repos use the external `dotnet-coverage` data-collector path; expect potentially 1–2 rounds of remediation per established pattern. OpenRA targets `net8.0` (side-installs .NET 8 SDK in noble container); StockSharp resolves to `net10.0`.
+
+### 2026-05-08 — Mode #1 attribution diagnosis (Avalonia/eShop/duplicati/runtime)
+
+Brady asked why 4 repos in `tools/coverage_xref/UNIFIED_TABLE.md` show `Mode #1 covered = 0` despite having coverage data. Read-only diagnostic against locally-downloaded cobertura artifacts (gh run download from runs 25532664482 / 25532665179 / 25527102157). Decision drop at `.squad/decisions/inbox/beck-mode1-attribution.md` has the full breakdown.
+
+Two distinct failure modes found:
+
+1. **Empty instrumentation** (Avalonia, eShop) — coverlet.console emits structurally valid cobertura with thousands of classes/lines but **zero hit-lines anywhere in the file**. Path matching works fine; the suffix matcher in `xref_mode1_coverage.py` correctly resolves `tests/Avalonia.Base.UnitTests/...` to `__w/.../target/tests/avalonia.base.unittests/...`. Tests either didn't run under coverlet.console or the in-process collector didn't attach. Diagnostic signature: `lines-valid` is large, all `<line hits="0">`.
+
+2. **Real test-scope gap** (duplicati, runtime) — duplicati has 34,597 hit-lines (real coverage), but the 21 matched Mode#1 sites are in `Backend/Jottacloud`, `RestAPI/Database`, `OneDrive`, `HttpClientExtensions` — code paths the unit tests don't reach. runtime is more severe: cobertura covers `FSharp.Compiler.Service`, `FSharp.Core`, `illink`, source generators (`Microsoft.Interop.*`, `System.Text.*.Generator`); all 33 Mode#1 sites are in `src/libraries/System.Net.Http/...` and `src/libraries/Microsoft.Extensions.*/...` which are not in the test scope at all.
+
+**Useful path shape reference (cobertura `<class filename="...">`):**
+- Avalonia: `__w/mocking-static-methods/mocking-static-methods/target/src/Avalonia.Dialogs/...` (workspace-absolute) and `_/src/Avalonia.Dialogs/...` (deterministic-build).
+- eShop: `src/Basket.API/...` (project-relative, clean).
+- duplicati: `Duplicati/Library/Encryption/...` (project-relative, clean — matches Mode#1 sites directly).
+- runtime: `/_/src/arcade/src/...` (deterministic-build absolute prefix).
+
+Suffix-matcher in `xref_mode1_coverage.py` handles all four shapes; no path-matching fix needed.
+
+**Optional xref improvement** (not implemented, just suggested in decision drop): add a `matched_zero_hits_global` status to flag repos where EVERY hit value in the cobertura is 0 — distinguishes "instrumentation broken" from "this line not exercised".
+
+### 2026-05-08 — Mode #1 attribution re-confirmed (duplicati / runtime)
+
+Brady asked for a fresh diagnostic on the 0-covered Mode#1 cells in `tools/coverage_xref/UNIFIED_TABLE.md`. Re-ran the live `load_coverage_map` + `find_site` from `build_unified_table.py` against `/tmp/cov_phase2/coverage-xml-{duplicati,runtime}/`. Result is identical to my 2026-05-08 finding (decision: `beck-mode1-attribution.md`):
+
+- **duplicati**: matcher works. 21/34 sites match directly into cobertura (`direct_in_map=True`) and report `uncovered` (hits=0 — Backend/OAuthHelper/RestAPI surface not driven by the 1,096-test unit suite). 13 sites are in `Duplicati/UnitTest/*.cs` test sources that cobertura correctly omits (prod-only instrumentation).
+- **runtime**: matcher works. All 33 sites are `unknown_file`. Cobertura only contains F# compiler, HotReload generator tooling, illink, source generators, arcade — `grep filename=".*System\.Net\.Http"` and `grep filename=".*Microsoft\.Extensions"` both return zero. The libs targeted by the Mode#1 sites (`src/libraries/{System.Net.Http,Microsoft.Extensions.*}`) were never instrumented by the `build.sh -subset libs+libs.tests -test` run.
+
+No fix needed in `find_site` — its 5/4/3/2 suffix match + lowercase forward-slash normalization handles all four cobertura path shapes (project-relative, `/_/src/...` deterministic, `/__w/1/s/...` workspace-absolute, plain `src/...`).
+
+Recommendations sent in `beck-mode1-attribution-gap.md`:
+1. runtime is a Vogel/orchestrator issue (artifact glob may be missing per-library cobertura, OR libs.tests didn't emit cobertura at all).
+2. duplicati's 13 `unknown_file` sites are an analyzer hygiene issue — Mode1Analyzer should skip test source paths (`*/UnitTest/*`, `*Test*.cs`) so they don't pollute the denominator.
+3. The 21 uncovered duplicati sites are a real "code not exercised" signal — keep as-is.

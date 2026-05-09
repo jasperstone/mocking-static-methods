@@ -975,15 +975,21 @@ jobs:
             base=$(basename "$proj" .csproj)
             dir=$(dirname "$proj")
             exe="$dir/bin/Debug/net10.0/$base"
+            dll="$dir/bin/Debug/net10.0/$base.dll"
             echo "::group::[$i/${#PROJECTS[@]}] $base"
             if [[ -x "$exe" ]]; then
-              dotnet-coverage collect "$exe" \
-                -f cobertura \
-                -o "TestResults/${i}_${base}.cobertura.xml" \
-                || echo "::warning::Coverage collection for $base failed — continuing"
+              target="$exe"
+            elif [[ -f "$dll" ]]; then
+              target="dotnet $dll"
             else
-              echo "::warning::Test exe not found at $exe — skipping"
+              echo "::warning::Test binary not found at $exe or $dll — skipping"
+              echo "::endgroup::"
+              continue
             fi
+            dotnet-coverage collect "$target" \
+              -f cobertura \
+              -o "TestResults/${i}_${base}.cobertura.xml" \
+              || echo "::warning::Coverage collection for $base failed — continuing"
             echo "::endgroup::"
           done
           shopt -s globstar nullglob
@@ -1186,15 +1192,21 @@ jobs:
             base=$(basename "$proj" .csproj)
             dir=$(dirname "$proj")
             exe="$dir/bin/Debug/net10.0/$base"
+            dll="$dir/bin/Debug/net10.0/$base.dll"
             echo "::group::[$i/${#PROJECTS[@]}] $base"
             if [[ -x "$exe" ]]; then
-              dotnet-coverage collect "$exe" \
-                -f cobertura \
-                -o "TestResults/${i}_${base}.cobertura.xml" \
-                || echo "::warning::Coverage collection for $base failed — continuing"
+              target="$exe"
+            elif [[ -f "$dll" ]]; then
+              target="dotnet $dll"
             else
-              echo "::warning::Test exe not found at $exe — skipping"
+              echo "::warning::Test binary not found at $exe or $dll — skipping"
+              echo "::endgroup::"
+              continue
             fi
+            dotnet-coverage collect "$target" \
+              -f cobertura \
+              -o "TestResults/${i}_${base}.cobertura.xml" \
+              || echo "::warning::Coverage collection for $base failed — continuing"
             echo "::endgroup::"
           done
           shopt -s globstar nullglob
@@ -1687,17 +1699,19 @@ jobs:
         shell: bash
         working-directory: target
         continue-on-error: true
-        # MTP test exe doesn't understand vstest CLI; wrap exe directly.
+        # StockSharp.Tests.csproj produces a .dll only (no apphost exe) so we
+        # launch via `dotnet StockSharp.Tests.dll` (MTP entrypoint works either
+        # way). dotnet-coverage attaches its CLR profiler around the child.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          exe="Tests/bin/Release/net10.0/StockSharp.Tests"
-          if [[ ! -x "$exe" ]]; then
-            echo "::error::Test exe not found at $exe"
+          dll="Tests/bin/Release/net10.0/StockSharp.Tests.dll"
+          if [[ ! -f "$dll" ]]; then
+            echo "::error::Test dll not found at $dll"
             ls -la Tests/bin/Release/net10.0/ || true
             exit 0
           fi
-          dotnet-coverage collect "$exe" \
+          dotnet-coverage collect "dotnet $dll" \
             -f cobertura \
             -o TestResults/coverage.cobertura.xml \
             || echo "::warning::dotnet-coverage collect for StockSharp.Tests failed — continuing"

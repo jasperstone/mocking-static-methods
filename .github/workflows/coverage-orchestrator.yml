@@ -986,10 +986,11 @@ jobs:
               echo "::endgroup::"
               continue
             fi
-            dotnet-coverage collect "$target" \
-              -f cobertura \
-              -o "TestResults/${i}_${base}.cobertura.xml" \
-              || echo "::warning::Coverage collection for $base failed — continuing"
+            timeout --kill-after=30s 600s \
+              dotnet-coverage collect "$target" \
+                -f cobertura \
+                -o "TestResults/${i}_${base}.cobertura.xml" \
+              || echo "::warning::Coverage collection for $base failed/timed out — continuing"
             echo "::endgroup::"
           done
           shopt -s globstar nullglob
@@ -1203,10 +1204,11 @@ jobs:
               echo "::endgroup::"
               continue
             fi
-            dotnet-coverage collect "$target" \
-              -f cobertura \
-              -o "TestResults/${i}_${base}.cobertura.xml" \
-              || echo "::warning::Coverage collection for $base failed — continuing"
+            timeout --kill-after=30s 600s \
+              dotnet-coverage collect "$target" \
+                -f cobertura \
+                -o "TestResults/${i}_${base}.cobertura.xml" \
+              || echo "::warning::Coverage collection for $base failed/timed out — continuing"
             echo "::endgroup::"
           done
           shopt -s globstar nullglob

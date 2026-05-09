@@ -1,0 +1,12 @@
+name: Install dotnet-coverage
+description: Install dotnet-coverage as a global tool at a pinned version.
+inputs:
+  version:
+    description: dotnet-coverage version to install.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install dotnet-coverage
+      shell: bash
+      run: dotnet tool install -g dotnet-coverage --version ${{ inputs.version }}

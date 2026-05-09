@@ -115,6 +115,15 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-abp-raw
+          path: target/framework/_discovery_raw/
+          retention-days: 7
+          if-no-files-found: warn
+
   # ===========================================================================
   # ASP.NET Core
   # ===========================================================================
@@ -196,6 +205,15 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-aspnetcore-raw
+          path: target/_discovery_raw/
+          retention-days: 7
+          if-no-files-found: warn
+
   # ===========================================================================
   # EF Core
   # ===========================================================================
@@ -267,6 +285,15 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-efcore-raw
+          path: target/_discovery_raw/
+          retention-days: 7
+          if-no-files-found: warn
+
   # ===========================================================================
   # Orleans
   # ===========================================================================
@@ -295,6 +322,20 @@ jobs:
           repo-name: orleans
           sha-prefix: 8024faf8
 
+      - name: Install Node.js (required by Orleans.Dashboard.Frontend.targets)
+        # `dotnet build Orleans.slnx` triggers Orleans.Dashboard's Frontend
+        # targets which call `node --version`. The coverage workflow's
+        # `dotnet test Orleans.slnx` somehow tolerates the failure (Dashboard
+        # is not a test project), but `dotnet build` propagates it as MSB3073
+        # and aborts. Install node 22 so the build completes cleanly.
+        shell: bash
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends curl ca-certificates
+          curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+          apt-get install -y --no-install-recommends nodejs
+          node --version
+
       - name: Restore and build Orleans
         working-directory: target
         run: |
@@ -308,9 +349,13 @@ jobs:
         run: |
           # The coverage workflow runs `dotnet test Orleans.slnx ...` against the
           # whole solution. For diagnostic granularity we enumerate per-csproj
-          # under test/ — same FILTER, same exclusion classes (BVT/SlowBVT/etc).
-          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky&Category!=BVT&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf'
-          mapfile -t PROJECTS < <(find test -name "*.Tests.csproj" 2>/dev/null \
+          # under test/ — same FILTER, same exclusion classes.
+          # 2026-05-07: BVT re-included (was excluding ~159 unit-test files).
+          # SlowBVT/LoadShedding/CorePerf remain excluded (slow/stress/perf).
+          # Glob also catches *.UnitTests.csproj (Orleans.Serialization.UnitTests,
+          # Orleans.Dashboard.UnitTests) which the .Tests.csproj pattern misses.
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky&Category!=SlowBVT&Category!=LoadShedding&Category!=CorePerf'
+          mapfile -t PROJECTS < <(find test \( -name "*.Tests.csproj" -o -name "*.UnitTests.csproj" \) 2>/dev/null \
             ! -path "*FunctionalTests*" \
             ! -path "*IntegrationTests*" \
             ! -path "*E2E*" \
@@ -329,6 +374,15 @@ jobs:
           name: test-discovery-orleans
           path: target/test-discovery-orleans.csv
           retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-orleans-raw
+          path: target/_discovery_raw/
+          retention-days: 7
           if-no-files-found: warn
 
   # ===========================================================================
@@ -405,6 +459,15 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-roslyn-raw
+          path: target/_discovery_raw/
+          retention-days: 7
+          if-no-files-found: warn
+
   # ===========================================================================
   # Semantic Kernel
   # ===========================================================================
@@ -467,6 +530,15 @@ jobs:
           name: test-discovery-semantic-kernel
           path: target/dotnet/test-discovery-semantic-kernel.csv
           retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload raw discovery logs (debug)
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: test-discovery-semantic-kernel-raw
+          path: target/dotnet/_discovery_raw/
+          retention-days: 7
           if-no-files-found: warn
 
   # ===========================================================================

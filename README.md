@@ -106,7 +106,7 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 | Web Framework | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | SDK 10.0.101 | [See below](#aspnet-core-build--test-command) |
 | ORM | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | SDK 10.0.102 | [See below](#ef-core-build--test-command) |
 | XPlat Runtime | [https://github.com/mono/mono](https://github.com/mono/mono) | Native (autotools) | **Skipped** - Final release Feb 2024, archived project |
-| Distributed Actors | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | .NET 8 | [See below](#orleans-build--test-command) |
+| Distributed Actors | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | .NET 10 | [See below](#orleans-build--test-command) |
 | Compiler | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | SDK 10.0.102 | [See below](#roslyn-build--test-command) |
 | .NET Runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | SDK 10.0.100 | [See below](#runtime-build--test-command) |
 | AI SDK | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | SDK 10.0.100 | [See below](#semantic-kernel-build--test-command) |
@@ -188,16 +188,16 @@ echo "Coverage report: cloned_repos/efcore/CoverageReport/index.html"
 
 ```bash
 cd cloned_repos/orleans && \
-git checkout v9.2.1 && \
-dotnet restore Orleans.sln && \
-dotnet test Orleans.sln \
+git checkout v10.0.0 && \
+dotnet restore Orleans.slnx && \
+dotnet test Orleans.slnx \
   --collect:"XPlat Code Coverage" \
   --results-directory ./TestResults && \
 reportgenerator -reports:"./TestResults/*/coverage.cobertura.xml" -targetdir:"./CoverageReport" -reporttypes:Html && \
 echo "Coverage report: cloned_repos/orleans/CoverageReport/index.html"
 ```
 
-**Note**: Orleans v9.2.1 uses .NET 8 (installed via devcontainer feature). Successfully tested Orleans.sln with 309 tests passed across 20 test projects. Orleans is Microsoft's framework for building distributed applications using the virtual actor model.
+**Note**: Orleans v10.0.0 uses .NET 10. Orleans is Microsoft's framework for building distributed applications using the virtual actor model with features like stateful grains, streams, and transactions.
 
 #### Roslyn Build & Test Command
 

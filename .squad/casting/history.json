@@ -1,0 +1,12 @@
+{
+  "universe_usage_history": [
+    { "universe": "the-martian", "assigned_at": "2026-04-30" }
+  ],
+  "assignment_cast_snapshots": {
+    "initial-2026-04-30": {
+      "universe": "the-martian",
+      "assigned_at": "2026-04-30",
+      "agents": ["lewis", "watney", "vogel", "beck"]
+    }
+  }
+}

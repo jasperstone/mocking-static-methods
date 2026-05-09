@@ -1,0 +1,32 @@
+{
+  "agents": {
+    "lewis": {
+      "persistent_name": "Lewis",
+      "universe": "the-martian",
+      "created_at": "2026-04-30",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "watney": {
+      "persistent_name": "Watney",
+      "universe": "the-martian",
+      "created_at": "2026-04-30",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "vogel": {
+      "persistent_name": "Vogel",
+      "universe": "the-martian",
+      "created_at": "2026-04-30",
+      "legacy_named": false,
+      "status": "active"
+    },
+    "beck": {
+      "persistent_name": "Beck",
+      "universe": "the-martian",
+      "created_at": "2026-04-30",
+      "legacy_named": false,
+      "status": "active"
+    }
+  }
+}

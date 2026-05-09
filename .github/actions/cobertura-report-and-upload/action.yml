@@ -1,0 +1,70 @@
+name: Cobertura report and upload
+description: |
+  Generate an HTML coverage report from cobertura XML and upload three artifacts
+  (HTML report, raw TestResults tree, raw cobertura XML).
+
+  NOTE on conditional execution: composite-action internal steps inherit the
+  caller's `if:` condition. Callers should set `if: always()` so this whole
+  composite runs even when an upstream test step failed.
+inputs:
+  repo-name:
+    description: Short repo identifier; used in artifact names (coverage-report-<repo>, coverage-raw-<repo>, coverage-xml-<repo>).
+    required: true
+  working-directory:
+    description: Directory containing TestResults/ (e.g. target or target/framework).
+    required: true
+  cobertura-glob:
+    description: Path glob (relative to working-directory) pointing at the cobertura XML(s) to feed reportgenerator and upload.
+    required: false
+    default: "TestResults/coverage.cobertura.xml"
+  reportgenerator-version:
+    description: dotnet-reportgenerator-globaltool version.
+    required: true
+  report-retention-days:
+    description: Retention (days) for the HTML report and raw TestResults artifacts.
+    required: false
+    default: "30"
+  xml-retention-days:
+    description: Retention (days) for the raw cobertura XML artifact.
+    required: false
+    default: "90"
+runs:
+  using: composite
+  steps:
+    - name: Generate HTML report
+      if: always()
+      shell: bash
+      run: |
+        dotnet tool install -g dotnet-reportgenerator-globaltool --version ${{ inputs.reportgenerator-version }}
+        export PATH="$PATH:/github/home/.dotnet/tools"
+        reportgenerator \
+          -reports:"${{ inputs.working-directory }}/${{ inputs.cobertura-glob }}" \
+          -targetdir:"CoverageReport" \
+          -reporttypes:Html
+
+    - name: Upload HTML coverage report
+      if: always()
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      with:
+        name: coverage-report-${{ inputs.repo-name }}
+        path: CoverageReport/
+        retention-days: ${{ inputs.report-retention-days }}
+        if-no-files-found: warn
+
+    - name: Upload raw TestResults tree (forensics)
+      if: always()
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      with:
+        name: coverage-raw-${{ inputs.repo-name }}
+        path: ${{ inputs.working-directory }}/TestResults/
+        retention-days: ${{ inputs.report-retention-days }}
+        if-no-files-found: warn
+
+    - name: Upload raw cobertura XML
+      if: always()
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+      with:
+        name: coverage-xml-${{ inputs.repo-name }}
+        path: ${{ inputs.working-directory }}/${{ inputs.cobertura-glob }}
+        retention-days: ${{ inputs.xml-retention-days }}
+        if-no-files-found: warn

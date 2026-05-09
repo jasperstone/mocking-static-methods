@@ -17,11 +17,20 @@ Recorded once; later phases compare against these.
 | Repos in matrix | 15 | [phases/phase1-baseline/phase.lock.yaml](phases/phase1-baseline/phase.lock.yaml) |
 | Existing tests aggregated | 249,955 | [phases/phase1-baseline/REPORT.md](phases/phase1-baseline/REPORT.md) |
 | Total line coverage | 58.23% | [phases/phase1-baseline/reports/unified_table.csv](phases/phase1-baseline/reports/unified_table.csv) |
-| Mode #1 production sites | 5,154 | [phases/phase1-baseline/reports/mode1_coverage.csv](phases/phase1-baseline/reports/mode1_coverage.csv) |
-| — already covered | 1,087 | (excluded from `targets/v1/`) |
-| — uncovered, in cobertura | 3,147 | [targets/v1/targets.csv](targets/v1/targets.csv) ← **the input set** |
-| — uncovered, missing from cobertura | 901 | (deferred to `targets/v2/`) |
-| — non-production / unknown-line | 1,186 | (out of scope) |
+| Mode #1 sites detected (all) | 6,321 | [phases/phase1-baseline/reports/mode1_sites.csv](phases/phase1-baseline/reports/mode1_sites.csv) |
+
+Partition of all 6,321 detected sites — every site lands in exactly one bucket:
+
+| Bucket | Count | In `targets/v1/`? |
+|---|---:|:---:|
+| **production, uncovered, in cobertura** | **3,147** | ✅ **the input set** ([targets/v1/targets.csv](targets/v1/targets.csv)) |
+| production, already covered | 1,087 | no — covered by existing suite |
+| non-production path (test/sample/benchmark) | 1,167 | no — out of scope |
+| production, `unknown_file` (no cobertura entry) | 901 | no — deferred to `targets/v2/` |
+| production, `unknown_line` (multi-line expr) | 19 | no — data quality |
+| **TOTAL** | **6,321** | |
+
+Production Mode #1 sites = 3,147 + 1,087 + 901 + 19 = 5,154. The headline "21.1% covered" in phase 1 reports is `1,087 / 5,154`.
 
 ## Per-repo line coverage at baseline (phase 1)
 

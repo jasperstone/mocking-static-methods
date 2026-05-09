@@ -61,25 +61,49 @@ A phase that runs against a different `targets_sha256` than the file currently o
 ## How it was built
 
 Run `python3 tools/targets/build_targets.py --version v1`. Inputs:
-- [`Mode1Analyzer/results/mode1_sites.csv`](../../Mode1Analyzer/results/mode1_sites.csv) — all 6,879 Mode #1 sites detected by the Roslyn analyzer.
+- [`Mode1Analyzer/results/mode1_sites.csv`](../../Mode1Analyzer/results/mode1_sites.csv) — Mode #1 sites detected by the Roslyn analyzer.
 - `/tmp/cov_phase2/coverage-xml-{repo}/` — cobertura output collected during the phase 1 baseline coverage run.
 
-Output sizes (see [`targets.lock.yaml`](targets.lock.yaml) for full provenance):
+## Bucket partition (every detected site lands in exactly one bucket)
 
-| Bucket | Count |
-|---|---:|
-| **In `targets.csv` (the input set)** | **3,147** |
-| Excluded — already covered | 1,087 |
-| Excluded — non-production path | 1,167 |
-| Excluded — `unknown_file` (no cobertura entry) | 901 |
-| Excluded — `unknown_line` (multi-line expression) | 19 |
-| Total Mode #1 sites detected | 6,321 (deduped by row) |
+The analyzer detected **6,321 Mode #1 sites** across the 15 repos in the matrix. Each site falls into one — and only one — of these buckets:
 
-## Targets per repo
+| Bucket | Count | In `targets.csv`? | Why |
+|---|---:|:---:|---|
+| **uncovered, in cobertura** | **3,147** | ✅ **yes** | Production code, line is not currently covered, cobertura has the file/line. We can verify whether a generated test newly covers it. |
+| already covered | 1,087 | no | Production code, line already hit by the existing suite. A new test here can't move line coverage. Catalogued in [`covered_sites_analysis.csv`](covered_sites_analysis.csv). |
+| non-production path | 1,167 | no | Site lives under `test/`, `samples/`, `benchmarks/`, `playground/`. Out of scope by definition. |
+| `unknown_file` | 901 | no — deferred to v2 | Production source exists but cobertura has no entry — the existing test suite's projects never reference the assembly. A generated test gives us no signal until we resolve the missing-assembly issue. |
+| `unknown_line` | 19 | no | Cobertura has the file but not the exact line (multi-line expression cobertura collapsed). Data quality issue. |
+| **TOTAL** | **6,321** | | `3,147 + 1,087 + 1,167 + 901 + 19` |
 
-See `counts.targets_by_repo` in [`targets.lock.yaml`](targets.lock.yaml). Highlights:
-- jellyfin (1,046), garnet (499), semantic-kernel (458), abp (445), aspnetcore (403) — the bulk of the work.
-- Avalonia (0), runtime (0), StockSharp (0) — all production Mode #1 sites in these repos are either already covered or sit in files cobertura didn't load. Reconsider for v2 once we expand coverage scope.
+The full provenance (sha256, source SHAs, source CI run) is in [`targets.lock.yaml`](targets.lock.yaml).
+
+## Per-repo bucket breakdown
+
+| Repo | **target** | covered | non-prod | unknown_file | unknown_line | total |
+|---|---:|---:|---:|---:|---:|---:|
+| abp | **445** | 192 | 5 | 370 | 5 | 1,017 |
+| aspnetcore | **403** | 314 | 13 | 203 | 3 | 936 |
+| Avalonia | **0** | 0 | 9 | 0 | 0 | 9 |
+| duplicati | **21** | 0 | 13 | 0 | 0 | 34 |
+| efcore | **1** | 11 | 0 | 1 | 0 | 13 |
+| eShop | **30** | 4 | 0 | 60 | 0 | 94 |
+| garnet | **499** | 179 | 57 | 10 | 0 | 745 |
+| jellyfin | **1,046** | 153 | 7 | 0 | 0 | 1,206 |
+| OpenRA | **13** | 0 | 0 | 0 | 0 | 13 |
+| orleans | **98** | 154 | 891 | 38 | 0 | 1,181 |
+| roslyn | **6** | 4 | 4 | 100 | 0 | 114 |
+| runtime | **0** | 1 | 0 | 32 | 0 | 33 |
+| semantic-kernel | **458** | 31 | 159 | 83 | 11 | 742 |
+| server | **127** | 44 | 9 | 1 | 0 | 181 |
+| StockSharp | **0** | 0 | 0 | 3 | 0 | 3 |
+| **TOTAL** | **3,147** | 1,087 | 1,167 | 901 | 19 | 6,321 |
+
+Highlights:
+- jellyfin (1,046), garnet (499), semantic-kernel (458), abp (445), aspnetcore (403) carry 79% of the targets.
+- Avalonia, runtime, StockSharp contribute 0 targets. Their production Mode #1 sites are either already covered or sit in files cobertura didn't load (recoverable in v2).
+- abp and aspnetcore alone account for 573 of the 901 `unknown_file` sites. Recovering those is the most valuable v2 expansion — see issue notes in v2 README when created.
 
 ## Versioning
 

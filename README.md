@@ -62,11 +62,17 @@ Branch-uncovered code around line-covered statics. A generated test for "FOO is 
 
 #### What we drop besides covered sites
 
-Two further filters apply when building [`targets/v1/`](targets/v1/) (full counts in [`targets/v1/targets.lock.yaml`](targets/v1/targets.lock.yaml)):
+The Mode #1 analyzer detected 6,321 sites total across the 15 repos. Each lands in exactly one bucket; only the first becomes a target:
 
-- **Non-production paths** (1,167 sites) — anything under `test/`, `samples/`, `benchmarks/`, `playground/`. Out of scope by definition.
-- **`unknown_file`** (901 sites) — the production source exists but cobertura has no entry for it: the existing test suite never loaded the assembly. We can't tell from a generated test alone whether new coverage is real, so we defer these to v2.
-- **`unknown_line`** (19 sites) — cobertura has the file but not the exact line (multi-line expressions cobertura collapsed). Data quality issue, dropped.
+| Bucket | Count | In v1 input? |
+|---|---:|:---:|
+| **production, uncovered, in cobertura** | **3,147** | ✅ **yes — `targets/v1/targets.csv`** |
+| production, already line-covered | 1,087 | no — see five buckets above |
+| non-production path (test/, samples/, benchmarks/, playground/) | 1,167 | no — out of scope |
+| production, `unknown_file` (no cobertura entry — test suite never loaded the assembly) | 901 | no — deferred to v2 |
+| production, `unknown_line` (cobertura collapsed a multi-line expression) | 19 | no — data quality |
+
+Per-repo breakdown is in [`targets/v1/README.md`](targets/v1/README.md#per-repo-bucket-breakdown). Full provenance with sha256 of the input is in [`targets/v1/targets.lock.yaml`](targets/v1/targets.lock.yaml).
 
 ### Reproducibility contract
 

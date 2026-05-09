@@ -1699,22 +1699,29 @@ jobs:
         shell: bash
         working-directory: target
         continue-on-error: true
-        # StockSharp.Tests.csproj produces a .dll only (no apphost exe) so we
-        # launch via `dotnet StockSharp.Tests.dll` (MTP entrypoint works either
-        # way). dotnet-coverage attaches its CLR profiler around the child.
+        # StockSharp.Tests.csproj produces a .dll only (no apphost exe). Force
+        # apphost generation via -p:UseAppHost=true at build time so we can
+        # hand dotnet-coverage a single executable path (proven to work for
+        # Avalonia/eShop where apphosts are produced naturally).
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
+          dotnet build Tests/Tests.csproj -c Release --no-restore -p:UseAppHost=true
+          exe="Tests/bin/Release/net10.0/StockSharp.Tests"
           dll="Tests/bin/Release/net10.0/StockSharp.Tests.dll"
-          if [[ ! -f "$dll" ]]; then
-            echo "::error::Test dll not found at $dll"
-            ls -la Tests/bin/Release/net10.0/ || true
-            exit 0
+          if [[ -x "$exe" ]]; then
+            dotnet-coverage collect "$exe" \
+              -f cobertura \
+              -o TestResults/coverage.cobertura.xml \
+              || echo "::warning::dotnet-coverage collect (apphost) failed — continuing"
+          else
+            echo "::warning::Apphost not produced; falling back to 'dotnet \$dll'"
+            ls -la Tests/bin/Release/net10.0/ | head -20
+            dotnet-coverage collect -f cobertura \
+              -o TestResults/coverage.cobertura.xml \
+              -- dotnet "$dll" \
+              || echo "::warning::dotnet-coverage collect (dll) failed — continuing"
           fi
-          dotnet-coverage collect "dotnet $dll" \
-            -f cobertura \
-            -o TestResults/coverage.cobertura.xml \
-            || echo "::warning::dotnet-coverage collect for StockSharp.Tests failed — continuing"
 
       - uses: ./.github/actions/validate-cobertura
         if: always()

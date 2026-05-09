@@ -86,15 +86,18 @@ jobs:
         run: |
           set -euo pipefail
           # Generation reads source files from cloned_repos/<repo>/. We don't
-          # need to build them — just need the source tree at the pinned SHA.
-          # Each repo's SHA is pinned in phase.lock.yaml. We only clone the
-          # repos that actually appear in the target set to keep checkout fast.
+          # need git history — just the source tree at the pinned SHA. Use
+          # codeload tarballs because (a) they accept short SHAs (git
+          # protocol's `fetch <sha>` requires full SHAs and uploadpack
+          # config), (b) they're a single HTTP GET each, and (c) cheaper
+          # than a full clone of repos like dotnet/runtime.
           mkdir -p cloned_repos
+          apt-get install -y --no-install-recommends jq >/dev/null
           python3 - <<'PY'
-          import csv, subprocess, yaml, pathlib
+          import csv, json, os, pathlib, subprocess, tarfile, tempfile, urllib.request, yaml
           lock = yaml.safe_load(open("phases/phase2-singleshot/phase.lock.yaml"))
-          repos_in_targets = sorted({row["repo"] for row in csv.DictReader(open("targets/${{ inputs.target_set }}/targets.csv"))})
-          # repo -> upstream slug
+          target_set = "${{ inputs.target_set }}"
+          repos_in_targets = sorted({row["repo"] for row in csv.DictReader(open(f"targets/{target_set}/targets.csv"))})
           UPSTREAM = {
             "abp": "abpframework/abp",
             "aspnetcore": "dotnet/aspnetcore",
@@ -112,17 +115,45 @@ jobs:
             "server": "bitwarden/server",
             "StockSharp": "StockSharp/StockSharp",
           }
+          token = os.environ["GITHUB_MODELS_TOKEN"]  # also accepted by api.github.com
           for repo in repos_in_targets:
               sha = lock["repos"][repo]
               dest = pathlib.Path("cloned_repos") / repo
               if dest.exists():
                   continue
               slug = UPSTREAM[repo]
-              print(f"== cloning {repo} ({slug}@{sha})")
-              subprocess.check_call(["git", "init", "-q", str(dest)])
-              subprocess.check_call(["git", "-C", str(dest), "remote", "add", "origin", f"https://github.com/{slug}.git"])
-              subprocess.check_call(["git", "-C", str(dest), "fetch", "--depth=1", "origin", sha])
-              subprocess.check_call(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"])
+              url = f"https://api.github.com/repos/{slug}/tarball/{sha}"
+              print(f"== fetching {repo} ({slug}@{sha})")
+              req = urllib.request.Request(url, headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "phase2-singleshot",
+              })
+              with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tf:
+                  with urllib.request.urlopen(req) as resp:
+                      while True:
+                          chunk = resp.read(1 << 20)
+                          if not chunk:
+                              break
+                          tf.write(chunk)
+                  tarball = tf.name
+              # Tarball top-level dir is `<owner>-<repo>-<sha>/`. Strip it.
+              dest.mkdir(parents=True)
+              with tarfile.open(tarball, "r:gz") as tar:
+                  members = tar.getmembers()
+                  if not members:
+                      raise SystemExit(f"empty tarball for {repo}")
+                  prefix = members[0].name.split("/", 1)[0] + "/"
+                  for m in members:
+                      if not m.name.startswith(prefix):
+                          continue
+                      m.name = m.name[len(prefix):]
+                      if m.name:
+                          tar.extract(m, dest, filter="data")
+              os.unlink(tarball)
+              # Quick sanity: target file should exist for at least one row.
+              n_files = sum(1 for _ in dest.rglob("*"))
+              print(f"   {repo}: {n_files} entries extracted")
           PY
 
       - name: Run generation cell

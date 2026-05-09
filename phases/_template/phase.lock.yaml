@@ -1,0 +1,56 @@
+# Snapshot of every input that affects this phase's reproducibility.
+# When you start a phase: cp -r phases/_template phases/phaseN-name and fill in.
+# When you seal a phase: every field below MUST be populated and immutable.
+
+phase:
+  id: phaseN-name              # e.g. phase2-singleshot
+  title: ""                    # human-readable title
+  strategy: ""                 # e.g. "single-shot test generation per Mode#1 site"
+  start_date: ""               # ISO date phase work began
+  seal_date: ""                # ISO date phase frozen (no further edits to this dir)
+  git_tag: ""                  # tag created at seal: phase-N-final
+
+inputs:
+  targets_version: ""          # e.g. v1 — points to targets/v{N}/targets.csv
+  targets_sha256: ""           # sha256 of targets/v{N}/targets.csv at run time
+  targets_count: 0             # number of rows actually attempted
+
+infrastructure:
+  sdk_image: ""                # e.g. mcr.microsoft.com/dotnet/sdk:10.0-noble
+  sdk_image_digest: ""         # sha256:... — pin, do not rely on the tag
+  orchestrator_workflow_sha: "" # commit SHA of .github/workflows/coverage-orchestrator.yml when this phase ran
+  generator_workflow_sha: ""   # commit SHA of .github/workflows/test-generator-*.yml (empty for baseline)
+
+repos:
+  # Per-repo SHA pin. Must match what the orchestrator checked out for this phase.
+  # abp: a1b2c3d
+  # aspnetcore: ...
+
+generation:                    # omit/empty for baseline
+  model: ""                    # e.g. "claude-opus-4.7" / "gpt-5"
+  model_revision: ""
+  prompt_template_sha: ""      # git SHA of the prompt template file
+  temperature: null
+  seed: null
+  max_attempts_per_target: 1
+  agent_loop_max_iterations: null  # only for agentic phases
+  squad_personas: []           # only for multi-agent phases
+
+ci_runs:
+  # gh run IDs that produced the artifacts in coverage/ and errors/.
+  coverage_orchestrator_run_id: ""
+  generator_run_id: ""         # empty for baseline
+
+results:
+  total_tests_after_phase: 0
+  total_lines_valid: 0
+  total_lines_covered: 0
+  line_coverage_pct: 0.0
+  mode1_sites_total: 0
+  mode1_sites_covered: 0
+  mode1_sites_newly_covered: 0   # delta vs phase 1 baseline (0 for phase 1 itself)
+  generation_attempts: 0
+  generation_compile_failures: 0
+  generation_runtime_failures: 0
+  generation_passing: 0
+  generation_passing_and_covering_target: 0  # the headline phase score

@@ -1,0 +1,59 @@
+phase:
+  id: phase1-baseline
+  title: "Baseline coverage across 15 OSS .NET repos"
+  strategy: "No test generation. Run existing test suites under coverlet/dotnet-coverage; cross-reference Mode#1 static-call sites against cobertura output."
+  start_date: "2026-04-26"
+  seal_date: "2026-05-09"
+  git_tag: "phase-1-baseline-final"
+
+inputs:
+  # Phase 1 has no targets file — it produces the data that targets/v1 is
+  # built from. Subsequent phases pin to a targets version here.
+  targets_version: ""
+  targets_sha256: ""
+  targets_count: 0
+
+infrastructure:
+  sdk_image: "mcr.microsoft.com/dotnet/sdk:10.0-noble"
+  sdk_image_digest: ""  # TODO: pin digest. Tag floats; re-runs may diverge.
+  orchestrator_workflow_sha: "05ee7c142a07e452d6157909cdb11f8457ba950c"
+  generator_workflow_sha: ""  # n/a for baseline
+
+repos:
+  abp: ea4bbb8b51
+  aspnetcore: ecb199c29c
+  Avalonia: dcb6071
+  duplicati: 4afa374
+  efcore: 45e3af0273
+  eShop: 9b4f943
+  garnet: 38cac99
+  jellyfin: e1e18e8
+  OpenRA: 8f2138c
+  orleans: 8024faf86
+  roslyn: 02d301627ed
+  runtime: 9ffface2f3f
+  semantic-kernel: 1fe41e17a
+  server: ea233580d
+  StockSharp: a26ce59
+
+generation: {}  # n/a for baseline
+
+ci_runs:
+  # Aggregate of multiple CI runs; the table in REPORT.md cites per-repo job IDs
+  # for the test-count scrapes. Headline run-ids:
+  coverage_orchestrator_run_id: "see REPORT.md (multiple runs aggregated)"
+  generator_run_id: ""
+
+results:
+  total_tests_after_phase: 249955
+  total_lines_valid: 7999056      # sum of unique (file,line) across 15 repos after dedup
+  total_lines_covered: 4658119
+  line_coverage_pct: 58.23
+  mode1_sites_total: 5154
+  mode1_sites_covered: 1087
+  mode1_sites_newly_covered: 0    # baseline — no delta to compute against
+  generation_attempts: 0
+  generation_compile_failures: 0
+  generation_runtime_failures: 0
+  generation_passing: 0
+  generation_passing_and_covering_target: 0

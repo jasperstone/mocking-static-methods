@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Build the canonical input set for test-generation phases.
+
+Produces targets/v{version}/:
+  - targets.csv               — the input. One row per Mode#1 site we want a
+                                 phase to attempt to cover with a new test.
+                                 v1 scope: production sites whose line is NOT
+                                 currently covered by the existing test suite.
+  - targets.lock.yaml         — provenance + sha256 of targets.csv.
+  - covered_sites_analysis.csv — informational. Sites we did NOT include because
+                                 they're already line-covered. Useful context;
+                                 not consumed by phases.
+  - README.md                 — schema, build steps, exclusion rationale.
+
+Inputs (these must already exist; this script does not run CI):
+  - Mode1Analyzer/results/mode1_sites.csv
+  - /tmp/cov_phase2/coverage-xml-{repo}/**/coverage.cobertura.xml
+  - tools/coverage_xref/build_unified_table.py (helpers reused)
+
+Usage:
+    python3 tools/targets/build_targets.py --version v1
+"""
+from __future__ import annotations
+import argparse
+import csv
+import hashlib
+import sys
+from collections import Counter
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "tools" / "coverage_xref"))
+
+from build_unified_table import (  # type: ignore
+    REPOS,
+    SITES_CSV,
+    is_production_site,
+    load_coverage_map,
+    find_site,
+)
+
+OUT_BASE = REPO_ROOT / "targets"
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def build(version: str) -> None:
+    out_dir = OUT_BASE / version
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Load sites
+    with SITES_CSV.open() as fh:
+        all_sites = list(csv.DictReader(fh))
+
+    # Per-repo coverage maps (one parse pass)
+    cov_maps = {repo: load_coverage_map(repo) for repo in REPOS}
+
+    targets: list[dict] = []
+    covered: list[dict] = []
+    skipped_non_prod = 0
+    skipped_unknown_file = 0
+    skipped_unknown_line = 0
+
+    per_repo_id: dict[str, int] = Counter()
+
+    for s in all_sites:
+        repo = s["repo"]
+        if repo not in cov_maps:
+            continue
+        if not is_production_site(s["file"]):
+            skipped_non_prod += 1
+            continue
+
+        status = find_site(cov_maps[repo], s["file"], int(s["line"]))
+
+        if status == "unknown_file":
+            # Production site exists in source but no cobertura entry — the
+            # test suite never loaded the assembly. Practically uncovered, but
+            # we drop it from v1 because we have no evidence that running a
+            # generated test would even execute on the repo's CI configuration.
+            # Re-evaluate for v2.
+            skipped_unknown_file += 1
+            continue
+        if status == "unknown_line":
+            # Cobertura has the file but not this exact line. Usually means the
+            # static call sits on a line cobertura collapsed (e.g. multi-line
+            # expression). Skip; data quality issue.
+            skipped_unknown_line += 1
+            continue
+
+        per_repo_id[repo] += 1
+        target_id = f"{repo}:{per_repo_id[repo]:04d}"
+
+        row = {
+            "target_id": target_id,
+            "repo": repo,
+            "file": s["file"],
+            "line": s["line"],
+            "containing_type": s["containing_type"],
+            "method": s["method"],
+            "receiver_type": s["receiver_type"],
+            "kind": s["kind"],
+        }
+
+        if status == "covered":
+            covered.append(row)
+        else:  # uncovered
+            targets.append(row)
+
+    # Write targets.csv (the input set — phase B scope: uncovered only)
+    targets_csv = out_dir / "targets.csv"
+    with targets_csv.open("w", newline="") as fh:
+        w = csv.DictWriter(
+            fh,
+            fieldnames=["target_id", "repo", "file", "line",
+                        "containing_type", "method", "receiver_type", "kind"],
+        )
+        w.writeheader()
+        w.writerows(targets)
+
+    # Write covered_sites_analysis.csv (informational)
+    covered_csv = out_dir / "covered_sites_analysis.csv"
+    with covered_csv.open("w", newline="") as fh:
+        w = csv.DictWriter(
+            fh,
+            fieldnames=["target_id", "repo", "file", "line",
+                        "containing_type", "method", "receiver_type", "kind"],
+        )
+        w.writeheader()
+        w.writerows(covered)
+
+    # Lock file
+    lock = out_dir / "targets.lock.yaml"
+    by_repo = Counter(t["repo"] for t in targets)
+    by_repo_lines = "\n".join(
+        f"  {r}: {by_repo.get(r, 0)}" for r in REPOS
+    )
+
+    lock.write_text(
+        f"""# Provenance for targets/{version}/targets.csv
+# Generated by tools/targets/build_targets.py — do not edit by hand.
+# Re-run the script and commit the diff if the inputs change.
+
+version: {version}
+generated_utc: "{datetime.now(timezone.utc).isoformat(timespec='seconds')}"
+
+source_data:
+  mode1_sites_csv: "Mode1Analyzer/results/mode1_sites.csv"
+  mode1_sites_sha256: "{sha256_file(SITES_CSV)}"
+  coverage_xml_root: "/tmp/cov_phase2"
+  coverage_phase: "phase1-baseline"
+
+scope:
+  description: "Production Mode#1 static-call sites that are NOT currently line-covered."
+  excluded_categories:
+    - "non_production_paths (test/, sample/, benchmark/, playground/)"
+    - "currently_covered (line hits > 0 in baseline cobertura)"
+    - "unknown_file (no cobertura entry — test suite never loaded the assembly)"
+    - "unknown_line (cobertura has file but not the exact line — multi-line expr)"
+
+counts:
+  targets_total: {len(targets)}
+  covered_excluded: {len(covered)}
+  skipped_non_production: {skipped_non_prod}
+  skipped_unknown_file: {skipped_unknown_file}
+  skipped_unknown_line: {skipped_unknown_line}
+
+targets_by_repo:
+{by_repo_lines}
+
+artifacts:
+  targets_csv_sha256: "{sha256_file(targets_csv)}"
+  covered_sites_analysis_csv_sha256: "{sha256_file(covered_csv)}"
+"""
+    )
+
+    print(f"Wrote {targets_csv} ({len(targets)} rows)")
+    print(f"Wrote {covered_csv} ({len(covered)} rows)")
+    print(f"Wrote {lock}")
+    print(f"Skipped: non-prod={skipped_non_prod} unknown_file={skipped_unknown_file} unknown_line={skipped_unknown_line}")
+
+
+if __name__ == "__main__":
+    p = argparse.ArgumentParser()
+    p.add_argument("--version", default="v1", help="Target set version (e.g. v1)")
+    args = p.parse_args()
+    build(args.version)

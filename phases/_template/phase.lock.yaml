@@ -19,28 +19,65 @@ infrastructure:
   sdk_image: ""                # e.g. mcr.microsoft.com/dotnet/sdk:10.0-noble
   sdk_image_digest: ""         # sha256:... — pin, do not rely on the tag
   orchestrator_workflow_sha: "" # commit SHA of .github/workflows/coverage-orchestrator.yml when this phase ran
-  generator_workflow_sha: ""   # commit SHA of .github/workflows/test-generator-*.yml (empty for baseline)
+  generator_workflow_sha: ""   # commit SHA of .github/workflows/phaseN-*.yml when this phase ran
 
 repos:
   # Per-repo SHA pin. Must match what the orchestrator checked out for this phase.
   # abp: a1b2c3d
   # aspnetcore: ...
 
-generation:                    # omit/empty for baseline
-  model: ""                    # e.g. "claude-opus-4.7" / "gpt-5"
-  model_revision: ""
-  prompt_template_sha: ""      # git SHA of the prompt template file
-  temperature: null
-  seed: null
-  max_attempts_per_target: 1
-  agent_loop_max_iterations: null  # only for agentic phases
-  squad_personas: []           # only for multi-agent phases
+# ---------------------------------------------------------------------------
+# Generation parameters. Empty/omitted for phase 1 (baseline = no generation).
+# ---------------------------------------------------------------------------
+generation:
+  # Endpoint. Phase 2+ uses GitHub Models for closed-weight reproducibility:
+  # the same endpoint is available to anyone with a GitHub account, so the
+  # experiment can be re-run by readers without provider-specific accounts.
+  endpoint: "https://models.github.ai/inference"
+
+  # Model panel. All five run for every phase 2+. Five runs per (model × phase)
+  # for noise estimation. The exact snapshot ID returned by the API at run
+  # time MUST be recorded in `model_snapshots_observed` below — generic IDs
+  # like "openai/gpt-5" route to whatever the current snapshot is.
+  models:
+    - id: "anthropic/claude-opus-4-5"      # frontier, lineage 1
+    - id: "anthropic/claude-sonnet-4-5"    # mid-tier, controls capability axis within Anthropic
+    - id: "openai/gpt-5"                   # frontier, lineage 2
+    - id: "openai/o3"                      # reasoning, controls training-paradigm axis within OpenAI
+    - id: "google/gemini-2-5-pro"          # frontier, lineage 3
+  runs_per_model: 5
+  temperature: 0.0
+  top_p: 1.0
+  seed: 42
+  max_output_tokens: 4096
+
+  # Filled in AFTER the run from each response payload's `model` field
+  # (the actual snapshot the gateway routed to). One entry per model id above.
+  model_snapshots_observed: {}
+    # "openai/gpt-5": "openai/gpt-5-2026-mm-dd"
+    # ...
+
+  prompt_template_dir: "prompt/"           # relative to this phase dir
+  prompt_system_sha256: ""                 # sha256 of prompt/system.md at run time
+  prompt_user_template_sha256: ""          # sha256 of prompt/user-template.md
+  prompt_loop_feedback_sha256: ""          # phase 3+ only
+
+  agent_loop_max_iterations: null          # phase 3+ only
+  agent_tools_allowed: []                  # phase 3+ only
+
+  squad_personas: []                       # phase 4+ only — list of {role, sha} entries
+  squad_orchestration_protocol_sha: ""     # phase 4+ only
 
 ci_runs:
-  # gh run IDs that produced the artifacts in coverage/ and errors/.
+  # gh run IDs that produced the artifacts in coverage/, errors/, results/.
+  # Phase 2+ has 25 generation jobs (5 models × 5 runs) plus one coverage run.
   coverage_orchestrator_run_id: ""
-  generator_run_id: ""         # empty for baseline
+  generator_run_ids: {}                    # mapping {model_id: {run_index: run_id}}
 
+# ---------------------------------------------------------------------------
+# Aggregate results. Filled at seal time. Per-model breakdown lives in
+# results/aggregate.csv (one row per target × model × run_index).
+# ---------------------------------------------------------------------------
 results:
   total_tests_after_phase: 0
   total_lines_valid: 0
@@ -49,8 +86,17 @@ results:
   mode1_sites_total: 0
   mode1_sites_covered: 0
   mode1_sites_newly_covered: 0   # delta vs phase 1 baseline (0 for phase 1 itself)
-  generation_attempts: 0
-  generation_compile_failures: 0
-  generation_runtime_failures: 0
-  generation_passing: 0
-  generation_passing_and_covering_target: 0  # the headline phase score
+
+  # Per-model headline numbers. Each is the mean across runs_per_model runs;
+  # stddev recorded in the same block. Phase 1 leaves this empty.
+  per_model: {}
+    # "anthropic/claude-opus-4-5":
+    #   generation_attempts_per_run: 0
+    #   generation_compile_failures_mean: 0.0
+    #   generation_compile_failures_stddev: 0.0
+    #   generation_runtime_failures_mean: 0.0
+    #   generation_runtime_failures_stddev: 0.0
+    #   generation_passing_mean: 0.0
+    #   generation_passing_stddev: 0.0
+    #   generation_passing_and_covering_target_mean: 0.0
+    #   generation_passing_and_covering_target_stddev: 0.0

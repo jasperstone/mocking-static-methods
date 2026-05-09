@@ -1,0 +1,184 @@
+# =============================================================================
+# Phase template — copy to .github/workflows/phaseN-name.yml when starting a
+# new phase. Replace {{PHASE_ID}} placeholders with the phase id (e.g.
+# phase2-singleshot) and update workflow_dispatch defaults as needed.
+#
+# Architecture:
+#   1. generate (matrix: 5 models × 5 runs = 25 jobs in parallel)
+#        - reads targets/v{N}/targets.csv
+#        - calls tools/generation/runner.py for each target
+#        - writes phases/{{PHASE_ID}}/results/{model}/run_{i}/...
+#        - uploads as artifact `gen-{model}-run{i}`
+#   2. assemble (1 job, after generate)
+#        - downloads all 25 artifacts
+#        - commits to phases/{{PHASE_ID}}/results/ (or to a replica dir
+#          if replication=true)
+#   3. coverage (delegated to coverage-orchestrator.yml — out of scope here)
+#   4. score (1 job, after coverage)
+#        - runs tools/generation/build_outcomes.py for each cell
+#        - runs tools/generation/aggregate.py
+#        - uploads aggregate.csv as artifact
+# =============================================================================
+name: "{{PHASE_ID}}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_set:
+        description: "Targets version (e.g. v1)"
+        required: true
+        default: "v1"
+      replication:
+        description: "If true, write outputs to a replica dir instead of the canonical results/ dir"
+        required: false
+        default: "false"
+      limit:
+        description: "Optional cap on number of targets per cell (for dry runs)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  models: read
+
+concurrency:
+  group: "{{PHASE_ID}}-${{ github.event.inputs.replication }}"
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: "gen ${{ matrix.model }} run ${{ matrix.run_index }}"
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    strategy:
+      fail-fast: false
+      max-parallel: 25
+      matrix:
+        model:
+          - anthropic/claude-opus-4-5
+          - anthropic/claude-sonnet-4-5
+          - openai/gpt-5
+          - openai/o3
+          - google/gemini-2-5-pro
+        run_index: [1, 2, 3, 4, 5]
+    env:
+      GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_MODELS_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Verify target set integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          want=$(python3 -c "
+          import yaml
+          d = yaml.safe_load(open('phases/{{PHASE_ID}}/phase.lock.yaml'))
+          print(d['inputs'].get('targets_sha256', ''))
+          ")
+          have=$(sha256sum "targets/${{ inputs.target_set }}/targets.csv" | awk '{print $1}')
+          if [[ -n "$want" && "$want" != "$have" ]]; then
+            echo "::error::targets.csv sha256 drift: want=$want have=$have"
+            exit 1
+          fi
+
+      - name: Run generation cell
+        shell: bash
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${{ inputs.limit }}" ]]; then
+            extra+=(--limit "${{ inputs.limit }}")
+          fi
+          python3 tools/generation/runner.py \
+            --phase {{PHASE_ID}} \
+            --model "${{ matrix.model }}" \
+            --run-index "${{ matrix.run_index }}" \
+            --target-set "${{ inputs.target_set }}" \
+            "${extra[@]}"
+
+      - name: Upload cell artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "gen-${{ matrix.model }}-run${{ matrix.run_index }}"
+          path: "phases/{{PHASE_ID}}/results/"
+          if-no-files-found: error
+          retention-days: 90
+
+  assemble:
+    name: "assemble all cells"
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all cell artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: phases/{{PHASE_ID}}/results/
+
+      - name: Aggregate (preliminary, before coverage CI)
+        shell: bash
+        run: |
+          ls -la "phases/{{PHASE_ID}}/results/"
+          # Final aggregation happens in the score job after coverage CI
+          # has produced compile/runtime logs and cobertura XMLs. For now
+          # we only confirm all 25 cells uploaded.
+          count=$(find "phases/{{PHASE_ID}}/results/" -name "attempts.jsonl" | wc -l)
+          if [[ "$count" -ne 25 ]]; then
+            echo "::error::expected 25 cell attempts.jsonl files; got $count"
+            exit 1
+          fi
+
+      - name: Upload combined results
+        uses: actions/upload-artifact@v4
+        with:
+          name: "{{PHASE_ID}}-results-pre-coverage"
+          path: "phases/{{PHASE_ID}}/results/"
+          retention-days: 90
+
+  # Coverage CI (coverage-orchestrator.yml) is dispatched separately after
+  # this workflow completes. It consumes generated_tests/ from the
+  # combined-results artifact, builds + tests them per repo, and uploads
+  # cobertura XMLs. The score job below joins those back into outcome.csv.
+  #
+  # When implementing this for phase 2: either chain via workflow_run
+  # trigger, or run them sequentially via a one-line wrapper script that
+  # dispatches both and waits for completion.
+
+  score:
+    name: "score (after coverage)"
+    if: false  # enable when coverage CI integration is wired in phase 2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build outcomes per cell
+        shell: bash
+        run: |
+          for model in anthropic/claude-opus-4-5 anthropic/claude-sonnet-4-5 openai/gpt-5 openai/o3 google/gemini-2-5-pro; do
+            for run in 1 2 3 4 5; do
+              python3 tools/generation/build_outcomes.py \
+                --phase {{PHASE_ID}} \
+                --model "$model" \
+                --run-index "$run" \
+                --targets-csv "targets/${{ inputs.target_set }}/targets.csv"
+            done
+          done
+
+      - name: Aggregate
+        shell: bash
+        run: |
+          python3 tools/generation/aggregate.py --phase {{PHASE_ID}}
+
+      - name: Upload aggregate
+        uses: actions/upload-artifact@v4
+        with:
+          name: "{{PHASE_ID}}-aggregate"
+          path: "phases/{{PHASE_ID}}/results/aggregate.csv"

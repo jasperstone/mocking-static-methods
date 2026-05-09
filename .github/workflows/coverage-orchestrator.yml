@@ -666,6 +666,87 @@ jobs:
             "./build.sh -subset libs+libs.tests -test" \
             -f cobertura -o ./TestResults/coverage.cobertura.xml
 
+      # R6 (2026-05-08): build.sh -subset libs+libs.tests produces cobertura
+      # but the actual emitted scope is narrow (only F#/HotReload/illink/
+      # source-generators tests run end-to-end inside the orchestrated build).
+      # The 33 Mode #1 sites we care about live in System.Net.Http.* and
+      # Microsoft.Extensions.*. Run those test projects explicitly with the
+      # XPlat collector so their assemblies show up in cobertura.
+      - name: Write coverlet.runsettings (libraries widening)
+        working-directory: target
+        shell: bash
+        run: |
+          cat > coverlet.runsettings <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <RunSettings>
+            <DataCollectionRunSettings>
+              <DataCollectors>
+                <DataCollector friendlyName="XPlat code coverage">
+                  <Configuration>
+                    <Format>cobertura</Format>
+                    <Include>[System.Net.Http]*,[System.Net.Http.*]*,[Microsoft.Extensions.*]*</Include>
+                    <Exclude>[*Tests]*,[*UnitTests]*,[xunit*]*,[Moq*]*,[NSubstitute*]*</Exclude>
+                    <SingleHit>false</SingleHit>
+                    <UseSourceLink>true</UseSourceLink>
+                    <IncludeTestAssembly>false</IncludeTestAssembly>
+                    <SkipAutoProps>true</SkipAutoProps>
+                  </Configuration>
+                </DataCollector>
+              </DataCollectors>
+            </DataCollectionRunSettings>
+          </RunSettings>
+          EOF
+
+      - name: Run targeted libraries tests with coverage (widen Mode #1 scope)
+        working-directory: target
+        continue-on-error: true
+        shell: bash
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          FILTER='Category!=OuterLoop&Category!=failing&Category!=IgnoreForCI&Category!=Integration'
+          mapfile -t PROJECTS < <(find \
+            src/libraries/System.Net.Http \
+            src/libraries/Microsoft.Extensions.Configuration \
+            src/libraries/Microsoft.Extensions.DependencyInjection \
+            src/libraries/Microsoft.Extensions.Logging \
+            src/libraries/Microsoft.Extensions.Options \
+            src/libraries/Microsoft.Extensions.Primitives \
+            src/libraries/Microsoft.Extensions.Hosting \
+            -type f -name "*.Tests.csproj" \
+            ! -path "*FunctionalTests*" \
+            ! -path "*IntegrationTests*" \
+            2>/dev/null | sort -u)
+          echo "Discovered ${#PROJECTS[@]} targeted test projects"
+          printf '  %s\n' "${PROJECTS[@]}"
+          i=0
+          for proj in "${PROJECTS[@]}"; do
+            i=$((i+1))
+            base=$(basename "$proj" .csproj)
+            echo "::group::[$i/${#PROJECTS[@]}] $base"
+            dotnet test "$proj" \
+              --filter "$FILTER" \
+              --collect:"XPlat Code Coverage" \
+              --settings coverlet.runsettings \
+              --results-directory "TestResults/${i}_${base}" \
+              || echo "::warning::Tests in $base failed or runner pressure — continuing"
+            echo "::endgroup::"
+          done
+          shopt -s globstar nullglob
+          mapfile -t REPORTS < <(find TestResults -type f -name 'coverage.cobertura.xml' 2>/dev/null)
+          echo "Found ${#REPORTS[@]} XPlat cobertura files"
+          # Merge XPlat reports into the main cobertura (overwrites if build.sh
+          # produced one — wider scope is the goal). If build.sh's report
+          # exists, include it in the merge.
+          if [ -f TestResults/coverage.cobertura.xml ]; then
+            REPORTS+=("TestResults/coverage.cobertura.xml")
+          fi
+          if [ "${#REPORTS[@]}" -gt 0 ]; then
+            dotnet-coverage merge -r -f cobertura \
+              -o TestResults/coverage.cobertura.xml \
+              "${REPORTS[@]}" || echo "merge produced no output"
+          fi
+
       - name: Disk usage (end)
         if: always()
         run: df -h

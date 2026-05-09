@@ -94,7 +94,18 @@ def main() -> int:
 
     compile_logs = {p.stem.replace("_", ":", 1): p for p in (cell_dir / "compile").rglob("*.log")} if (cell_dir / "compile").is_dir() else {}
     runtime_logs = {p.stem.replace("_", ":", 1): p for p in (cell_dir / "runtime").rglob("*.log")} if (cell_dir / "runtime").is_dir() else {}
-    generated = {p.stem.replace("_", ":", 1) for p in (cell_dir / "generated_tests").rglob("*.cs")} if (cell_dir / "generated_tests").is_dir() else set()
+    # generated_tests/{repo}/{target_id_safe}/block_NN.cs — presence of the
+    # directory means the model produced at least one csharp block for that target.
+    if (cell_dir / "generated_tests").is_dir():
+        generated = {
+            d.name.replace("_", ":", 1)
+            for repo_dir in (cell_dir / "generated_tests").iterdir()
+            if repo_dir.is_dir()
+            for d in repo_dir.iterdir()
+            if d.is_dir()
+        }
+    else:
+        generated = set()
 
     out_path = cell_dir / "outcome.csv"
     n = 0

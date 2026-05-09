@@ -57,7 +57,7 @@ generation:
 
   prompt_template_dir: "prompt/"
   prompt_system_sha256: "b0cab6be30e91c5f6e322caa14632a760efbec76962e735b6b63b5bd8ce5f0c6"
-  prompt_user_template_sha256: "963c5bf445eec00b7da974db16e25286ef172788a8b333ff9f737074ad56da67"
+  prompt_user_template_sha256: "f5119da3c4be09d650d30d858fc6ab4ebcc5bbf840eb2f9db5474497808e0653"
   prompt_loop_feedback_sha256: ""   # phase 3+
 
   agent_loop_max_iterations: null   # phase 3+

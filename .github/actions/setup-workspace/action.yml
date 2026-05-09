@@ -1,11 +1,24 @@
 name: Setup workspace
-description: Mark workspace as a safe git directory and print starting disk usage.
+description: Mark workspace as a safe git directory, install native deps for dotnet-coverage, print disk usage.
 runs:
   using: composite
   steps:
     - name: Mark workspace as a safe git directory
       shell: bash
       run: git config --global --add safe.directory '*'
+
+    # dotnet-coverage CLR profiler requires libxml2 to load; the
+    # mcr.microsoft.com/dotnet/sdk:10.0-noble image ships without it, which
+    # produces "Profiler was not initialized. Verify that glibc (>=2.27),
+    # libxml2 and all .NET dependencies are installed." and an empty cobertura
+    # stub — exactly the silent no-op we keep hitting on Avalonia/eShop/
+    # StockSharp. Install it once at job start.
+    - name: Install dotnet-coverage native deps (libxml2)
+      shell: bash
+      run: |
+        if command -v apt-get >/dev/null; then
+          apt-get update -qq && apt-get install -y --no-install-recommends libxml2 ca-certificates >/dev/null
+        fi
 
     - name: Disk usage (start)
       shell: bash

@@ -117,3 +117,63 @@ from coverage logs". Decision file:
 
 ### 2026-05-07 — Test counts refreshed against run 25495265941 (post-BVT-fix)
 Re-ran `tools/test_counts/from_coverage_logs.py 25495265941` after the all-green Orleans BVT run. Headline change: **Orleans 28 / 1,692 → 36 / 10,951** (+8 projects, +9,259 tests) — BVT inclusion landed. Side notes: abp slipped 74 / 1,358 → 73 / 1,346 (one project dropped from logs, likely a flaky-skip change); aspnetcore / efcore / roslyn / semantic-kernel unchanged. New authoritative source = single run 25495265941. Commit 349981e on jasper/squad.
+
+### 2026-05-08 — Baseline matrix update (heads up)
+
+Coverage matrix changed: MAUI removed (4 failed remediation rounds), OpenRA + StockSharp added, Files + PowerToys skipped (Windows-only). Once OpenRA (run 25552129165) and StockSharp (run 25552132370) finish, the next baseline + test-counts refresh covers 15 repos. Both new repos use the external `dotnet-coverage` data-collector path; expect potentially 1–2 rounds of remediation per established pattern. OpenRA targets `net8.0` (side-installs .NET 8 SDK in noble container); StockSharp resolves to `net10.0`.
+
+### 2026-05-08 — Mode #1 attribution diagnosis (Avalonia/eShop/duplicati/runtime)
+
+Brady asked why 4 repos in `tools/coverage_xref/UNIFIED_TABLE.md` show `Mode #1 covered = 0` despite having coverage data. Read-only diagnostic against locally-downloaded cobertura artifacts (gh run download from runs 25532664482 / 25532665179 / 25527102157). Decision drop at `.squad/decisions/inbox/beck-mode1-attribution.md` has the full breakdown.
+
+Two distinct failure modes found:
+
+1. **Empty instrumentation** (Avalonia, eShop) — coverlet.console emits structurally valid cobertura with thousands of classes/lines but **zero hit-lines anywhere in the file**. Path matching works fine; the suffix matcher in `xref_mode1_coverage.py` correctly resolves `tests/Avalonia.Base.UnitTests/...` to `__w/.../target/tests/avalonia.base.unittests/...`. Tests either didn't run under coverlet.console or the in-process collector didn't attach. Diagnostic signature: `lines-valid` is large, all `<line hits="0">`.
+
+2. **Real test-scope gap** (duplicati, runtime) — duplicati has 34,597 hit-lines (real coverage), but the 21 matched Mode#1 sites are in `Backend/Jottacloud`, `RestAPI/Database`, `OneDrive`, `HttpClientExtensions` — code paths the unit tests don't reach. runtime is more severe: cobertura covers `FSharp.Compiler.Service`, `FSharp.Core`, `illink`, source generators (`Microsoft.Interop.*`, `System.Text.*.Generator`); all 33 Mode#1 sites are in `src/libraries/System.Net.Http/...` and `src/libraries/Microsoft.Extensions.*/...` which are not in the test scope at all.
+
+**Useful path shape reference (cobertura `<class filename="...">`):**
+- Avalonia: `__w/mocking-static-methods/mocking-static-methods/target/src/Avalonia.Dialogs/...` (workspace-absolute) and `_/src/Avalonia.Dialogs/...` (deterministic-build).
+- eShop: `src/Basket.API/...` (project-relative, clean).
+- duplicati: `Duplicati/Library/Encryption/...` (project-relative, clean — matches Mode#1 sites directly).
+- runtime: `/_/src/arcade/src/...` (deterministic-build absolute prefix).
+
+Suffix-matcher in `xref_mode1_coverage.py` handles all four shapes; no path-matching fix needed.
+
+**Optional xref improvement** (not implemented, just suggested in decision drop): add a `matched_zero_hits_global` status to flag repos where EVERY hit value in the cobertura is 0 — distinguishes "instrumentation broken" from "this line not exercised".
+
+### 2026-05-08 — Mode #1 attribution re-confirmed (duplicati / runtime)
+
+Brady asked for a fresh diagnostic on the 0-covered Mode#1 cells in `tools/coverage_xref/UNIFIED_TABLE.md`. Re-ran the live `load_coverage_map` + `find_site` from `build_unified_table.py` against `/tmp/cov_phase2/coverage-xml-{duplicati,runtime}/`. Result is identical to my 2026-05-08 finding (decision: `beck-mode1-attribution.md`):
+
+- **duplicati**: matcher works. 21/34 sites match directly into cobertura (`direct_in_map=True`) and report `uncovered` (hits=0 — Backend/OAuthHelper/RestAPI surface not driven by the 1,096-test unit suite). 13 sites are in `Duplicati/UnitTest/*.cs` test sources that cobertura correctly omits (prod-only instrumentation).
+- **runtime**: matcher works. All 33 sites are `unknown_file`. Cobertura only contains F# compiler, HotReload generator tooling, illink, source generators, arcade — `grep filename=".*System\.Net\.Http"` and `grep filename=".*Microsoft\.Extensions"` both return zero. The libs targeted by the Mode#1 sites (`src/libraries/{System.Net.Http,Microsoft.Extensions.*}`) were never instrumented by the `build.sh -subset libs+libs.tests -test` run.
+
+No fix needed in `find_site` — its 5/4/3/2 suffix match + lowercase forward-slash normalization handles all four cobertura path shapes (project-relative, `/_/src/...` deterministic, `/__w/1/s/...` workspace-absolute, plain `src/...`).
+
+Recommendations sent in `beck-mode1-attribution-gap.md`:
+1. runtime is a Vogel/orchestrator issue (artifact glob may be missing per-library cobertura, OR libs.tests didn't emit cobertura at all).
+2. duplicati's 13 `unknown_file` sites are an analyzer hygiene issue — Mode1Analyzer should skip test source paths (`*/UnitTest/*`, `*Test*.cs`) so they don't pollute the denominator.
+3. The 21 uncovered duplicati sites are a real "code not exercised" signal — keep as-is.
+- 2026-05-08: R6 fixes were dispatched, awaiting run results.
+
+## Learnings
+
+### 2026-05-09 — Per-csproj cobertura inflation (the dedup fix)
+- **Root cause:** When a repo runs N test projects with coverlet, each per-project `coverage.cobertura.xml` enumerates every assembly the test process loaded, not just files owned by the test project. Summing root `lines-valid` across all cobertura files multiplies shared production sources by N while `lines-covered` reflects only the runner that actually hit them.
+- **Symptom:** Synthetically deflated coverage. jellyfin (16 cobertura files) reported 11.24%; the underlying tests were actually exercising 55.93% of unique production lines.
+- **Fix in `tools/coverage_xref/build_unified_table.py`:** build a per-(file, line) map across all cobertura files, take max hits, then sum unique lines-valid and lines-covered once. Iterate only direct `<class>/<lines>/<line>` children — cobertura also repeats the same line elements under `<methods>/<method>/<lines>` (double-count trap).
+- **Initial bug in the fix:** my first dedup pass used `cur = line_map.get(num, 0); if hits > cur: line_map[num] = hits`. That registers a line only when a hit is recorded somewhere, so every dict entry has hits>0 → 100% coverage. Corrected to `cur = line_map.get(num, -1)` so zero-hit lines are still registered as instrumented.
+- **Impact:** TOTAL 33.04% → 58.23%; jellyfin crossed 50% (11→56); aspnetcore 60→64; roslyn 76→85; orleans 10→40.
+
+### Test-count scraping
+- The dotnet-coverage MTP wrapper emits per-assembly `total: N` (lowercase) inside `Test run summary: Passed! - <dll>` blocks. Distinct from classic `Total: N` summaries.
+- StockSharp's MTP exe writes `Passed!  - Failed: 0, Passed: ..., Total: N` — uppercase.
+- Avalonia per-csproj loop: 5 assemblies, lowercase `total:` lines, sum = 6,860.
+- runtime targeted XPlat step: 12 assemblies, uppercase `Total:` lines, sum = 6,012.
+- StockSharp: single Tests.dll, 4,107.
+- eShop: captured run crashed under coverlet.console; no parseable summary.
+
+### Methodology over scope
+- Most "low coverage" repos turned out to be measurement artifacts, not real coverage gaps. Before dispatching CI runs to expand scope, always check whether the aggregation is correct — fixing the math was higher leverage than 6+ hours of CI iterations would have been.
+- Repos that remain under 50% after the dedup fix (server 3.4%, eShop 14%, runtime 15%, OpenRA 6%, etc.) are at structural caps: their unit-only test scope genuinely does not exercise more of the codebase, and the missing coverage requires integration infrastructure (DBs, browsers, displays, platform workloads) we deliberately exclude.

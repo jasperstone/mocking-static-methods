@@ -435,3 +435,8 @@ test_counts.csv
 test_metrics.csv
 test_discovery_summary.csv
 discovery_artifacts/
+
+
+# Mode1Analyzer run logs (regenerable)
+Mode1Analyzer/results/run.log
+Mode1Analyzer/eshop_test.csv

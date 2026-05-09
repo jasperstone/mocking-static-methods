@@ -115,6 +115,31 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 
 > **Note:** Build commands may vary based on the specific repository structure and requirements. Some repositories may require additional setup steps or have custom build scripts. Always check the repository's README for specific build instructions.
 
+### Phase 2 Expansion (May 2026)
+
+To grow the sample set from 7 to a more meaningful 13–15 repositories, we ran a Roslyn-semantic Mode #1 detector ([Mode1Analyzer/](Mode1Analyzer/)) over candidate codebases discovered via GitHub Code Search ([tools/repo_search/](tools/repo_search/)). Repositories were selected for the coverage CI matrix using the following criteria:
+
+1. **Linux-buildable in a containerized .NET SDK** (`mcr.microsoft.com/dotnet/sdk:10.0-noble`). Anything requiring Windows-only UI frameworks (WinUI, WPF) is out.
+2. **Active project** — not deprecated, not archived.
+3. **Measurable Mode #1 footprint** — enough call sites to a non-mockable static API surface (`ILogger`/`HttpClient`/`IConfiguration`/`IServiceProvider`) to materially affect coverage if a developer attempted to write tests against them.
+4. **Reasonable CI cost** — not requiring multi-GB platform SDKs (Android, iOS, Mac) on top of the .NET SDK.
+
+| Repository | GitHub Link | Mode #1 sites | Status | Rationale |
+|------------|-------------|---------------|--------|-----------|
+| jellyfin | [jellyfin/jellyfin](https://github.com/jellyfin/jellyfin) | 1,206 | ✅ Included | Cross-platform .NET media server, clean `dotnet test` flow |
+| garnet | [microsoft/garnet](https://github.com/microsoft/garnet) | 745 | ✅ Included | Microsoft Redis-like server, well-tested |
+| server (Bitwarden) | [bitwarden/server](https://github.com/bitwarden/server) | 181 | ✅ Included | Cross-platform .NET; `RustSdk.csproj` excluded by per-csproj test build (no Rust toolchain in container) |
+| eShop | [dotnet/eShop](https://github.com/dotnet/eShop) | 94 | ✅ Included | Microsoft reference architecture; `tests/ClientApp.UnitTests` excluded (requires `maui-tizen` workload) |
+| duplicati | [duplicati/duplicati](https://github.com/duplicati/duplicati) | 34 | ✅ Included | Cross-platform backup tool, standard .NET test layout |
+| Avalonia | [AvaloniaUI/Avalonia](https://github.com/AvaloniaUI/Avalonia) | 9 | ✅ Included | Cross-platform UI; restore scoped to `tests/*.UnitTests.csproj` to avoid Android/iOS/wasm sample projects |
+| MAUI | [dotnet/maui](https://github.com/dotnet/maui) | 329 | ❌ Removed (was deferred) | Removed after 4 rounds of remediation. The MAUI build presumes MS-internal CI conventions (`Build.Tasks.slnf` prerequisite, then projects target `net10.0-android36.0` directly). Carrying these workarounds added more drag than the data justified |
+| Files | [files-community/Files](https://github.com/files-community/Files) | 163 | ❌ Excluded | UWP/WinUI 3, Windows-only TFMs throughout (`Directory.Build.props` mandates `net10.0-windows10.0.26100.0`); UI tests carry `Package.appxmanifest`. Cannot build in Linux container |
+| PowerToys | [microsoft/PowerToys](https://github.com/microsoft/PowerToys) | 66 | ❌ Excluded | WPF/WinUI 3, Windows-only. UnitTest projects all hang off `src/modules/<windows-only-module>/` and pull WinUI references transitively. Cannot build in Linux container |
+| OpenRA | [OpenRA/OpenRA](https://github.com/OpenRA/OpenRA) | 13 | ✅ Included | Cross-platform (`net8.0`, NUnit 4). .NET 8 SDK side-installed in the .NET 10 container; `OpenRA.Test` uses external `dotnet-coverage` (no coverlet in repo) |
+| StockSharp | [StockSharp/StockSharp](https://github.com/StockSharp/StockSharp) | 3 | ✅ Included | Cross-platform (`net10.0`, MSTest 4). Single `Tests/Tests.csproj`; external `dotnet-coverage` data-collector path |
+
+**Result:** 15 repos in the active matrix (7 original + 8 added in Phase 2), covering ~6,500 of 6,879 detected Mode #1 sites (94%).
+
 ### Containerized Builds
 
 For projects with complex dependencies, you can use Docker to ensure a consistent build environment:

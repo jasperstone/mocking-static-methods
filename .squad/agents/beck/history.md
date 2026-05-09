@@ -155,3 +155,4 @@ Recommendations sent in `beck-mode1-attribution-gap.md`:
 1. runtime is a Vogel/orchestrator issue (artifact glob may be missing per-library cobertura, OR libs.tests didn't emit cobertura at all).
 2. duplicati's 13 `unknown_file` sites are an analyzer hygiene issue — Mode1Analyzer should skip test source paths (`*/UnitTest/*`, `*Test*.cs`) so they don't pollute the denominator.
 3. The 21 uncovered duplicati sites are a real "code not exercised" signal — keep as-is.
+- 2026-05-08: R6 fixes were dispatched, awaiting run results.

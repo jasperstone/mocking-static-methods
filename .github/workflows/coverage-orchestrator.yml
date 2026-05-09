@@ -1030,14 +1030,37 @@ jobs:
         with:
           version: ${{ env.DOTNET_COVERAGE_VERSION }}
 
-      - name: Install coverlet.console
-        # eShop uses MSTest.Sdk + Microsoft.Testing.Platform. Same MTP-vs-data-
-        # collector silent-no-op as Avalonia: --collect produces a 169-byte
-        # empty stub. Use coverlet.console (mono.cecil-based, runner-agnostic).
-        # Run 25495265941 / eShop: empty cobertura.
+      - name: Write coverlet.runsettings
+        # R6 (2026-05-08): coverlet.console (R5) was a silent no-op on .NET 10
+        # MTP hosts. Switch to `dotnet test --collect:"XPlat Code Coverage"
+        # --settings coverlet.runsettings`. eShop's MSTest.Sdk-based tests
+        # transitively reference coverlet.collector through Microsoft.NET.Test
+        # .Sdk; the XPlat collector hooks the SDK pipeline (not vstest CLR
+        # profiler attach), which works under MTP.
         shell: bash
+        working-directory: target
         run: |
-          dotnet tool install -g coverlet.console --version 6.0.2
+          cat > coverlet.runsettings <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <RunSettings>
+            <DataCollectionRunSettings>
+              <DataCollectors>
+                <DataCollector friendlyName="XPlat code coverage">
+                  <Configuration>
+                    <Format>cobertura</Format>
+                    <Include>[eShop*]*,[Ordering*]*,[Basket*]*,[Catalog*]*,[Identity*]*,[Webhooks*]*</Include>
+                    <Exclude>[*Tests]*,[*UnitTests]*,[xunit*]*,[Moq*]*,[NSubstitute*]*</Exclude>
+                    <SingleHit>false</SingleHit>
+                    <UseSourceLink>true</UseSourceLink>
+                    <IncludeTestAssembly>false</IncludeTestAssembly>
+                    <SkipAutoProps>true</SkipAutoProps>
+                    <DeterministicReport>false</DeterministicReport>
+                  </Configuration>
+                </DataCollector>
+              </DataCollectors>
+            </DataCollectionRunSettings>
+          </RunSettings>
+          EOF
 
       # eShop's tests/ contains 3 unit-test csprojs (Ordering / Basket /
       # ClientApp). They use MSTest.Sdk + Microsoft.Testing.Platform — exe-style
@@ -1079,30 +1102,24 @@ jobs:
           for proj in "${PROJECTS[@]}"; do
             i=$((i+1))
             base=$(basename "$proj" .csproj)
-            proj_dir=$(dirname "$proj")
-            out="TestResults/${i}_${base}.cobertura.xml"
             echo "::group::[$i/${#PROJECTS[@]}] $base"
-            asm=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 2 -name "${base}.dll" 2>/dev/null | head -1 || true)
-            if [[ -z "$asm" || ! -f "$asm" ]]; then
-              asm=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 2 -name "*.UnitTests.dll" 2>/dev/null | head -1 || true)
-            fi
-            if [[ -z "$asm" || ! -f "$asm" ]]; then
-              echo "::warning::No built test DLL for $base — skipping"
-              echo "::endgroup::"
-              continue
-            fi
-            coverlet "$asm" \
-              --target "dotnet" \
-              --targetargs "test \"$proj\" --no-build --filter \"$FILTER\"" \
-              --format cobertura \
-              --output "$out" \
-              --include-test-assembly \
+            dotnet test "$proj" \
+              --no-build \
+              --filter "$FILTER" \
+              --collect:"XPlat Code Coverage" \
+              --settings coverlet.runsettings \
+              --results-directory "TestResults/${i}_${base}" \
               || echo "::warning::Tests in $base failed or runner pressure — continuing"
             echo "::endgroup::"
           done
-          dotnet-coverage merge -r -f cobertura \
-            -o TestResults/coverage.cobertura.xml \
-            "TestResults/*.cobertura.xml" || echo "merge produced no output"
+          shopt -s globstar nullglob
+          mapfile -t REPORTS < <(find TestResults -type f -name 'coverage.cobertura.xml' 2>/dev/null)
+          echo "Found ${#REPORTS[@]} cobertura files"
+          if [ "${#REPORTS[@]}" -gt 0 ]; then
+            dotnet-coverage merge -r -f cobertura \
+              -o TestResults/coverage.cobertura.xml \
+              "${REPORTS[@]}" || echo "merge produced no output"
+          fi
 
       - uses: ./.github/actions/validate-cobertura
         if: always()

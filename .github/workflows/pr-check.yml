@@ -60,7 +60,12 @@ jobs:
         # Disable embedded shellcheck — we run shellcheck separately at
         # error level only, to avoid blocking on pre-existing info/warning
         # noise in heartbeat / discovery scripts.
-        run: actionlint -color -shellcheck=
+        # -ignore: actionlint 1.7.7 doesn't know the "models" permission
+        # scope yet (added by GitHub for GitHub Models). The runtime
+        # accepts it; the lint warning is a false positive.
+        run: |
+          actionlint -color -shellcheck= \
+            -ignore 'unknown permission scope "models"'
 
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck

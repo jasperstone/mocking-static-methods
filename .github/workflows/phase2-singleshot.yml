@@ -18,6 +18,7 @@ on:
 
 permissions:
   contents: read
+  models: read    # gives the workflow's GITHUB_TOKEN access to models.github.ai
 
 concurrency:
   group: "phase2-singleshot-${{ github.event.inputs.replication }}"
@@ -41,7 +42,9 @@ jobs:
           - google/gemini-2-5-pro
         run_index: [1, 2, 3, 4, 5]
     env:
-      GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_MODELS_TOKEN }}
+      # The built-in GITHUB_TOKEN, with `models: read` granted above, is
+      # accepted by the GitHub Models endpoint. No PAT or secret needed.
+      GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,7 +74,7 @@ jobs:
         shell: bash
         run: |
           if [[ -z "${GITHUB_MODELS_TOKEN:-}" ]]; then
-            echo "::error::GITHUB_MODELS_TOKEN secret not set on this repo. Settings -> Secrets and variables -> Actions -> New repository secret."
+            echo "::error::GITHUB_TOKEN was not injected; check workflow permissions block"
             exit 1
           fi
           echo "token length: ${#GITHUB_MODELS_TOKEN}"

@@ -40,7 +40,7 @@ from tools.generation.adapters import github_models
 from tools.generation.prompt_render import render
 from tools.generation.source_window import read_window
 
-CSHARP_BLOCK = re.compile(r"```csharp\s*\n(.*?)```", re.DOTALL)
+CSHARP_BLOCK = re.compile(r"```(?:csharp|cs|c#)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
 
 def slug(model_id: str) -> str:
@@ -74,9 +74,16 @@ def build_user_values(target: dict, repo_root: Path) -> dict[str, str]:
     }
 
 
-def extract_csharp(text: str) -> str | None:
-    m = CSHARP_BLOCK.search(text)
-    return m.group(1).rstrip() + "\n" if m else None
+def extract_csharp_blocks(text: str) -> list[str]:
+    """Return every fenced code block in the response, in order.
+
+    The single-shot prompt no longer constrains the model to one file or
+    one block. A model that recognizes the static-call seam problem may
+    legitimately emit multiple blocks (a wrapper interface, an
+    implementation, the test class). We capture all of them; downstream
+    compile/test logic decides which (if any) goes into the test project.
+    """
+    return [m.group(1).rstrip() + "\n" for m in CSHARP_BLOCK.finditer(text)]
 
 
 def main() -> int:
@@ -148,28 +155,33 @@ def main() -> int:
                 n_fail += 1
                 continue
 
-            cs = extract_csharp(result.text)
-            test_path: str | None = None
-            if cs:
-                p = tests_dir / row["repo"] / f"{target_id.replace(':', '_')}.cs"
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text(cs, encoding="utf-8")
-                test_path = str(p.relative_to(out_dir))
+            blocks = extract_csharp_blocks(result.text)
+            test_paths: list[str] = []
+            if blocks:
+                base = tests_dir / row["repo"] / target_id.replace(":", "_")
+                base.mkdir(parents=True, exist_ok=True)
+                for i, cs in enumerate(blocks, start=1):
+                    p = base / f"block_{i:02d}.cs"
+                    p.write_text(cs, encoding="utf-8")
+                    test_paths.append(str(p.relative_to(out_dir)))
                 n_ok += 1
             else:
                 n_fail += 1
 
             _record(
                 out, target_id, args,
-                test_path=test_path,
+                test_paths=test_paths,
+                num_csharp_blocks=len(blocks),
                 model_snapshot=result.model_snapshot,
                 prompt_tokens=result.prompt_tokens,
                 completion_tokens=result.completion_tokens,
                 latency_ms=result.latency_ms,
                 finish_reason=result.finish_reason,
+                rendered_user_prompt=user_msg,
+                rendered_user_prompt_sha256=sha256_hex(user_msg),
                 response_sha256=sha256_hex(result.text),
                 response_text=result.text,
-                error=None if cs else "no csharp block in response",
+                error=None if blocks else "no csharp block in response",
             )
 
     print(f"done: {n_ok} files written, {n_fail} failures, attempts.jsonl at {attempts_path}")

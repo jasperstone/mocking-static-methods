@@ -1,0 +1,5 @@
+# Compile-fail and runtime-fail logs from the generation step.
+# Layout:
+#   errors/{repo}/compile/{target_id}.log
+#   errors/{repo}/runtime/{target_id}.log
+# Empty for baseline phases.

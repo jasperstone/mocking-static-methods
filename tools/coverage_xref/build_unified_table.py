@@ -292,10 +292,10 @@ def main():
     md.append("")
     md.append("## Notes")
     md.append("")
-    md.append("- **Tests** — sum of `Total: N` lines from each repo's job log (`dotnet test` summary). `—` means the test runner did not emit a parseable summary for this run (typically because tests crashed under coverlet.console — Avalonia/eShop — or dotnet-coverage wrapped the runner — runtime).")
+    md.append("- **Tests** — sum of test-runner totals from each repo's job log. Three patterns are scraped:  `Total: N` (uppercase) from classic `dotnet test` summaries; `total: N` (lowercase) from per-assembly summary blocks emitted by the dotnet-coverage MTP wrapper (Avalonia per-csproj loop, runtime targeted XPlat step); and the `Passed!` line from the StockSharp Microsoft.Testing.Platform exe. `—` means no parseable summary survives (eShop's coverlet.console crashed both unit suites with 0% per-project coverage in the captured run).")
     md.append("- **Family columns** — Mode #1 sites grouped by the receiver/extension family the analyzer detected.")
     md.append("- **Mode #1 covered** — call sites where the cobertura XML reports `hits > 0` for the source line.")
-    md.append("- **Line cov %** — `lines-covered / lines-valid` summed across all cobertura XMLs for the repo. This is overall test-suite coverage, not Mode #1-specific.")
+    md.append("- **Line cov %** — unique `(file, line)` instrumented across all cobertura XMLs for the repo, with max hits taken across files. This dedupes the per-csproj cobertura inflation: each test project's coverlet output enumerates *every* assembly the test process loaded, so naively summing root `lines-valid` would multiply shared production lines by N test projects (16 for jellyfin, 12 for server, 43 for semantic-kernel) while `lines-covered` reflects only one runner. See `line_coverage()` docstring.")
     OUT_MD.write_text("\n".join(md) + "\n")
     print(f"Wrote {OUT_MD}")
 

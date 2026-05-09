@@ -156,3 +156,24 @@ Recommendations sent in `beck-mode1-attribution-gap.md`:
 2. duplicati's 13 `unknown_file` sites are an analyzer hygiene issue — Mode1Analyzer should skip test source paths (`*/UnitTest/*`, `*Test*.cs`) so they don't pollute the denominator.
 3. The 21 uncovered duplicati sites are a real "code not exercised" signal — keep as-is.
 - 2026-05-08: R6 fixes were dispatched, awaiting run results.
+
+## Learnings
+
+### 2026-05-09 — Per-csproj cobertura inflation (the dedup fix)
+- **Root cause:** When a repo runs N test projects with coverlet, each per-project `coverage.cobertura.xml` enumerates every assembly the test process loaded, not just files owned by the test project. Summing root `lines-valid` across all cobertura files multiplies shared production sources by N while `lines-covered` reflects only the runner that actually hit them.
+- **Symptom:** Synthetically deflated coverage. jellyfin (16 cobertura files) reported 11.24%; the underlying tests were actually exercising 55.93% of unique production lines.
+- **Fix in `tools/coverage_xref/build_unified_table.py`:** build a per-(file, line) map across all cobertura files, take max hits, then sum unique lines-valid and lines-covered once. Iterate only direct `<class>/<lines>/<line>` children — cobertura also repeats the same line elements under `<methods>/<method>/<lines>` (double-count trap).
+- **Initial bug in the fix:** my first dedup pass used `cur = line_map.get(num, 0); if hits > cur: line_map[num] = hits`. That registers a line only when a hit is recorded somewhere, so every dict entry has hits>0 → 100% coverage. Corrected to `cur = line_map.get(num, -1)` so zero-hit lines are still registered as instrumented.
+- **Impact:** TOTAL 33.04% → 58.23%; jellyfin crossed 50% (11→56); aspnetcore 60→64; roslyn 76→85; orleans 10→40.
+
+### Test-count scraping
+- The dotnet-coverage MTP wrapper emits per-assembly `total: N` (lowercase) inside `Test run summary: Passed! - <dll>` blocks. Distinct from classic `Total: N` summaries.
+- StockSharp's MTP exe writes `Passed!  - Failed: 0, Passed: ..., Total: N` — uppercase.
+- Avalonia per-csproj loop: 5 assemblies, lowercase `total:` lines, sum = 6,860.
+- runtime targeted XPlat step: 12 assemblies, uppercase `Total:` lines, sum = 6,012.
+- StockSharp: single Tests.dll, 4,107.
+- eShop: captured run crashed under coverlet.console; no parseable summary.
+
+### Methodology over scope
+- Most "low coverage" repos turned out to be measurement artifacts, not real coverage gaps. Before dispatching CI runs to expand scope, always check whether the aggregation is correct — fixing the math was higher leverage than 6+ hours of CI iterations would have been.
+- Repos that remain under 50% after the dedup fix (server 3.4%, eShop 14%, runtime 15%, OpenRA 6%, etc.) are at structural caps: their unit-only test scope genuinely does not exercise more of the codebase, and the missing coverage requires integration infrastructure (DBs, browsers, displays, platform workloads) we deliberately exclude.

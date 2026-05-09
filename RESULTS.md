@@ -1,12 +1,29 @@
 # Results
 
-Cross-phase scoreboard. One row per sealed phase. Numbers are sourced from each phase's `phases/phaseN/phase.lock.yaml` `results:` block and must match. If a row disagrees with its lock file, the lock file wins and this table is wrong.
+Cross-phase scoreboard. One row per sealed phase × model. Numbers are sourced from each phase's `phases/phaseN/phase.lock.yaml` `results:` block and `results/aggregate.csv`; the lock file wins on disagreement.
+
+Phase 2+ rows show **mean ± stddev across 5 runs of that (phase × model) cell**.
 
 ## Headline
 
-| Phase | Strategy | Targets attempted | Newly covered | Pass | Compile-fail | Runtime-fail | Δ line cov vs phase 1 |
-|---|---|---:|---:|---:|---:|---:|---:|
-| [phase1-baseline](phases/phase1-baseline/) | no generation (existing suites only) | n/a | n/a | n/a | n/a | n/a | — (baseline = 58.23%) |
+| Phase | Strategy | Model | Targets | Newly covered (mean ± σ) | Pass (mean ± σ) | Compile-fail | Runtime-fail | Δ line cov |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| [phase1-baseline](phases/phase1-baseline/) | no generation | n/a | n/a | n/a | n/a | n/a | n/a | — (baseline = 58.23%) |
+<!-- Phase 2 will append five rows here, one per model in the panel. Phase 3, 4, 5 do the same. -->
+
+## Model panel (frozen for phases 2+)
+
+All five models route through GitHub Models (`https://models.github.ai/inference`). Generic ids; the actual snapshot served at run time is captured into each phase's `phase.lock.yaml.generation.model_snapshots_observed`.
+
+| Slot | Model id | Lineage | Tier |
+|---|---|---|---|
+| 1 | `anthropic/claude-opus-4-5` | Anthropic | frontier |
+| 2 | `anthropic/claude-sonnet-4-5` | Anthropic | mid |
+| 3 | `openai/gpt-5` | OpenAI | frontier |
+| 4 | `openai/o3` | OpenAI | reasoning |
+| 5 | `google/gemini-2-5-pro` | Google | frontier |
+
+Per-cell parameters (frozen): `temperature=0.0`, `top_p=1.0`, `seed=42`, `max_output_tokens=4096`, `runs_per_model=5`.
 
 ## Baseline anchors
 

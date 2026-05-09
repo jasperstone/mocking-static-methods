@@ -1,0 +1,211 @@
+          working-directory: target
+          cobertura-glob: TestResults/*/coverage.cobertura.xml
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # eShop — external data collector (no coverlet); MTP + MSTest.Sdk test runner
+  # ===========================================================================
+  eShop:
+    name: "Coverage: eShop"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'eShop'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone eShop at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/dotnet/eShop.git target
+          cd target
+          git fetch --depth 1 origin 9b4f9434f46fdc5c1a6e9e936af2868340cdbc48
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: eShop
+          sha-prefix: 9b4f9434
+
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      - name: Install coverlet.console
+        # eShop uses MSTest.Sdk + Microsoft.Testing.Platform. Same MTP-vs-data-
+        # collector silent-no-op as Avalonia: --collect produces a 169-byte
+        # empty stub. Use coverlet.console (mono.cecil-based, runner-agnostic).
+        # Run 25495265941 / eShop: empty cobertura.
+        shell: bash
+        run: |
+          dotnet tool install -g coverlet.console --version 6.0.2
+
+      # eShop's tests/ contains 3 unit-test csprojs (Ordering / Basket /
+      # ClientApp). They use MSTest.Sdk + Microsoft.Testing.Platform — exe-style
+      # entry points, not standard vstest hosts.
+      #
+      # ClientApp.UnitTests is a MAUI client and requires the `maui-tizen`
+      # workload to restore (NETSDK1147). We deliberately skip it — Ordering and
+      # Basket are the server-side unit suites that align with the rest of the
+      # matrix. Restoring eShop.slnx as a whole also pulls ClientApp into the
+      # graph, so we restore+build per-csproj instead.
+      # Run 25527102157 / eShop: failed at `dotnet restore eShop.slnx`.
+      - name: Restore + build server unit-test projects
+        shell: bash
+        working-directory: target
+        run: |
+          for proj in tests/Ordering.UnitTests/Ordering.UnitTests.csproj \
+                      tests/Basket.UnitTests/Basket.UnitTests.csproj; do
+            echo "::group::Restore+Build $proj"
+            dotnet restore "$proj" \
+              || echo "::warning::Restore of $proj failed — continuing"
+            dotnet build "$proj" -c Debug --no-restore \
+              || echo "::warning::Build of $proj failed — continuing"
+            echo "::endgroup::"
+          done
+
+      - name: Run tests with coverage (per-csproj, server UnitTests only)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          FILTER='FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky'
+          PROJECTS=( \
+            "tests/Ordering.UnitTests/Ordering.UnitTests.csproj" \
+            "tests/Basket.UnitTests/Basket.UnitTests.csproj" \
+          )
+          i=0
+          for proj in "${PROJECTS[@]}"; do
+            i=$((i+1))
+            base=$(basename "$proj" .csproj)
+            proj_dir=$(dirname "$proj")
+            out="$(pwd)/TestResults/${i}_${base}.cobertura.xml"
+            echo "::group::[$i/${#PROJECTS[@]}] $base"
+            # R2 (2026-05-08): pass bin/Debug/<tfm> DIRECTORY to coverlet so it
+            # instruments production assemblies, not just the test DLL.
+            tfm_dir=$(set +o pipefail; find "$proj_dir/bin/Debug" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | head -1 || true)
+            if [[ -z "$tfm_dir" || ! -d "$tfm_dir" ]]; then
+              echo "::warning::No bin/Debug/<tfm> directory for $base — skipping"
+              echo "::endgroup::"
+              continue
+            fi
+            coverlet "$tfm_dir" \
+              --target "dotnet" \
+              --targetargs "test \"$proj\" --no-build --filter \"$FILTER\"" \
+              --format cobertura \
+              --output "$out" \
+              --include-test-assembly \
+              --exclude "[xunit*]*" \
+              --exclude "[MSTest*]*" \
+              --exclude "[Microsoft.Testing.*]*" \
+              --exclude "[Microsoft.VisualStudio.*]*" \
+              --exclude "[Moq*]*" \
+              || echo "::warning::Tests in $base failed or runner pressure — continuing"
+            echo "::endgroup::"
+          done
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: eShop
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # Garnet — external data collector (no coverlet); NUnit-based suite
+  # ===========================================================================
+  garnet:
+    name: "Coverage: Garnet"
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 360
+    if: github.event.inputs.repo == 'all' || github.event.inputs.repo == 'garnet'
+    steps:
+      - name: Checkout orchestrator repo (for local composite actions)
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Clone Garnet at pinned SHA
+        run: |
+          git clone --filter=blob:none https://github.com/microsoft/garnet.git target
+          cd target
+          git fetch --depth 1 origin 38cac99c7ad80ae8465ea6e0f120bd6698730a75
+          git checkout FETCH_HEAD
+
+      - uses: ./.github/actions/restore-nuget-cache
+        with:
+          repo-name: garnet
+          sha-prefix: 38cac99c
+
+      - uses: ./.github/actions/install-dotnet-coverage
+        with:
+          version: ${{ env.DOTNET_COVERAGE_VERSION }}
+
+      - name: Restore Garnet.slnx
+        shell: bash
+        working-directory: target
+        run: dotnet restore Garnet.slnx
+
+      - name: Build Garnet.slnx
+        shell: bash
+        working-directory: target
+        run: dotnet build Garnet.slnx -c Debug --no-restore
+
+      # Garnet test projects don't follow the *.Tests.csproj suffix convention —
+      # they're under test/ as Garnet.test, Garnet.test.cluster, Garnet.fuzz.
+      # Garnet.test is the main NUnit unit-test suite. Cluster tests need a multi-
+      # node cluster (integration-shaped). Fuzz is non-deterministic. Run only
+      # Garnet.test with the standard exclusion filter.
+      - name: Run tests with coverage (Garnet.test only)
+        shell: bash
+        working-directory: target
+        continue-on-error: true
+        run: |
+          export PATH="$PATH:/github/home/.dotnet/tools"
+          mkdir -p TestResults
+          dotnet test test/Garnet.test/Garnet.test.csproj --no-build \
+            --filter "FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&FullyQualifiedName!~Cluster&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky" \
+            --collect "Code Coverage;Format=cobertura" \
+            --results-directory TestResults \
+            || echo "::warning::Garnet.test failed or runner pressure — continuing"
+          dotnet-coverage merge -r -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            "TestResults/*.cobertura.xml" || echo "merge produced no output"
+
+      - uses: ./.github/actions/validate-cobertura
+        if: always()
+        with:
+          working-directory: target
+
+      - name: Disk usage (end)
+        if: always()
+        run: df -h
+
+      - uses: ./.github/actions/cobertura-report-and-upload
+        if: always()
+        with:
+          repo-name: garnet
+          working-directory: target
+          reportgenerator-version: ${{ env.REPORTGENERATOR_VERSION }}
+
+  # ===========================================================================
+  # Jellyfin — built-in coverlet.collector (all 16 test projects)

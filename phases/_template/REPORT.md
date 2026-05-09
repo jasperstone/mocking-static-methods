@@ -10,7 +10,7 @@ Then:
 
 1. **Frame the strategy.** Edit `phase.strategy` in `phase.lock.yaml`. One sentence.
 2. **Author the prompt.** Edit `prompt/system.md` and `prompt/user-template.md`. Phase 3+ also adds `prompt/loop-feedback-template.md`.
-3. **Author the workflow.** `cp .github/workflows/_phase-template.yml .github/workflows/phaseN-name.yml` and fill in the phase-specific steps.
+3. **Author the workflow.** `cp .github/workflow-templates/phase.yml .github/workflows/phaseN-name.yml` and fill in the phase-specific steps.
 4. **Wire the adapter.** If you need a strategy hook beyond the default single-shot in `tools/generation/runner.py`, add a runner under `tools/generation/strategies/`.
 5. **Dispatch.** `gh workflow run .github/workflows/phaseN-name.yml`. Captures 5 models × 5 runs = 25 generation jobs, then one coverage CI run on the union of generated tests.
 6. **Fill `phase.lock.yaml`.** Every field. Especially `model_snapshots_observed` from the JSONL rows.

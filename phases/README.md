@@ -54,7 +54,7 @@ Why one workflow per phase, not one parameterized workflow:
 
 ```bash
 cp -r phases/_template phases/phase2-singleshot
-cp .github/workflows/_phase-template.yml .github/workflows/phase2-singleshot.yml
+cp .github/workflow-templates/phase.yml .github/workflows/phase2-singleshot.yml
 # edit prompt/, phase.lock.yaml, and the workflow file
 gh workflow run .github/workflows/phase2-singleshot.yml
 ```

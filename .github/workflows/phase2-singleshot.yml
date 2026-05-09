@@ -1,0 +1,189 @@
+name: phase2-singleshot
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_set:
+        description: "Targets version (e.g. v1)"
+        required: true
+        default: "v1"
+      replication:
+        description: "If true, write outputs to a replica dir instead of the canonical results/ dir"
+        required: false
+        default: "false"
+      limit:
+        description: "Optional cap on number of targets per cell (for dry runs)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "phase2-singleshot-${{ github.event.inputs.replication }}"
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    name: "gen ${{ matrix.model }} run ${{ matrix.run_index }}"
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    strategy:
+      fail-fast: false
+      max-parallel: 25
+      matrix:
+        model:
+          - anthropic/claude-opus-4-5
+          - anthropic/claude-sonnet-4-5
+          - openai/gpt-5
+          - openai/o3
+          - google/gemini-2-5-pro
+        run_index: [1, 2, 3, 4, 5]
+    env:
+      GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_MODELS_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Install Python and pip
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends python3 python3-pip python3-yaml curl ca-certificates >/dev/null
+
+      - name: Verify target set integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          want=$(python3 -c "import yaml; d=yaml.safe_load(open('phases/phase2-singleshot/phase.lock.yaml')); print(d['inputs'].get('targets_sha256',''))")
+          have=$(sha256sum "targets/${{ inputs.target_set }}/targets.csv" | awk '{print $1}')
+          if [[ -n "$want" && "$want" != "$have" ]]; then
+            echo "::error::targets.csv sha256 drift: want=$want have=$have"
+            exit 1
+          fi
+          echo "targets.csv sha256 OK: $have"
+
+      - name: Verify GITHUB_MODELS_TOKEN is set
+        shell: bash
+        run: |
+          if [[ -z "${GITHUB_MODELS_TOKEN:-}" ]]; then
+            echo "::error::GITHUB_MODELS_TOKEN secret not set on this repo. Settings -> Secrets and variables -> Actions -> New repository secret."
+            exit 1
+          fi
+          echo "token length: ${#GITHUB_MODELS_TOKEN}"
+
+      - name: Clone target repo at pinned SHA
+        shell: bash
+        env:
+          MATRIX_MODEL: ${{ matrix.model }}
+        run: |
+          set -euo pipefail
+          # Generation reads source files from cloned_repos/<repo>/. We don't
+          # need to build them — just need the source tree at the pinned SHA.
+          # Each repo's SHA is pinned in phase.lock.yaml. We only clone the
+          # repos that actually appear in the target set to keep checkout fast.
+          mkdir -p cloned_repos
+          python3 - <<'PY'
+          import csv, subprocess, yaml, pathlib
+          lock = yaml.safe_load(open("phases/phase2-singleshot/phase.lock.yaml"))
+          repos_in_targets = sorted({row["repo"] for row in csv.DictReader(open("targets/${{ inputs.target_set }}/targets.csv"))})
+          # repo -> upstream slug
+          UPSTREAM = {
+            "abp": "abpframework/abp",
+            "aspnetcore": "dotnet/aspnetcore",
+            "Avalonia": "AvaloniaUI/Avalonia",
+            "duplicati": "duplicati/duplicati",
+            "efcore": "dotnet/efcore",
+            "eShop": "dotnet/eShop",
+            "garnet": "microsoft/garnet",
+            "jellyfin": "jellyfin/jellyfin",
+            "OpenRA": "OpenRA/OpenRA",
+            "orleans": "dotnet/orleans",
+            "roslyn": "dotnet/roslyn",
+            "runtime": "dotnet/runtime",
+            "semantic-kernel": "microsoft/semantic-kernel",
+            "server": "bitwarden/server",
+            "StockSharp": "StockSharp/StockSharp",
+          }
+          for repo in repos_in_targets:
+              sha = lock["repos"][repo]
+              dest = pathlib.Path("cloned_repos") / repo
+              if dest.exists():
+                  continue
+              slug = UPSTREAM[repo]
+              print(f"== cloning {repo} ({slug}@{sha})")
+              subprocess.check_call(["git", "init", "-q", str(dest)])
+              subprocess.check_call(["git", "-C", str(dest), "remote", "add", "origin", f"https://github.com/{slug}.git"])
+              subprocess.check_call(["git", "-C", str(dest), "fetch", "--depth=1", "origin", sha])
+              subprocess.check_call(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"])
+          PY
+
+      - name: Run generation cell
+        shell: bash
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${{ inputs.limit }}" ]]; then
+            extra+=(--limit "${{ inputs.limit }}")
+          fi
+          python3 tools/generation/runner.py \
+            --phase phase2-singleshot \
+            --model "${{ matrix.model }}" \
+            --run-index "${{ matrix.run_index }}" \
+            --target-set "${{ inputs.target_set }}" \
+            "${extra[@]}"
+
+      - name: Sanitize artifact name
+        id: sanitize
+        shell: bash
+        env:
+          MATRIX_MODEL: ${{ matrix.model }}
+        run: |
+          slug="${MATRIX_MODEL//\//__}"
+          echo "slug=$slug" >> "$GITHUB_OUTPUT"
+
+      - name: Upload cell artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "gen-${{ steps.sanitize.outputs.slug }}-run${{ matrix.run_index }}"
+          path: "phases/phase2-singleshot/results/"
+          if-no-files-found: error
+          retention-days: 90
+
+  assemble:
+    name: "assemble all cells"
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all cell artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: phases/phase2-singleshot/results/
+          pattern: "gen-*"
+          merge-multiple: true
+
+      - name: Verify all 25 cells uploaded
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la "phases/phase2-singleshot/results/"
+          count=$(find "phases/phase2-singleshot/results/" -name "attempts.jsonl" | wc -l)
+          echo "found $count attempts.jsonl files"
+          if [[ "$count" -ne 25 ]]; then
+            echo "::error::expected 25 cell attempts.jsonl files; got $count"
+            exit 1
+          fi
+
+      - name: Upload combined results
+        uses: actions/upload-artifact@v4
+        with:
+          name: "phase2-singleshot-results-pre-coverage"
+          path: "phases/phase2-singleshot/results/"
+          retention-days: 90

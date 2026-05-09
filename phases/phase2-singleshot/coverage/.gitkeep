@@ -1,0 +1,3 @@
+# Per-repo cobertura coverage XMLs collected during this phase's coverage run.
+# One subdirectory per repo, named coverage-xml-{repo}.
+# These are large and reproducible from the CI run-id recorded in ../phase.lock.yaml.

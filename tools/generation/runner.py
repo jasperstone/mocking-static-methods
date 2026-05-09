@@ -167,6 +167,8 @@ def main() -> int:
                 completion_tokens=result.completion_tokens,
                 latency_ms=result.latency_ms,
                 finish_reason=result.finish_reason,
+                rendered_user_prompt=user_msg,
+                rendered_user_prompt_sha256=sha256_hex(user_msg),
                 response_sha256=sha256_hex(result.text),
                 response_text=result.text,
                 error=None if cs else "no csharp block in response",

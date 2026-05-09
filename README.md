@@ -1,5 +1,90 @@
 # mocking-static-methods
-Experiment in generating unit tests and mocks for code containing static method calls
+
+Experiment in generating unit tests and mocks for code containing static method calls.
+
+## Experimental design
+
+The experiment progresses in phases. Each phase fixes the input set and varies one thing — the test-generation strategy — so we can attribute coverage gains and failure modes to that strategy.
+
+| Phase | Strategy | Status |
+|---|---|---|
+| 1 — baseline | No generation. Measure existing test suites. | ✅ sealed (see [`phases/phase1-baseline/`](phases/phase1-baseline/)) |
+| 2 — single-shot | LLM produces one test per target in a single prompt; no feedback. | not started |
+| 3 — single-agent loop | One agent iterates compile → fix → run → fix per target. | not started |
+| 4 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | not started |
+| 5 — multi-team | Multiple multi-agent teams compete or partition the target set. | not started |
+
+### Repository layout
+
+```
+phases/                  Per-phase snapshots (immutable once sealed)
+  _template/             Skeleton for new phases
+  phase1-baseline/       Baseline coverage data + REPORT.md + phase.lock.yaml
+  phase2-singleshot/     (created when phase 2 starts)
+  ...
+targets/                 Versioned input set (which Mode#1 sites to attempt)
+  v1/                    Production sites, currently uncovered
+  current -> v1          Convenience symlink
+tools/                   Global, evolving — analyzers, orchestrator helpers
+  coverage_xref/         Cobertura ↔ Mode#1-site cross-reference
+  targets/               Builds targets/v{N}/ from analyzer + cobertura output
+  repo_search/           GitHub Code Search candidate finder
+.github/workflows/       Global CI — coverage-orchestrator.yml runs the matrix
+Mode1Analyzer/           Roslyn analyzer that detects Mode#1 static-call sites
+RESULTS.md               Cross-phase comparison table (the headline scoreboard)
+```
+
+**Tooling lives outside `phases/` and evolves freely.** Each phase pins the SHAs it ran against in its own `phase.lock.yaml`, so reproducibility is anchored by the lock file, not by frozen tooling copies. This avoids back-porting bug fixes into N phase directories every time we improve an analyzer.
+
+**Inputs live in versioned `targets/`.** Every phase reads the same `targets.csv` (or pins to an earlier `v{N}`), so cross-phase deltas reflect generation strategy, not target-set drift.
+
+### Why we target only uncovered sites
+
+The phase 1 baseline detected 5,154 Mode #1 static-call sites in production code across 15 repos. 1,087 (21.1%) are already line-covered by the existing test suites. The input set in [`targets/v1/targets.csv`](targets/v1/targets.csv) deliberately excludes those, scoping each later phase to **3,147 sites that are not currently covered**. The headline metric for each phase is:
+
+> "Of the 3,147 targets, how many did this phase newly cover with a passing generated test?"
+
+Including already-covered sites would dilute that signal — generating a test for a covered line cannot move the line-coverage number.
+
+#### How a Mode#1 site can already be "covered" without being mocked
+
+The 1,087 currently-covered sites fall into roughly five buckets, all of which are catalogued in [`targets/v1/covered_sites_analysis.csv`](targets/v1/covered_sites_analysis.csv) for later inspection:
+
+1. **Deterministic, side-effect-free statics** — `Math.Min`, `string.IsNullOrEmpty`, `Guid.NewGuid` (output ignored), `Encoding.UTF8.GetBytes`. The test executes them as-is; no mocking needed.
+2. **Real implementation against a controlled fixture** — `HttpClient.GetAsync` covered by `WebApplicationFactory` / `TestServer` (real ASP.NET pipeline against a loopback endpoint), or `File.ReadAllText` covered by writing to `Path.GetTempFileName()` first. Real I/O, controlled inputs.
+3. **Configuration / environment statics** — `Environment.GetEnvironmentVariable("FOO")` returning `null` is often the *only* tested branch (the "FOO not set" path); the "FOO is set to a bad value" branch usually requires mocking and is therefore left uncovered. Same pattern for `AppContext.GetData`.
+4. **Wrappers behind interfaces, mocked at the seam** — abp's `IClock.Now` / `IGuidGenerator` instead of `DateTime.UtcNow` / `Guid.NewGuid`. The static call site executes only through DI registration of the default wrapper. This is the historical best-practice approach to testing static-method-bearing code, and it will be the model for later phases.
+5. **Integration / end-to-end tests** — jellyfin and aspnetcore boot real SQLite, real Kestrel, real file system in temp dirs. Every static call along the request path executes. High coverage, low isolation. As LLMs author more code, we expect this style to dominate over fine-grained unit tests.
+
+#### What we leave on the table by excluding covered sites
+
+Branch-uncovered code around line-covered statics. A generated test for "FOO is set to bad value" can add real value without changing line coverage. That's a separate experiment scoped to a future `targets/v2/` (branch-coverage targets), not merged into v1's input set.
+
+#### What we drop besides covered sites
+
+The Mode #1 analyzer detected 6,321 sites total across the 15 repos. Each lands in exactly one bucket; only the first becomes a target:
+
+| Bucket | Count | In v1 input? |
+|---|---:|:---:|
+| **production, uncovered, in cobertura** | **3,147** | ✅ **yes — `targets/v1/targets.csv`** |
+| production, already line-covered | 1,087 | no — see five buckets above |
+| non-production path (test/, samples/, benchmarks/, playground/) | 1,167 | no — out of scope |
+| production, `unknown_file` (no cobertura entry — test suite never loaded the assembly) | 901 | no — deferred to v2 |
+| production, `unknown_line` (cobertura collapsed a multi-line expression) | 19 | no — data quality |
+
+Per-repo breakdown is in [`targets/v1/README.md`](targets/v1/README.md#per-repo-bucket-breakdown). Full provenance with sha256 of the input is in [`targets/v1/targets.lock.yaml`](targets/v1/targets.lock.yaml).
+
+### Reproducibility contract
+
+Each `phases/phaseN/phase.lock.yaml` records:
+- SDK image digest (not just tag)
+- Per-repo commit SHAs at run time
+- Orchestrator workflow SHA
+- Generator workflow SHA + prompt template SHA + model + temperature + seed (for generation phases)
+- `targets_version` and `targets_sha256` (the input set — must match what was on disk)
+- CI run-ids for both coverage and generation steps
+
+A re-run that produces identical lock-file inputs must produce identical results, modulo LLM nondeterminism (which is itself recorded in `seed`/`temperature`).
 
 ## Setup
 

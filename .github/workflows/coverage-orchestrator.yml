@@ -1701,29 +1701,20 @@ jobs:
         shell: bash
         working-directory: target
         continue-on-error: true
-        # StockSharp.Tests.csproj produces a .dll only (no apphost exe). Force
-        # apphost generation via -p:UseAppHost=true at build time so we can
-        # hand dotnet-coverage a single executable path (proven to work for
-        # Avalonia/eShop where apphosts are produced naturally).
+        # R7.4: the MTP apphost exits in 200ms when run directly (no NUnit
+        # discovery without `dotnet test`). Wrap `dotnet test` itself under
+        # dotnet-coverage — same approach as R4, but libxml2 is now installed
+        # in setup-workspace so the CLR profiler can actually attach.
+        # Flaky-test exclusions retained from R2.
         run: |
           export PATH="$PATH:/github/home/.dotnet/tools"
           mkdir -p TestResults
-          dotnet build Tests/Tests.csproj -c Release --no-restore -p:UseAppHost=true
-          exe="Tests/bin/Release/net10.0/StockSharp.Tests"
-          dll="Tests/bin/Release/net10.0/StockSharp.Tests.dll"
-          if [[ -x "$exe" ]]; then
-            dotnet-coverage collect "$exe" \
-              -f cobertura \
-              -o TestResults/coverage.cobertura.xml \
-              || echo "::warning::dotnet-coverage collect (apphost) failed — continuing"
-          else
-            echo "::warning::Apphost not produced; falling back to 'dotnet \$dll'"
-            ls -la Tests/bin/Release/net10.0/ | head -20
-            dotnet-coverage collect -f cobertura \
-              -o TestResults/coverage.cobertura.xml \
-              -- dotnet "$dll" \
-              || echo "::warning::dotnet-coverage collect (dll) failed — continuing"
-          fi
+          FILTER="FullyQualifiedName!~FunctionalTests&FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~E2E&FullyQualifiedName!~EndToEnd&FullyQualifiedName!~Stress&FullyQualifiedName!~AsyncExtensionsTests&FullyQualifiedName!~ConnectorBasketTests&FullyQualifiedName!~PathsTests&FullyQualifiedName!~ReportTests&FullyQualifiedName!~TransactionIdStorageTests&Category!=Integration&Category!=IntegrationTest&Category!=IntegrationTests&Category!=E2E&Category!=EndToEnd&Category!=Functional&Category!=FunctionalTests&Category!=Stress&Category!=Performance&Category!=Quarantined&Category!=Flaky"
+          dotnet-coverage collect \
+            "dotnet test Tests/Tests.csproj --no-build -c Release --filter \"$FILTER\"" \
+            -f cobertura \
+            -o TestResults/coverage.cobertura.xml \
+            || echo "::warning::dotnet-coverage collect (dotnet test) failed — continuing"
 
       - uses: ./.github/actions/validate-cobertura
         if: always()

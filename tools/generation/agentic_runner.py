@@ -91,6 +91,8 @@ def main() -> int:
                     help="cap on number of targets to process")
     ap.add_argument("--target-ids", default=None,
                     help="comma-separated target_id whitelist (overrides --limit ordering)")
+    ap.add_argument("--repo-filter", default=None,
+                    help="comma-separated repo names; only targets in these repos are processed")
     ap.add_argument("--cloned-repos", default=str(REPO_ROOT / "cloned_repos"))
     args = ap.parse_args()
 
@@ -123,12 +125,18 @@ def main() -> int:
     if args.target_ids:
         target_whitelist = {t.strip() for t in args.target_ids.split(",") if t.strip()}
 
+    repo_filter = None
+    if args.repo_filter:
+        repo_filter = {r.strip() for r in args.repo_filter.split(",") if r.strip()}
+
     n_ok = n_fail = 0
     with targets_csv.open() as fh, attempts_path.open("w") as out:
         rows = list(csv.DictReader(fh))
         if target_whitelist:
             rows = [r for r in rows if r["target_id"] in target_whitelist]
-        elif args.limit:
+        if repo_filter:
+            rows = [r for r in rows if r["repo"] in repo_filter]
+        if not target_whitelist and args.limit:
             rows = rows[: args.limit]
 
         for row in rows:

@@ -91,6 +91,16 @@ jobs:
           apt-get update -qq
           apt-get install -y --no-install-recommends python3 python3-pip >/dev/null
 
+      - name: Purge tracked pilot results so this shard only emits its own work
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pilot v1 results are committed; without this wipe the eval reads them,
+          # tries to score them against v2 targets.csv (where the ids don't exist),
+          # and the upload step folds the whole pilot tree into this shard's artifact.
+          rm -rf "phases/${PHASE}/results"
+          mkdir -p "phases/${PHASE}/results"
+
       - name: Download generate artifact for this shard
         if: ${{ inputs.generate_run_id != '' }}
         uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
@@ -176,6 +186,11 @@ jobs:
           REPO: ${{ matrix.repo }}
           RUN_INDEX: ${{ matrix.run_index }}
           TARGET_SET: ${{ inputs.target_set }}
+          # Panel routing not strictly needed by the evaluator (it only compiles + runs
+          # tests), but kept for parity in case the harness ever calls back to Foundry.
+          FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
+          FOUNDRY_PANEL_OPENAI_RESPONSES: "gpt-5-codex"
+          FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
         run: |
           set -euo pipefail
           model_safe="${MODEL//\//__}"

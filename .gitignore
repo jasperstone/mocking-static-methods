@@ -440,3 +440,12 @@ discovery_artifacts/
 # Mode1Analyzer run logs (regenerable)
 Mode1Analyzer/results/run.log
 Mode1Analyzer/eshop_test.csv
+.env.foundry
+
+# Phase 2 agentic — evaluator artifacts (regenerable from generated tests)
+.nuget-cache/
+**/.squad-eval/
+# Old-prompt results from prompt-iteration spike — superseded by results/
+phases/phase2-agentic/results_v1_oldprompt/
+# Smoke-test scratch outputs
+tools/generation/ping_results.json

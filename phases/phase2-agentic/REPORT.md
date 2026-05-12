@@ -12,12 +12,14 @@ See also:
 
 These terms get used loosely in the agent literature — here's what they mean in *this* phase specifically:
 
-- **Turn** — one round-trip to the model. The agent emits text, we parse a `<tool>...</tool>` call out of it, run the tool (read a file, list a dir, or accept the submitted test), append the tool result to the transcript, and ask the model again. A turn is bounded compute, not bounded thinking; the model may emit lots of reasoning per turn.
-- **Read** — one successful `read_file` call. Bounded separately from turns (max 5) so a model can't burn its whole budget re-reading the same file.
-- **Submission** — one `submit_test` call. There is exactly one per cell. The instant it fires, the loop ends and the cell is done.
+- **Cell** — one (model, target) pair to be evaluated. The pilot has 35 cells (7 models × 5 targets).
+- **Run** — one independent execution of a cell. Same model, same target, same prompt, same temperature — fired separately. Repeated because the same model can produce different outputs on the same input: GPU floating-point nondeterminism (batched matmul reduction order shifts with concurrent traffic), reasoning-model sampling (gpt-5-codex's internal reasoning trace varies even at temperature 0), and provider routing (Foundry can route the same deployment ID to different snapshots or replicas). With multiple runs you can report mean ± stddev rather than a single number that might be luck. The pilot uses 1 run; the full run will use 3 (the conference-paper convention).
+- **Turn** — one round-trip to the model *within a single run*. The agent emits text, we parse a `<tool>...</tool>` call out of it, run the tool (read a file, list a dir, or accept the submitted test), append the tool result to the transcript, and ask the model again. A turn is bounded compute, not bounded thinking; the model may emit lots of reasoning per turn.
+- **Read** — one successful `read_file` call within a turn. Bounded separately from turns (max 5) so a model can't burn its whole budget re-reading the same file.
+- **Submission** — one `submit_test` call. There is exactly one per run. The instant it fires, the loop ends and that run is done.
 - **Iteration** — what an *agentic loop* (phase 3+) will add and what this phase deliberately does NOT have: submit → compile → feed errors back → revise → resubmit. Phase 2 has zero iterations by design. Every "compile failed" outcome below is final.
 
-So the "avg turns" column in the results table is the agent's exploration budget usage before submitting, not a count of revise-and-retry attempts. Phase 3 will add an "avg iterations" column on a separate axis.
+Hierarchy: phase contains many **cells**; each cell has multiple **runs**; each run has multiple **turns**; some turns contain a **read**; exactly one turn per run contains the **submission**. Phase 3 will add **iterations** as a new level between submission and end-of-run.
 
 ## Sample size: why 5 cells, and what's next
 

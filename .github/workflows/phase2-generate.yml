@@ -1,0 +1,215 @@
+name: Phase 2 — generate
+
+# Run the agentic generator (single agent, no feedback) against a target set
+# in parallel across (model × repo). Uploads per-shard results as artifacts
+# that phase2-evaluate.yml then consumes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_set:
+        description: "Targets version (must exist under targets/)"
+        required: true
+        default: "v2"
+      runs_per_cell:
+        description: "How many independent runs per (model, target) cell"
+        required: true
+        default: "3"
+      models:
+        description: "Comma-separated model ids; or 'all' for the full panel"
+        required: true
+        default: "all"
+      repos:
+        description: "Comma-separated repo names; or 'all' for every repo in the target set"
+        required: true
+        default: "all"
+      limit_per_repo:
+        description: "Optional cap on cells per repo (for shakedown). Empty = no cap."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "phase2-generate-${{ github.event.inputs.target_set }}"
+  cancel-in-progress: false
+
+env:
+  PHASE: phase2-agentic
+
+jobs:
+
+  plan:
+    name: "Plan shards"
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      target_sha256: ${{ steps.plan.outputs.target_sha256 }}
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Build (model × repo × run_index) matrix
+        id: plan
+        shell: bash
+        env:
+          TARGET_SET: ${{ inputs.target_set }}
+          RUNS_PER_CELL: ${{ inputs.runs_per_cell }}
+          MODELS: ${{ inputs.models }}
+          REPOS: ${{ inputs.repos }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/plan_matrix.py > matrix.json
+          n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
+          echo "::notice::Planned $n shards (target_set=$TARGET_SET, runs_per_cell=$RUNS_PER_CELL)"
+          {
+            echo "matrix<<__EOF__"
+            cat matrix.json
+            echo
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+          sha=$(sha256sum "targets/${TARGET_SET}/targets.csv" | awk '{print $1}')
+          echo "target_sha256=$sha" >> "$GITHUB_OUTPUT"
+
+  generate:
+    name: "gen ${{ matrix.model }} ${{ matrix.repo }} run${{ matrix.run_index }}"
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+      FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Verify Foundry secrets present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${FOUNDRY_ENDPOINT:-}" || -z "${FOUNDRY_API_KEY:-}" ]]; then
+            echo "::error::FOUNDRY_ENDPOINT or FOUNDRY_API_KEY missing from repo secrets"
+            exit 1
+          fi
+          echo "endpoint length: ${#FOUNDRY_ENDPOINT}, key length: ${#FOUNDRY_API_KEY}"
+
+      - name: Verify target set integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          have=$(sha256sum "targets/${{ inputs.target_set }}/targets.csv" | awk '{print $1}')
+          want="${{ needs.plan.outputs.target_sha256 }}"
+          if [[ "$want" != "$have" ]]; then
+            echo "::error::target_sha256 drift: want=$want have=$have"
+            exit 1
+          fi
+          echo "target_sha256 OK: $have"
+
+      - name: Setup Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        shell: bash
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install requests pyyaml
+
+      - name: Clone target repo at pinned SHA
+        shell: bash
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          # SHAs match phases/phase2-agentic/phase.lock.yaml + phase1 baseline
+          declare -A SHAS=(
+            [OpenRA]=8f2138c71106aaffd8a288b56d1c9ef6013700ba
+            [abp]=ea4bbb8b517869a9fb735ea5bc05c819c209d0b5
+            [aspnetcore]=ecb199c29cbefb6fcb6aa789436de36e44427a78
+            [duplicati]=4afa374d7b994cfbfb8167750baabec3eea557e3
+            [eShop]=9b4f9434f46fdc5c1a6e9e936af2868340cdbc48
+            [efcore]=45e3af0273b71919189367bc152a335b69f443c6
+            [garnet]=38cac99c7ad80ae8465ea6e0f120bd6698730a75
+            [jellyfin]=e1e18e8da015e7311e62cdb62167d51e90331edd
+            [orleans]=8024faf860549cb960b4b573c1571b379e283daa
+            [roslyn]=02d301627ed5016a4c18acd1a35e5bbc20ff03f0
+            [semantic-kernel]=1fe41e17a90e002aa7f4f834f7ebd9475d80803c
+            [server]=ea233580d24734f78feffe7fa5cef185b1a2df28
+          )
+          declare -A URLS=(
+            [OpenRA]=https://github.com/OpenRA/OpenRA.git
+            [abp]=https://github.com/abpframework/abp.git
+            [aspnetcore]=https://github.com/dotnet/aspnetcore.git
+            [duplicati]=https://github.com/duplicati/duplicati.git
+            [eShop]=https://github.com/dotnet/eShop.git
+            [efcore]=https://github.com/dotnet/efcore.git
+            [garnet]=https://github.com/microsoft/garnet.git
+            [jellyfin]=https://github.com/jellyfin/jellyfin.git
+            [orleans]=https://github.com/dotnet/orleans.git
+            [roslyn]=https://github.com/dotnet/roslyn.git
+            [semantic-kernel]=https://github.com/microsoft/semantic-kernel.git
+            [server]=https://github.com/bitwarden/server.git
+          )
+          mkdir -p cloned_repos
+          cd cloned_repos
+          git clone --filter=blob:none "${URLS[$REPO]}" "$REPO"
+          cd "$REPO"
+          git fetch --depth 1 origin "${SHAS[$REPO]}"
+          git checkout FETCH_HEAD
+          # Submodules — only aspnetcore needs them, but cheap to attempt for all
+          git submodule update --init --recursive --depth 1 || true
+
+      - name: Run agentic generator
+        shell: bash
+        env:
+          TARGET_SET: ${{ inputs.target_set }}
+          MODEL: ${{ matrix.model }}
+          REPO: ${{ matrix.repo }}
+          RUN_INDEX: ${{ matrix.run_index }}
+          LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${LIMIT_PER_REPO}" ]]; then
+            extra+=(--limit "${LIMIT_PER_REPO}")
+          fi
+          python3 tools/generation/agentic_runner.py \
+            --phase "${PHASE}" \
+            --model "${MODEL}" \
+            --run-index "${RUN_INDEX}" \
+            --target-set "${TARGET_SET}" \
+            --repo-filter "${REPO}" \
+            --max-turns 6 \
+            --max-reads 5 \
+            --max-output-tokens 4096 \
+            --timeout-s 240 \
+            "${extra[@]}"
+
+      - name: Show shard summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_safe="${{ matrix.model }}"
+          model_safe="${model_safe//\//__}"
+          dir="phases/${PHASE}/results/${model_safe}/run_${{ matrix.run_index }}"
+          if [[ -f "${dir}/attempts.jsonl" ]]; then
+            n=$(wc -l < "${dir}/attempts.jsonl")
+            echo "::notice::Shard wrote ${n} attempts to ${dir}"
+          else
+            echo "::warning::No attempts.jsonl produced"
+          fi
+
+      - name: Upload shard artifact
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
+          path: phases/${{ env.PHASE }}/results/
+          if-no-files-found: warn
+          retention-days: 14

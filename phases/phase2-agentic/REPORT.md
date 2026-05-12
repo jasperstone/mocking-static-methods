@@ -1,6 +1,6 @@
-# Phase 2 — Agentic Loop
+# Phase 2 — Single Agent, No Feedback
 
-> **Status: pilot complete.** 7-model panel, 5 cells, 1 run. Results capture the agentic-loop baseline that subsequent tiers (compile-feedback, multi-agent, multi-team) will be measured against.
+> **Status: pilot complete.** 7-model panel, 5 cells, 1 run. One agent per cell, given exploration tools but **no compile or test feedback** — the agent submits once and the loop ends. Phase 3 closes that gap by feeding compile errors back as additional turns. This phase is the no-feedback baseline that phase 3 will be measured against.
 
 See also:
 - [COSTS.md](COSTS.md) — what this experiment cost on Azure (~$0.57 to date) and how to read it
@@ -10,13 +10,13 @@ See also:
 
 ## Strategy
 
-Each model gets a multi-turn loop with three tools:
+Each model gets a multi-turn **exploration** budget with three tools:
 
   - `<tool>read_file(path)</tool>` — repo-relative read, sandboxed to the target repo root
   - `<tool>list_dir(path)</tool>` — list children
   - `<tool>submit_test(csharp)</tool>` — emit final fenced code block; loop ends
 
-Bounded: **6 turns max, 5 reads max** per cell. Models can choose to read the type-under-test, sibling files, or just submit immediately based on the source window provided.
+Bounded: **6 turns max, 5 reads max** per cell. The agent can read the type-under-test, sibling files, or just submit immediately based on the source window provided. Crucially, **no compile or test feedback is fed back into the loop** — once `submit_test` fires, the cell is done. That makes this a "single-agent, no-feedback" baseline; phase 3 will close the loop by feeding compile errors back as additional turns.
 
 Identical prompt for all seven models. The same prompt is shipped to whatever the natural API surface is for that deployment:
 
@@ -97,10 +97,10 @@ For every (model, cell) pair, three artifact streams survive in `results/<model>
 
 ## Next tiers
 
-The 0/21 compile rate is the headline. It strongly motivates the next experiments:
+The 0/21 compile rate is the headline. It strongly motivates the next phases:
 
-1. **Compile-feedback loop.** Let the model see CS errors and try again. Plausibly a large lift; cost roughly 3× this tier (more turns).
-2. **Multi-agent (writer + reviewer).** A reviewer reads the candidate test and flags missing usings / wrong types before submission.
-3. **Multi-team.** One team writes the spec; a separate team writes the test from that spec.
+1. **Phase 3 — agentic loop.** Same single agent, but compile errors are fed back as additional turns so the agent can fix its own output. Plausibly a large lift; cost roughly 3× this tier (more turns).
+2. **Phase 4 — multi-agent (writer + reviewer).** A reviewer reads the candidate test and flags missing usings / wrong types before submission.
+3. **Phase 5 — multi-team.** One team writes the spec; a separate team writes the test from that spec.
 
-Each tier will land in its own `phases/phase3-*` directory with its own COSTS.md so we can show how cost scales with sophistication.
+Each tier will land in its own `phases/phaseN-*` directory with its own COSTS.md so we can show how cost scales with sophistication.

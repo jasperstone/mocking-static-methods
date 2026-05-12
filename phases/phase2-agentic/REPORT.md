@@ -8,6 +8,17 @@ See also:
 - [phase.lock.yaml](phase.lock.yaml) — exact inputs / hyperparameters
 - [results/](results/) — per-model raw outputs (JSONL + generated tests + per-turn forensics)
 
+## Vocabulary
+
+These terms get used loosely in the agent literature — here's what they mean in *this* phase specifically:
+
+- **Turn** — one round-trip to the model. The agent emits text, we parse a `<tool>...</tool>` call out of it, run the tool (read a file, list a dir, or accept the submitted test), append the tool result to the transcript, and ask the model again. A turn is bounded compute, not bounded thinking; the model may emit lots of reasoning per turn.
+- **Read** — one successful `read_file` call. Bounded separately from turns (max 5) so a model can't burn its whole budget re-reading the same file.
+- **Submission** — one `submit_test` call. There is exactly one per cell. The instant it fires, the loop ends and the cell is done.
+- **Iteration** — what an *agentic loop* (phase 3+) will add and what this phase deliberately does NOT have: submit → compile → feed errors back → revise → resubmit. Phase 2 has zero iterations by design. Every "compile failed" outcome below is final.
+
+So the "avg turns" column in the results table is the agent's exploration budget usage before submitting, not a count of revise-and-retry attempts. Phase 3 will add an "avg iterations" column on a separate axis.
+
 ## Strategy
 
 Each model gets a multi-turn **exploration** budget with three tools:

@@ -248,6 +248,8 @@ def main() -> int:
     ap.add_argument("--cloned-repos", default=str(REPO_ROOT / "cloned_repos"))
     ap.add_argument("--build-timeout", type=int, default=180)
     ap.add_argument("--test-timeout", type=int, default=180)
+    ap.add_argument("--repo-filter", default=None,
+                    help="comma-separated repo names; only test.cs files under these repos are evaluated")
     args = ap.parse_args()
 
     phase_dir = REPO_ROOT / "phases" / args.phase
@@ -264,12 +266,18 @@ def main() -> int:
     eval_path = run_dir / "evaluation.jsonl"
     cloned_root = Path(args.cloned_repos)
 
+    repo_filter = None
+    if args.repo_filter:
+        repo_filter = {r.strip() for r in args.repo_filter.split(",") if r.strip()}
+
     n_compile = n_run = n_total = 0
     with eval_path.open("w") as out:
         # Iterate every test.cs under generated_tests/<repo>/<target_id>/
         for test_cs in sorted((run_dir / "generated_tests").rglob("test.cs")):
             target_id_safe = test_cs.parent.name        # repo_NNNN
             repo_name = test_cs.parent.parent.name
+            if repo_filter and repo_name not in repo_filter:
+                continue
             target_id = target_id_safe.replace("_", ":", 1)
             row = targets.get(target_id)
             if row is None:

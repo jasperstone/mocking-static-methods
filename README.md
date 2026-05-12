@@ -9,10 +9,15 @@ The experiment progresses in phases. Each phase fixes the input set and varies o
 | Phase | Strategy | Status |
 |---|---|---|
 | 1 — baseline | No generation. Measure existing test suites. | ✅ sealed (see [`phases/phase1-baseline/`](phases/phase1-baseline/)) |
-| 2 — single-shot | LLM produces one test per target in a single prompt; no feedback. | not started |
-| 3 — single-agent loop | One agent iterates compile → fix → run → fix per target. | not started |
+| 2a — single-shot | LLM produces one test per target in a single prompt; no feedback. | ✅ sealed (see [`phases/phase2-singleshot/`](phases/phase2-singleshot/)) |
+| 2b — agentic loop | One agent has read_file / list_dir / submit_test tools, max 6 turns. | ✅ pilot (see [`phases/phase2-agentic/`](phases/phase2-agentic/)) |
+| 3 — compile-feedback | Same as 2b plus compile-error feedback fed back into the loop. | not started |
 | 4 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | not started |
 | 5 — multi-team | Multiple multi-agent teams compete or partition the target set. | not started |
+
+### Cost so far
+
+The full [phase 2 agentic pilot](phases/phase2-agentic/) — 7 models × 5 cells × 1 run, plus prompt-iteration spikes — cost **$0.57 USD** of Azure spend. All seven models live in one Azure AI Foundry account; see [phases/phase2-agentic/COSTS.md](phases/phase2-agentic/COSTS.md) for the per-model breakdown, where to find Azure's cost-analysis charts, and rough projections for the next tiers.
 
 ### Repository layout
 

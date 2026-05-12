@@ -1,0 +1,150 @@
+# Snapshot of every input that affects this phase's reproducibility.
+
+phase:
+  id: phase2-agentic
+  title: "Agentic loop with read_file / list_dir / submit_test tools"
+  strategy: |
+    Each model runs in a multi-turn loop (max 6 turns, max 5 reads). The model
+    can call read_file(path), list_dir(path), or submit_test(csharp). Same
+    prompt for all 7 panel models, dispatched to the natural API surface for
+    each deployment (Azure OpenAI Chat Completions, Azure OpenAI Responses, or
+    Foundry Models Inference).
+  start_date: "2026-05-11"
+  seal_date: ""              # not yet sealed — pilot only
+  git_tag: ""                # set at seal: phase-2-agentic-final
+
+inputs:
+  targets_version: "v1"
+  targets_sha256: "aca60f388a4c82c8af021a76ea47a443838b7edb6a7992fe21f9fe3afe8d5e10"
+  targets_count: 5           # pilot subset; full run will expand
+  pilot_target_ids:
+    - eShop:0001
+    - duplicati:0011
+    - semantic-kernel:0001
+    - orleans:0001
+    - jellyfin:0001
+
+infrastructure:
+  sdk_image: ""              # local SDK install used for evaluator (not a container)
+  sdk_image_digest: ""
+  dotnet_sdk_version: "10.0.203"
+  python_version: "3.12"
+  orchestrator_workflow_sha: ""   # no workflow yet — local pilot
+  generator_workflow_sha: ""
+
+repos:
+  eShop:           "9b4f9434f46fdc5c1a6e9e936af2868340cdbc48"
+  duplicati:       "4afa374d7b994cfbfb8167750baabec3eea557e3"
+  semantic-kernel: "1fe41e17a90e002aa7f4f834f7ebd9475d80803c"
+  orleans:         "8024faf860549cb960b4b573c1571b379e283daa"
+  jellyfin:        "e1e18e8da015e7311e62cdb62167d51e90331edd"
+
+generation:
+  endpoint: "https://foundry-mockstatic.cognitiveservices.azure.com/"
+  endpoint_kind: "Azure AI Foundry (single account, three API surfaces)"
+  region: "eastus2"
+
+  surfaces:
+    openai_chat:        ["gpt-4.1-mini", "gpt-4.1-nano"]
+    openai_responses:   ["gpt-5-codex"]
+    foundry_inference:  ["phi-4", "codestral-2501", "llama-3.3-70b-instruct", "grok-4-1-fast"]
+
+  models:
+    - id: "gpt-4.1-mini"
+    - id: "gpt-4.1-nano"
+    - id: "gpt-5-codex"
+    - id: "phi-4"
+    - id: "codestral-2501"
+    - id: "llama-3.3-70b-instruct"
+    - id: "grok-4-1-fast"
+
+  runs_per_model: 1            # pilot — full will be 5
+  temperature: 0.0
+  top_p: 1.0
+  seed: 42
+  max_output_tokens: 4096      # bumped to >= 16384 for /responses internally
+
+  model_snapshots_observed: {}
+
+  prompt_template_dir: "prompt/"
+  prompt_system_sha256: "693367503a7eadfbe1a30c35027b6d68e5987f6657c7acd8e968d0b1e28b9888"
+  prompt_user_template_sha256: "75619e3f06cfe8ddd5688915ddca1c1b53546d71e5914b5100ff52dfea1bec0d"
+  prompt_loop_feedback_sha256: ""   # n/a — no feedback in this phase
+
+  agent_loop_max_iterations: 6
+  agent_max_reads: 5
+  agent_tools_allowed:
+    - read_file
+    - list_dir
+    - submit_test
+
+ci_runs:
+  coverage_orchestrator_run_id: ""   # local pilot — no CI yet
+  generator_run_ids: {}
+
+evaluation:
+  framework: xUnit
+  target_tfm: net10.0
+  build_timeout_s: 240
+  test_timeout_s: 180
+  coverage_collector: "XPlat Code Coverage (coverlet)"
+  package_pins:
+    Microsoft.NET.Test.Sdk: "17.12.0"
+    xunit: "2.9.2"
+    "xunit.runner.visualstudio": "2.8.2"
+    Moq: "4.20.72"
+    NSubstitute: "5.3.0"
+    "coverlet.collector": "6.0.2"
+
+cost:
+  total_usd_to_date: 0.5699          # see COSTS.md — regenerate via tools/cost/estimate.py
+  budget_alert_amount_usd: 50
+  budget_alert_resource_group: "rg-mocking-static-experiment"
+  account_name: "foundry-mockstatic"
+
+results:
+  total_attempts: 35
+  total_compile_ok: 0
+  total_run_ok: 0
+  total_tests_passed: 0
+  total_tests_failed: 0
+  mode1_sites_newly_covered: 0     # 0 — no test compiled
+
+  per_model:
+    gpt-4.1-mini:
+      submitted: 5
+      compile_ok: 0
+      avg_turns: 2.6
+      cost_usd: 0.0188
+    gpt-4.1-nano:
+      submitted: 2
+      compile_ok: 0
+      avg_turns: 4.8
+      cost_usd: 0.0055
+    gpt-5-codex:
+      submitted: 0
+      compile_ok: 0
+      avg_turns: 3.4
+      cost_usd: 0.4743
+      notes: "Mix of safety refusals and reasoning-token exhaustion. 83% of phase spend."
+    codestral-2501:
+      submitted: 4
+      compile_ok: 0
+      avg_turns: 5.2
+      cost_usd: 0.0192
+    grok-4-1-fast:
+      submitted: 5
+      compile_ok: 0
+      avg_turns: 3.4
+      cost_usd: 0.0108
+    llama-3.3-70b-instruct:
+      submitted: 5
+      compile_ok: 0
+      avg_turns: 3.4
+      cost_usd: 0.0388
+    phi-4:
+      submitted: 0
+      compile_ok: 0
+      avg_turns: 0.0
+      cost_usd: 0.0027
+      notes: "Upstream read timeouts on every call this run. Smoke works."

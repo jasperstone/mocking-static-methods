@@ -1,6 +1,6 @@
 # Phase 2 — Single Agent, No Feedback
 
-> **Status: pilot complete.** 7-model panel, 5 cells, 1 run. One agent per cell, given exploration tools but **no compile or test feedback** — the agent submits once and the loop ends. Phase 3 closes that gap by feeding compile errors back as additional turns. This phase is the no-feedback baseline that phase 3 will be measured against.
+> **Status: pilot complete, full run pending.** 7-model panel, 5 cells of 3,147, 1 run. The pilot establishes per-model unit costs, validates the harness, and surfaces the qualitative finding that compile is the bottleneck. It is **not** a publishable result — the full run (target ~150 stratified cells, 3 runs each) is what gets compared against phase 3's compile-feedback delta. See [Sample size](#sample-size-why-5-cells-and-whats-next) below.
 
 See also:
 - [COSTS.md](COSTS.md) — what this experiment cost on Azure (~$0.57 to date) and how to read it
@@ -18,6 +18,40 @@ These terms get used loosely in the agent literature — here's what they mean i
 - **Iteration** — what an *agentic loop* (phase 3+) will add and what this phase deliberately does NOT have: submit → compile → feed errors back → revise → resubmit. Phase 2 has zero iterations by design. Every "compile failed" outcome below is final.
 
 So the "avg turns" column in the results table is the agent's exploration budget usage before submitting, not a count of revise-and-retry attempts. Phase 3 will add an "avg iterations" column on a separate axis.
+
+## Sample size: why 5 cells, and what's next
+
+The full target set is **3,147 uncovered Mode#1 sites** across the 15 cloned repos (frozen in [`targets/v1/targets.csv`](../../targets/v1/targets.csv)). This phase ran 5 of them. That's a deliberate pilot, not the experiment.
+
+**Why a 5-cell pilot first:**
+
+1. **Cost reconnaissance.** Per-cell cost wasn't known a priori — gpt-5-codex turned out to spend ~$0.10/cell on internal reasoning before submitting. A naive full sweep (3,147 × 7 models × 5 runs ≈ 110k attempts) would have run ~$2,200 just for codex, $300+ for the rest. Pilot first, learn the unit costs, then scope the full sweep.
+2. **Harness shakedown.** Most of this phase's elapsed time was in finding out the evaluator must build *inside* the cloned repo (otherwise NU1100/NU1605 mask real CS errors), that `/responses` needs ≥16k output budget for reasoning headroom, that codestral wraps fences differently than the OpenAI surfaces, that aspnetcore's source-build refuses external `ProjectReference`s. Running 110k cells against a broken harness would have burned the budget without producing valid signal.
+3. **Cells span 5 of the 15 repos.** Not a random sample, but they hit different concrete static-method patterns: an `ILogger` extension, an `IServiceProvider` extension, a `LogError` extension, a `GetConnectionString` extension, and an `AzureAIAgent.LogInformation`. Enough variety to expose the most common failure modes (CS0246 missing using, CS7036 wrong constructor) at very low cost.
+
+**This is not a publishable result yet.** The 0/21 compile rate is a strong qualitative signal — it tells us compile is the bottleneck and motivates the phase 3 (compile-feedback) experiment — but n=5 is far too small for any per-model claim. With one cell per model per repo there is no within-condition variance to estimate, no stratified comparison across repos, and no way to separate model-skill from cell-difficulty.
+
+### Sample sizes in comparable empirical SE work
+
+Rough targets in the LLM-test-generation literature:
+
+| Bar | Cells / classes | Examples |
+|---|---|---|
+| Minimum credible (non-parametric tests viable) | **30–50** | small workshop papers |
+| Conference-paper baseline | **100–300** | most ICSE/FSE/ASE LLM-testgen submissions; SF110-derived subsets |
+| Strong | **300–500** with 3–5 runs each for variance | CodaMosa, ChatUniTest, A3Test |
+| Comprehensive benchmark | full population | Defects4J (835 bugs), SF110 (~24k classes) |
+
+Convention is also to report a **stratified sample** rather than a uniform one — partition by repo, by API-surface family (logger / DI / config / database), and by cyclomatic complexity bucket of the type-under-test, then sample proportionally so no one bucket dominates the headline.
+
+### What phase 2 needs before it can be sealed
+
+- **Bump cells to ~150** (conservative conference-paper baseline). Stratified sample of the 3,147: ~10 cells per repo × 15 repos. Estimated cost: ~$30 for the cheap models, plus $50–80 if codex stays in the panel — roughly within the $50/mo budget if codex is sampled at ~20 cells instead of all 150.
+- **Bump runs per cell to 3** for variance estimation. Temperature is currently 0.0 so per-call variance is limited to provider-side nondeterminism, but 3 runs lets us at least bound it.
+- **Drop or sample codex aggressively.** It contributed 83% of phase spend ($0.47 of $0.57) and submitted nothing. Reasonable choices: include it on a 20-cell sub-sample only, or hold it for phase 3 once compile-feedback is in (where its reasoning budget might actually pay off).
+- **Re-include phi-4 once Foundry capacity stabilizes** (it timed out on every call this run after working in smoke).
+
+That's "phase 2 — full run" before moving to phase 3. The pilot tells us what to spend; the full run produces the result that's safe to compare against phase 3's compile-feedback delta.
 
 ## Strategy
 

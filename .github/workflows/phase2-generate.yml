@@ -84,6 +84,10 @@ jobs:
     env:
       FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
       FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+      # Panel routing (which surface each model lives on). Static config — not secret.
+      FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
+      FOUNDRY_PANEL_OPENAI_RESPONSES: "gpt-5-codex"
+      FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
 
@@ -163,6 +167,16 @@ jobs:
           git checkout FETCH_HEAD
           # Submodules — only aspnetcore needs them, but cheap to attempt for all
           git submodule update --init --recursive --depth 1 || true
+
+      - name: Purge tracked pilot results so this shard only emits its own work
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pilot data is committed to the repo; in CI we want each shard's
+          # artifact to contain ONLY this shard's output so the aggregator
+          # doesn't double-count v1 pilot rows.
+          rm -rf "phases/${PHASE}/results"
+          mkdir -p "phases/${PHASE}/results"
 
       - name: Run agentic generator
         shell: bash

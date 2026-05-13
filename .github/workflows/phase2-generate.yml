@@ -32,7 +32,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: "phase2-generate-${{ github.event.inputs.target_set }}"
+  # Group by (target_set, models, repos) so independent partial dispatches
+  # (e.g. one per model when re-running cancelled shards) don't serialize.
+  # cancel-in-progress: false means a duplicate dispatch of the SAME shape
+  # will be queued, not stomped.
+  group: "phase2-generate-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}"
   cancel-in-progress: false
 
 env:

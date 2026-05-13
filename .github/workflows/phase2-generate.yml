@@ -76,7 +76,9 @@ jobs:
     name: "gen ${{ matrix.model }} ${{ matrix.repo }} run${{ matrix.run_index }}"
     needs: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # No explicit timeout-minutes — use GitHub's 360-min default. Slow models on
+    # the biggest repos (jellyfin = 62 cells, garnet ~50, aspnetcore ~40) need
+    # the full window when paired with codex / nano.
     strategy:
       fail-fast: false
       max-parallel: 20

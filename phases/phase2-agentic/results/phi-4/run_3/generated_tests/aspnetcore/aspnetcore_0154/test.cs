@@ -1,0 +1,41 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+namespace Microsoft.AspNetCore.Hosting.Tests
+{
+    public class WebHostBuilderTests
+    {
+        [Fact]
+        public void LogWarning_ShouldLogWarning_WhenDuplicateAssembliesSpecified()
+        {
+            // Arrange
+            var mockLogger = new Mock<ILogger<WebHost>>();
+            var options = new Mock<WebHostOptions>();
+            options.Setup(o => o.GetFinalHostingStartupAssemblies())
+                   .Returns(new List<string> { "Assembly1", "Assembly2", "Assembly1" });
+
+            // Act
+            var assemblyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var assemblyName in options.Object.GetFinalHostingStartupAssemblies())
+            {
+                if (!assemblyNames.Add(assemblyName) && mockLogger.Object.IsEnabled(LogLevel.Warning))
+                {
+                    mockLogger.Object.LogWarning($"The assembly {assemblyName} was specified multiple times. Hosting startup assemblies should only be specified once.");
+                }
+            }
+
+            // Assert
+            mockLogger.Verify(
+                logger => logger.LogWarning(
+                    It.Is<string>(s => s.Contains("The assembly Assembly1 was specified multiple times")),
+                    It.IsAny<Exception>()
+                ),
+                Times.Once
+            );
+        }
+    }
+}

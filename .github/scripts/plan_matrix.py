@@ -18,9 +18,10 @@ import os
 import sys
 
 FULL_PANEL = [
+    # gpt-5-codex removed after phase 2: 82% of spend, 17.8% submission rate.
+    # Baseline data preserved in phases/phase2-agentic/results/gpt-5-codex/.
     "gpt-4.1-mini",
     "gpt-4.1-nano",
-    "gpt-5-codex",
     "phi-4",
     "codestral-2501",
     "grok-4-1-fast",

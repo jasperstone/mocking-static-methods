@@ -17,6 +17,10 @@ on:
         description: "How many independent runs per (model, target) cell"
         required: true
         default: "3"
+      run_index_start:
+        description: "First run_index (default 1). Set to 2 for a follow-up sweep that reuses run_1 from a calibration dispatch."
+        required: false
+        default: "1"
       models:
         description: "Comma-separated model ids; or 'all' for the full panel"
         required: true
@@ -61,13 +65,14 @@ jobs:
         env:
           TARGET_SET: ${{ inputs.target_set }}
           RUNS_PER_CELL: ${{ inputs.runs_per_cell }}
+          RUN_INDEX_START: ${{ inputs.run_index_start }}
           MODELS: ${{ inputs.models }}
           REPOS: ${{ inputs.repos }}
         run: |
           set -euo pipefail
           python3 .github/scripts/plan_matrix.py > matrix.json
           n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
-          echo "::notice::Planned $n shards (target_set=$TARGET_SET, runs_per_cell=$RUNS_PER_CELL)"
+          echo "::notice::Planned $n shards (target_set=$TARGET_SET, runs_per_cell=$RUNS_PER_CELL, run_index_start=$RUN_INDEX_START)"
           {
             echo "matrix<<__EOF__"
             cat matrix.json

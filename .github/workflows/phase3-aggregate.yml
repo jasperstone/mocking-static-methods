@@ -8,10 +8,10 @@ on:
   workflow_dispatch:
     inputs:
       generate_run_id:
-        description: "phase3-generate run id whose artifacts to download"
+        description: "phase3-generate run id(s) whose artifacts to download. Comma-separated for multi-sweep aggregation (e.g. calibration + continuation)."
         required: true
       evaluate_run_id:
-        description: "phase3-evaluate run id whose artifacts to download"
+        description: "phase3-evaluate run id(s) whose artifacts to download. Comma-separated for multi-sweep aggregation."
         required: true
       branch_suffix:
         description: "Branch name suffix; final = phase3-results-{suffix}"
@@ -51,23 +51,42 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install pyyaml
 
-      - name: Download all generate artifacts
-        uses: actions/download-artifact@v5
-        with:
-          pattern: gen-*
-          path: artifacts/generate
-          merge-multiple: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.generate_run_id }}
-
-      - name: Download all evaluate artifacts
-        uses: actions/download-artifact@v5
-        with:
-          pattern: eval-*
-          path: artifacts/evaluate
-          merge-multiple: true
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ inputs.evaluate_run_id }}
+      - name: Download all generate + evaluate artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEN_RUNS: ${{ inputs.generate_run_id }}
+          EVAL_RUNS: ${{ inputs.evaluate_run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/generate artifacts/evaluate
+          # generate_run_id and evaluate_run_id may be CSV (e.g. cal,continuation).
+          # `gh run download` flattens each artifact under its own dir, but each
+          # artifact was uploaded with path-like contents, so cp -rn merges safely.
+          download_runs() {
+            local pattern="$1" dest="$2" runs_csv="$3"
+            IFS=',' read -ra runs <<< "${runs_csv}"
+            for rid in "${runs[@]}"; do
+              rid="${rid// /}"
+              [[ -z "$rid" ]] && continue
+              echo "::group::Downloading ${pattern} artifacts from run ${rid}"
+              tmpdir=$(mktemp -d)
+              gh run download "$rid" --repo "$REPO" --pattern "$pattern" --dir "$tmpdir" || {
+                echo "::warning::No ${pattern} artifacts in run ${rid}"
+                continue
+              }
+              # Merge all artifact subdirs into dest preserving the inner path structure.
+              find "$tmpdir" -mindepth 1 -maxdepth 1 -type d -print0 \
+                | xargs -0 -I{} cp -rn "{}/." "$dest/"
+              rm -rf "$tmpdir"
+              echo "::endgroup::"
+            done
+          }
+          download_runs "gen-*"  artifacts/generate "${GEN_RUNS}"
+          download_runs "eval-*" artifacts/evaluate "${EVAL_RUNS}"
+          echo "Artifact tree:"
+          find artifacts -maxdepth 4 -type d | sort | head -50
 
       - name: Merge artifacts into results/
         shell: bash

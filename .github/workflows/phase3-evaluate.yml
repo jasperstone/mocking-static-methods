@@ -16,6 +16,10 @@ on:
         description: "How many runs to evaluate per (model, repo)"
         required: true
         default: "3"
+      run_index_start:
+        description: "First run_index (default 1). Match the value used in phase3-generate to evaluate the right shards."
+        required: false
+        default: "1"
       models:
         description: "Comma-separated model ids; or 'all' for the full panel"
         required: true
@@ -55,13 +59,14 @@ jobs:
         env:
           TARGET_SET: ${{ inputs.target_set }}
           RUNS_PER_CELL: ${{ inputs.runs_per_cell }}
+          RUN_INDEX_START: ${{ inputs.run_index_start }}
           MODELS: ${{ inputs.models }}
           REPOS: ${{ inputs.repos }}
         run: |
           set -euo pipefail
           python3 .github/scripts/plan_matrix.py > matrix.json
           n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
-          echo "::notice::Planned $n eval shards"
+          echo "::notice::Planned $n eval shards (run_index_start=$RUN_INDEX_START, runs_per_cell=$RUNS_PER_CELL)"
           {
             echo "matrix<<__EOF__"
             cat matrix.json

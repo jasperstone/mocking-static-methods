@@ -32,6 +32,9 @@ FULL_PANEL = [
 def main() -> int:
     ts = os.environ["TARGET_SET"]
     runs = int(os.environ.get("RUNS_PER_CELL", "1"))
+    # Optional: shift the run_index window so a follow-up sweep can produce
+    # only run_2/run_3 without redoing run_1. Default 1 keeps prior behavior.
+    start = int(os.environ.get("RUN_INDEX_START", "1"))
 
     want_models = os.environ.get("MODELS", "all").strip()
     models = FULL_PANEL if want_models == "all" else [m.strip() for m in want_models.split(",") if m.strip()]
@@ -44,7 +47,7 @@ def main() -> int:
         {"model": m, "repo": r, "run_index": i}
         for m in models
         for r in repos
-        for i in range(1, runs + 1)
+        for i in range(start, start + runs)
     ]
     json.dump({"include": include}, sys.stdout)
     return 0

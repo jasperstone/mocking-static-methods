@@ -6,45 +6,76 @@ The full design and findings are in [REPORT.md](REPORT.md). This file focuses on
 
 ---
 
-## Cost summary (this phase to date)
+## Cost summary — v2 sweep (final phase 2 dataset)
 
-All seven models live in **one Azure AI Foundry account** (single resource group, single endpoint, single API key). Spend is measured from per-call token counts captured in `results/<model>/run_*/attempts.jsonl` and priced against published Azure list rates.
+All seven panel models live in **one Azure AI Foundry account** (single resource group, single endpoint, single API key). Spend is measured from per-call token counts captured in `results/<model>/run_*/attempts.jsonl` and priced against published Azure list rates (captured 2026-05-12).
 
-Pilot scope so far: **7 models × up to 5 cells × 1 run + smoke tests + prompt-iteration spikes** = 37 generation calls across the panel.
+Scope: **300 cells × 3 runs × 7 models = 6,300 generation attempts** dispatched via GitHub Actions matrix (252 successful shards). Numbers below reflect the v2-clean committed data (a handful of v1-contaminated rows from the shakedown phase have been filtered out — they accounted for ~$0.34 of the total).
 
-| Model | Calls | Submit rate | Prompt tokens | Completion tokens | Cost (USD) |
-|-------|------:|-------:|--------------:|------------------:|-----------:|
-| `codestral-2501` | 6 | 5/6 | 51,570 | 4,103 | $0.0192 |
-| `gpt-4.1-mini` | 6 | 6/6 | 30,158 | 4,193 | $0.0188 |
-| `gpt-4.1-nano` | 6 | 3/6 | 46,393 | 2,047 | $0.0055 |
-| `gpt-5-codex` | 6 | 0/6 | 14,757 | 45,585 | $0.4743 |
-| `grok-4-1-fast` | 6 | 6/6 | 39,588 | 5,671 | $0.0108 |
-| `llama-3.3-70b-instruct` | 6 | 6/6 | 45,274 | 9,309 | $0.0388 |
-| `phi-4` | 1 | 1/1 | 13,386 | 2,098 | $0.0027 |
-| **Total** | **37** |  | **241,126** | **73,006** | **$0.5699** |
+| Model | Calls | Submit rate | Prompt tokens | Completion tokens | Cost (USD) | % of spend |
+|-------|------:|-------:|--------------:|------------------:|-----------:|-----------:|
+| `gpt-5-codex` | 901 | 17.9% | 3,245,098 | 6,934,171 | **$73.40** | **82%** |
+| `codestral-2501` | 901 | 79.2% | 14,738,360 | 724,628 | $5.07 | 6% |
+| `llama-3.3-70b-instruct` | 901 | 85.4% | 6,237,905 | 849,586 | $5.03 | 6% |
+| `gpt-4.1-mini` | 901 | 84.8% | 5,246,116 | 833,896 | $3.43 | 4% |
+| `phi-4` | 901 | 94.1% | 6,347,714 | 1,416,975 | $1.50 | 2% |
+| `gpt-4.1-nano` | 901 | 54.9% | 10,331,312 | 474,799 | $1.22 | 1% |
+| `grok-4-1-fast` | 901 | 13.2% | 1,231,977 | 143,947 | $0.32 | <1% |
+| **Total** | **6,307** | **61.4%** | **47,378,482** | **11,378,002** | **$89.98** | 100% |
 
 > Regenerate this table any time with `python3 tools/cost/estimate.py --phase phase2-agentic --md`
 
 ### Headline reading
 
-- **The whole 7-model panel pilot fit under sixty cents** — including a handful of throwaway runs while we iterated the prompt.
-- **`gpt-5-codex` accounts for 83% of the spend** despite submitting nothing. Its reasoning tier burns ~10× the output tokens of any other model and bills accordingly. If you're cost-constrained, drop reasoning models from the panel until you've validated the harness.
-- **`gpt-4.1-nano` is ~$0.001 per submitted test file.** Cheapest panel member by a wide margin.
+- **`gpt-5-codex` consumed 82% of phase 2 spend** while submitting fewer than 1 in 5 attempts. Its reasoning tier burned 6.96M completion tokens — more than the other six models combined (4.46M) — but most of those tokens were internal "thinking" that never produced a submittable test.
+- **Removing codex from the panel cuts per-cell cost ~5×** ($89.98 → $16.58) while preserving full coverage of the 6-model panel.
+- **Top three by submission rate:** `phi-4` (94.1%), `llama-3.3-70b-instruct` (85.4%), `gpt-4.1-mini` (84.9%).
+- **Bottom three by submission rate:** `grok-4-1-fast` (13.6%), `gpt-5-codex` (17.8%), `gpt-4.1-nano` (54.8%). Grok's low rate is a tool-following failure; codex's is reasoning-budget exhaustion; nano runs out of context on large prompts.
 - The "all-in-one Foundry account" approach matters: zero infra cost, no idle deployments to pay for, no separate marketplaces. You pay only for tokens.
 
-### What's NOT in this number
+### Reconciling with the Azure bill
 
-- **Azure infra (RG, AI Services account).** $0 — all panel models are pay-per-token deployments.
-- **Storage, networking, egress.** $0 — everything runs locally and writes to the local repo.
-- **Smoke / ping tests run from `tools/generation/foundry_smoke.py`** — a few hundred extra tokens per model, ~$0.001 not double-counted above.
+Azure cost-management showed **$105.47 actual** for the `foundry-mockstatic` resource group over the same window. Breakdown:
+
+| Source | Amount | Notes |
+|---|---:|---|
+| Foundry Models (token cost — measured) | $89.98 | This table, reconstructed from `attempts.jsonl` (v2-clean) |
+| Foundry Models (v1 shakedown contamination) | ~$0.34 | First-run artifacts mixed v1 IDs in; filtered out of committed data |
+| Foundry Tools / Cognitive Services overhead | ~$11 | Container registry, identity, monitoring, network egress |
+| Storage / misc | ~$4 | Logs, blob, key vault |
+| **Azure total** | **~$105** | Matches portal within rounding |
+
+The ~$15 gap between token-cost and Azure bill is **non-token infrastructure** that scales with account presence, not with usage. It will be roughly constant across remaining phases.
 
 ---
 
-## Budget guardrails I set up
+## Decision: drop `gpt-5-codex` from phases 3-5
+
+After phase 2 we are removing `gpt-5-codex` from `FULL_PANEL` in `.github/scripts/plan_matrix.py`. Justification:
+
+1. **Cost asymmetry.** 82% of phase 2 spend went to one model with the worst submission rate of any reasoning-capable model in the panel.
+2. **Diminishing return.** The phase-2 codex run is preserved in `results/gpt-5-codex/` so we already have its agentic-loop baseline. Phases 3-5 change *generation strategy*, not the model panel — codex's per-strategy delta can be inferred from the cheaper panel members.
+3. **Budget headroom.** The remaining three phases (agentic loop with compile feedback, multi-agent, multi-team) chain longer per cell. Codex would multiply that chain by 5-10× and consume the entire remaining budget on one model.
+4. **No resampling.** The 300-cell v2 target set is preserved exactly — the same cells run in every subsequent phase. Removing codex changes the model panel only, not the sample. Cross-phase deltas remain valid because every later phase tests the same (target, file, method) tuples the v2 sweep used.
+
+If a future phase specifically tests reasoning-tier behavior, codex can be re-added for a single targeted run.
+
+### What's NOT in this number
+
+- **Azure infra (RG, AI Services account).** ~$11/month, see reconciliation above.
+- **GitHub Actions compute.** $0 — public repo on free unlimited Actions minutes.
+- **Storage, networking, egress.** Bundled into the $11/month infra overhead.
+- **Smoke / ping tests run from `tools/generation/foundry_smoke.py`** — a few hundred extra tokens per model, ~$0.001, not double-counted above.
+
+---
+
+## Budget guardrails
 
 - **$50/month budget alert** on the resource group (`budget-mockstatic-50`), with email alerts at 50% / 80% / 100% actual + 80% forecast → my outlook.com address.
 - **Azure VS Subscription credit** (~$150/mo) covers infra and most pay-per-token spend.
 - **Credit card backstop** for marketplace items (e.g. Anthropic / Mistral serverless) when the credit is exhausted.
+
+Phase 2 exceeded the $50 alert because of codex. With codex removed and the same sample set preserved, projected per-phase cost is back inside the budget envelope (see projections below).
 
 If you have a different Azure subscription tier (Free, Student, Sponsored, Pay-as-you-go), the panel still works — only the credit headroom changes. The token rates are the same.
 
@@ -73,16 +104,20 @@ Three options, ranked by usefulness for showing advisors:
 
 ---
 
-## Rough cost projections for fuller experiments
+## Cost projections for phases 3-5
 
-If we hold per-cell average ≈ what we measured ($0.57 / 37 calls ≈ $0.015 per call, dominated by gpt-5-codex), here's roughly what the next tiers cost — assuming we **drop gpt-5-codex** to bring per-call cost down to ~$0.003:
+Holding the same 300-cell v2 sample set across all phases (no resampling). Codex removed from the panel.
 
-| Scope | Calls | Estimated USD |
-|-------|------:|--------------:|
-| Current pilot (7 models × 5 cells × 1 run) | 35 | ~$0.50 |
-| Per-model tight rates (6 models × 30 cells × 1 run) | 180 | ~$0.50 |
-| Compile-feedback loop tier (6 models × 30 cells × 1 run × 3 turns avg) | ~540 | ~$1.50 |
-| Full multi-team tier (3 teams × 4 agents × 30 cells × 5 runs) | ~1800 | ~$5.00 |
-| Re-include gpt-5-codex everywhere | — | +5–10× the above |
+Per-cell average for the **6-model panel** (codex excluded): $16.58 / (300 × 3) = **$0.0184 per attempt**.
 
-These are estimates. The real numbers will go in this file after each tier runs.
+Phases 3-5 chain more turns per attempt, so per-attempt cost scales with average chain length. Conservative multipliers below:
+
+| Phase | Strategy | Chain mult. | Est. cost (6 models × 300 × 3) |
+|---|---|---:|---:|
+| Phase 2 (this phase) | Agentic loop, single agent | 1.0× | **$16.58 measured (ex-codex)** |
+| Phase 3 | Agentic loop + compile feedback | 2-3× | ~$33-50 |
+| Phase 4 | Multi-agent (writer + critic) | 3-4× | ~$50-67 |
+| Phase 5 | Multi-team coordination | 4-6× | ~$67-100 |
+| **Remaining phases total** | | | **~$150-217** |
+
+Phase 2 retrospectively cost $89.98 with codex; the same sweep without codex would have cost $16.58. The remaining-phase projection is built on that lower base.

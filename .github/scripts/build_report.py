@@ -142,12 +142,16 @@ def main() -> int:
     headline_path.write_text("\n".join(lines) + "\n")
     print(f"wrote {headline_path}")
 
-    # ---- COSTS.md ----
-    cost_md_path = phase_dir / "COSTS.md"
+    # ---- COSTS_AUTOGEN.md ----
+    # The hand-written narrative lives in COSTS.md; we don't overwrite it.
+    # Just emit the machine-readable per-call cost table beside it so anyone
+    # can diff the latest numbers against the narrative.
+    cost_md_path = phase_dir / "COSTS_AUTOGEN.md"
     cost_text = args.cost_md.read_text()
     cost_md_path.write_text(
-        f"# Phase `{args.phase}` — cost report\n\n"
-        f"Auto-generated from `tools/cost/estimate.py`. Do not hand-edit.\n\n"
+        f"# Phase `{args.phase}` — cost report (autogen)\n\n"
+        f"Auto-generated from `tools/cost/estimate.py`. The narrative version with\n"
+        f"reconciliation, panel decisions, and projections lives in `COSTS.md`.\n\n"
         f"{cost_text}"
     )
     print(f"wrote {cost_md_path}")

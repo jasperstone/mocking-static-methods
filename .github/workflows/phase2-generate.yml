@@ -32,7 +32,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: "phase2-generate-${{ github.event.inputs.target_set }}"
+  # Group by (target_set, models, repos) so independent partial dispatches
+  # (e.g. one per model when re-running cancelled shards) don't serialize.
+  # cancel-in-progress: false means a duplicate dispatch of the SAME shape
+  # will be queued, not stomped.
+  group: "phase2-generate-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}"
   cancel-in-progress: false
 
 env:
@@ -47,7 +51,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       target_sha256: ${{ steps.plan.outputs.target_sha256 }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@v5
 
       - name: Build (model × repo × run_index) matrix
         id: plan
@@ -76,7 +80,9 @@ jobs:
     name: "gen ${{ matrix.model }} ${{ matrix.repo }} run${{ matrix.run_index }}"
     needs: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # No explicit timeout-minutes — use GitHub's 360-min default. Slow models on
+    # the biggest repos (jellyfin = 62 cells, garnet ~50, aspnetcore ~40) need
+    # the full window when paired with codex / nano.
     strategy:
       fail-fast: false
       max-parallel: 20
@@ -89,7 +95,7 @@ jobs:
       FOUNDRY_PANEL_OPENAI_RESPONSES: "gpt-5-codex"
       FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@v5
 
       - name: Verify Foundry secrets present
         shell: bash
@@ -114,7 +120,7 @@ jobs:
           echo "target_sha256 OK: $have"
 
       - name: Setup Python
-        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -221,7 +227,7 @@ jobs:
 
       - name: Upload shard artifact
         if: always()
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@v5
         with:
           name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
           path: phases/${{ env.PHASE }}/results/

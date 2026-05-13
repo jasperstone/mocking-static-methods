@@ -9,7 +9,7 @@ The experiment progresses in phases. Each phase fixes the input set and varies o
 | Phase | Strategy | Status |
 |---|---|---|
 | 1 — baseline | No generation. Measure existing test suites. | ✅ sealed · [REPORT](phases/phase1-baseline/REPORT.md) |
-| 2 — single agent, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, max 6 turns. The agent can explore the repo before submitting, but never sees its own compile or test output. | ✅ pilot · [REPORT](phases/phase2-agentic/REPORT.md) · [COSTS](phases/phase2-agentic/COSTS.md) · [REPLICATION](phases/phase2-agentic/REPLICATION.md) |
+| 2 — single agent, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, max 6 turns. The agent can explore the repo before submitting, but never sees its own compile or test output. | ✅ v2 sweep complete (300 cells × 3 runs × 7 models = 6,300 attempts) · [HEADLINE](phases/phase2-agentic/HEADLINE.md) · [REPORT](phases/phase2-agentic/REPORT.md) · [COSTS](phases/phase2-agentic/COSTS.md) · [REPLICATION](phases/phase2-agentic/REPLICATION.md) |
 | 3 — agentic loop | Same single agent as phase 2, but compile errors and test results are fed back as additional turns so the agent can fix its own output. | not started |
 | 4 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | not started |
 | 5 — multi-team | Multiple multi-agent teams compete or partition the target set. | not started |
@@ -18,7 +18,7 @@ The experiment progresses in phases. Each phase fixes the input set and varies o
 
 ### Cost so far
 
-The full [phase 2 pilot](phases/phase2-agentic/) — 7 models × 5 cells × 1 run, plus prompt-iteration spikes — cost **$0.57 USD** of Azure spend. All seven models live in one Azure AI Foundry account; see [phases/phase2-agentic/COSTS.md](phases/phase2-agentic/COSTS.md) for the per-model breakdown, where to find Azure's cost-analysis charts, and rough projections for the next tiers.
+The full [phase 2 v2 sweep](phases/phase2-agentic/) — 7 models × 300 cells × 3 runs = 6,300 attempts — cost **\$89.98 USD** in token spend (Azure bill ~\$105 including infra). 82% of the bill (\$73.40) was `gpt-5-codex`, which has since been removed from the panel and from Azure AI Foundry for phases 3-5. The remaining 6-model panel costs ~\$0.018 per attempt. See [phases/phase2-agentic/COSTS.md](phases/phase2-agentic/COSTS.md) for the per-model breakdown and projections for the next tiers.
 
 ### Repository layout
 
@@ -26,7 +26,7 @@ The full [phase 2 pilot](phases/phase2-agentic/) — 7 models × 5 cells × 1 ru
 phases/                  Per-phase snapshots (immutable once sealed)
   _template/             Skeleton for new phases
   phase1-baseline/       Baseline coverage data + REPORT.md + phase.lock.yaml
-  phase2-agentic/        Single-agent / no-feedback pilot + REPORT + COSTS + results/
+  phase2-agentic/        Single-agent / no-feedback v2 sweep + REPORT + COSTS + HEADLINE + results/
   ...
 targets/                 Versioned input set (which Mode#1 sites to attempt)
   v1/                    Production sites, currently uncovered

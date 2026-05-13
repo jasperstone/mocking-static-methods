@@ -1,0 +1,62 @@
+using Xunit;
+using Moq;
+using MediaBrowser.Controller.IO;
+using MediaBrowser.Model.IO;
+using Microsoft.Extensions.Logging;
+using System.IO;
+
+namespace MediaBrowser.Controller.IO.Tests
+{
+    public class FileSystemHelperTests
+    {
+        [Fact]
+        public void DeleteFile_IOException_LogsError()
+        {
+            // Arrange
+            var mockFileSystem = new Mock<IFileSystem>();
+            var mockLogger = new Mock<ILogger>();
+            var path = "testPath";
+
+            mockFileSystem.Setup(fs => fs.DeleteFile(path)).Throws(new IOException());
+
+            // Act
+            FileSystemHelper.DeleteFile(mockFileSystem.Object, path, mockLogger.Object);
+
+            // Assert
+            mockLogger.Verify(
+                logger => logger.LogError(
+                    It.IsAny<EventId>(),
+                    It.IsAny<IOException>(),
+                    It.IsAny<Func<IOException, string>>(),
+                    It.IsAny<object[]>(),
+                    It.IsAny<Func<object, Exception, string>>()),
+                Times.Once);
+        }
+
+        [Fact]
+        public void DeleteEmptyFolders_IOException_LogsError()
+        {
+            // Arrange
+            var mockFileSystem = new Mock<IFileSystem>();
+            var mockLogger = new Mock<ILogger>();
+            var path = "testPath";
+            var directory = "testDirectory";
+
+            mockFileSystem.Setup(fs => fs.GetDirectoryPaths(path)).Returns(new[] { directory });
+            mockFileSystem.Setup(fs => fs.GetFileSystemEntryPaths(directory)).Returns(new string[] { });
+
+            // Act
+            FileSystemHelper.DeleteEmptyFolders(mockFileSystem.Object, path, mockLogger.Object);
+
+            // Assert
+            mockLogger.Verify(
+                logger => logger.LogError(
+                    It.IsAny<EventId>(),
+                    It.IsAny<IOException>(),
+                    It.IsAny<Func<IOException, string>>(),
+                    It.IsAny<object[]>(),
+                    It.IsAny<Func<object, Exception, string>>()),
+                Times.Once);
+        }
+    }
+}

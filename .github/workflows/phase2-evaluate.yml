@@ -48,7 +48,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@v5
       - name: Plan
         id: plan
         shell: bash
@@ -81,7 +81,7 @@ jobs:
       max-parallel: 12
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@v5
 
       - uses: ./.github/actions/setup-workspace
 
@@ -103,7 +103,7 @@ jobs:
 
       - name: Download generate artifact for this shard
         if: ${{ inputs.generate_run_id != '' }}
-        uses: actions/download-artifact@cc203385981b70ca67e1cc392babf9cc229d5806 # v4.1.9
+        uses: actions/download-artifact@v5
         with:
           name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
           path: phases/${{ env.PHASE }}/results/
@@ -205,7 +205,7 @@ jobs:
 
       - name: Upload eval artifact
         if: always() && env.no_work != 'true'
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@v5
         with:
           name: eval-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
           path: phases/${{ env.PHASE }}/results/

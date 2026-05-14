@@ -148,7 +148,6 @@ jobs:
       - name: Install Python deps
         shell: bash
         run: |
-          python3 -m pip install --break-system-packages --upgrade pip
           python3 -m pip install --break-system-packages requests pyyaml
 
       - name: Clone target repo at pinned SHA

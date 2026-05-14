@@ -48,7 +48,6 @@ jobs:
       - name: Install Python deps
         shell: bash
         run: |
-          python3 -m pip install --upgrade pip
           python3 -m pip install pyyaml
 
       - name: Download all generate + evaluate artifacts

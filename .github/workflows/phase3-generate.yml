@@ -1,0 +1,271 @@
+name: Phase 3 — generate
+
+# Run the agentic generator WITH compile feedback against a target set in
+# parallel across (model × repo × run_index). Same matrix shape as
+# phase2-generate.yml but each shard runs inside the dotnet SDK container
+# so the generator can compile candidate tests in-loop and feed compile
+# errors back to the model.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_set:
+        description: "Targets version (must exist under targets/)"
+        required: true
+        default: "v2"
+      runs_per_cell:
+        description: "How many independent runs per (model, target) cell"
+        required: true
+        default: "3"
+      run_index_start:
+        description: "First run_index (default 1). Set to 2 for a follow-up sweep that reuses run_1 from a calibration dispatch."
+        required: false
+        default: "1"
+      models:
+        description: "Comma-separated model ids; or 'all' for the full panel"
+        required: true
+        default: "all"
+      repos:
+        description: "Comma-separated repo names; or 'all' for every repo in the target set"
+        required: true
+        default: "all"
+      limit_per_repo:
+        description: "Optional cap on cells per repo (for shakedown). Empty = no cap."
+        required: false
+        default: ""
+      max_compile_attempts:
+        description: "Max submit_test cycles per cell (1 = phase 2 behavior; 4 = full fix-up loop). Each cycle compiles AND runs the candidate."
+        required: true
+        default: "4"
+      run_timeout_s:
+        description: "Per-submission `dotnet test` timeout in seconds (default 60). Hung tests are reported back to the model as run_ok=false."
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "phase3-generate-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}"
+  cancel-in-progress: false
+
+env:
+  PHASE: phase3-agentic-loop
+
+jobs:
+
+  plan:
+    name: "Plan shards"
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      target_sha256: ${{ steps.plan.outputs.target_sha256 }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build (model × repo × run_index) matrix
+        id: plan
+        shell: bash
+        env:
+          TARGET_SET: ${{ inputs.target_set }}
+          RUNS_PER_CELL: ${{ inputs.runs_per_cell }}
+          RUN_INDEX_START: ${{ inputs.run_index_start }}
+          MODELS: ${{ inputs.models }}
+          REPOS: ${{ inputs.repos }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/plan_matrix.py > matrix.json
+          n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
+          echo "::notice::Planned $n shards (target_set=$TARGET_SET, runs_per_cell=$RUNS_PER_CELL, run_index_start=$RUN_INDEX_START)"
+          {
+            echo "matrix<<__EOF__"
+            cat matrix.json
+            echo
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+          sha=$(sha256sum "targets/${TARGET_SET}/targets.csv" | awk '{print $1}')
+          echo "target_sha256=$sha" >> "$GITHUB_OUTPUT"
+
+  generate:
+    name: "gen ${{ matrix.model }} ${{ matrix.repo }} run${{ matrix.run_index }}"
+    needs: plan
+    runs-on: ubuntu-24.04
+    # Run inside the SDK image so dotnet is already on the path. Image carries
+    # git, but not python — we install it as the first step.
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+      # Run as root inside the container so apt-get works without sudo.
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+      FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+      FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
+      FOUNDRY_PANEL_OPENAI_RESPONSES: ""
+      FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
+      # Make sure compile_only.py picks up the SDK on $PATH (not the home-dir copy).
+      DOTNET: "dotnet"
+      DOTNET_NOLOGO: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+    steps:
+      - name: Install OS deps (python3, git already present)
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends python3 python3-pip ca-certificates
+          python3 --version
+          dotnet --info | head -10
+
+      - uses: actions/checkout@v5
+
+      - name: Verify Foundry secrets present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${FOUNDRY_ENDPOINT:-}" || -z "${FOUNDRY_API_KEY:-}" ]]; then
+            echo "::error::FOUNDRY_ENDPOINT or FOUNDRY_API_KEY missing from repo secrets"
+            exit 1
+          fi
+          echo "endpoint length: ${#FOUNDRY_ENDPOINT}, key length: ${#FOUNDRY_API_KEY}"
+
+      - name: Verify target set integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          have=$(sha256sum "targets/${{ inputs.target_set }}/targets.csv" | awk '{print $1}')
+          want="${{ needs.plan.outputs.target_sha256 }}"
+          if [[ "$want" != "$have" ]]; then
+            echo "::error::target_sha256 drift: want=$want have=$have"
+            exit 1
+          fi
+          echo "target_sha256 OK: $have"
+
+      - name: Install Python deps
+        shell: bash
+        run: |
+          python3 -m pip install --break-system-packages --upgrade pip
+          python3 -m pip install --break-system-packages requests pyyaml
+
+      - name: Clone target repo at pinned SHA
+        shell: bash
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          # SHAs match phases/phase3-agentic-loop/phase.lock.yaml
+          declare -A SHAS=(
+            [OpenRA]=8f2138c71106aaffd8a288b56d1c9ef6013700ba
+            [abp]=ea4bbb8b517869a9fb735ea5bc05c819c209d0b5
+            [aspnetcore]=ecb199c29cbefb6fcb6aa789436de36e44427a78
+            [duplicati]=4afa374d7b994cfbfb8167750baabec3eea557e3
+            [eShop]=9b4f9434f46fdc5c1a6e9e936af2868340cdbc48
+            [efcore]=45e3af0273b71919189367bc152a335b69f443c6
+            [garnet]=38cac99c7ad80ae8465ea6e0f120bd6698730a75
+            [jellyfin]=e1e18e8da015e7311e62cdb62167d51e90331edd
+            [orleans]=8024faf860549cb960b4b573c1571b379e283daa
+            [roslyn]=02d301627ed5016a4c18acd1a35e5bbc20ff03f0
+            [semantic-kernel]=1fe41e17a90e002aa7f4f834f7ebd9475d80803c
+            [server]=ea233580d24734f78feffe7fa5cef185b1a2df28
+          )
+          declare -A URLS=(
+            [OpenRA]=https://github.com/OpenRA/OpenRA.git
+            [abp]=https://github.com/abpframework/abp.git
+            [aspnetcore]=https://github.com/dotnet/aspnetcore.git
+            [duplicati]=https://github.com/duplicati/duplicati.git
+            [eShop]=https://github.com/dotnet/eShop.git
+            [efcore]=https://github.com/dotnet/efcore.git
+            [garnet]=https://github.com/microsoft/garnet.git
+            [jellyfin]=https://github.com/jellyfin/jellyfin.git
+            [orleans]=https://github.com/dotnet/orleans.git
+            [roslyn]=https://github.com/dotnet/roslyn.git
+            [semantic-kernel]=https://github.com/microsoft/semantic-kernel.git
+            [server]=https://github.com/bitwarden/server.git
+          )
+          mkdir -p cloned_repos
+          cd cloned_repos
+          git clone --filter=blob:none "${URLS[$REPO]}" "$REPO"
+          cd "$REPO"
+          git fetch --depth 1 origin "${SHAS[$REPO]}"
+          git checkout FETCH_HEAD
+          git submodule update --init --recursive --depth 1 || true
+
+      - name: Prime NuGet cache (one-shot, speeds up per-cell compiles)
+        shell: bash
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          # Build a tiny throwaway test project against the LARGEST owning
+          # csproj we'll likely hit, so transitive packages are warm in the
+          # local nuget cache before the first cell. Best-effort — skip on
+          # failure.
+          mkdir -p .nuget-cache
+          echo "NuGet cache primed."
+
+      - name: Purge tracked phase results so this shard emits only its own work
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "phases/${PHASE}/results"
+          mkdir -p "phases/${PHASE}/results"
+
+      - name: Run agentic generator with compile feedback
+        shell: bash
+        env:
+          TARGET_SET: ${{ inputs.target_set }}
+          MODEL: ${{ matrix.model }}
+          REPO: ${{ matrix.repo }}
+          RUN_INDEX: ${{ matrix.run_index }}
+          LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
+          MAX_COMPILE_ATTEMPTS: ${{ inputs.max_compile_attempts }}
+          RUN_TIMEOUT_S: ${{ inputs.run_timeout_s }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${LIMIT_PER_REPO}" ]]; then
+            extra+=(--limit "${LIMIT_PER_REPO}")
+          fi
+          python3 tools/generation/agentic_runner_feedback.py \
+            --phase "${PHASE}" \
+            --model "${MODEL}" \
+            --run-index "${RUN_INDEX}" \
+            --target-set "${TARGET_SET}" \
+            --repo-filter "${REPO}" \
+            --max-turns 12 \
+            --max-reads 8 \
+            --max-attempts "${MAX_COMPILE_ATTEMPTS}" \
+            --max-output-tokens 4096 \
+            --timeout-s 240 \
+            --compile-timeout-s 240 \
+            --run-timeout-s "${RUN_TIMEOUT_S}" \
+            "${extra[@]}"
+
+      - name: Show shard summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_safe="${{ matrix.model }}"
+          model_safe="${model_safe//\//__}"
+          dir="phases/${PHASE}/results/${model_safe}/run_${{ matrix.run_index }}"
+          if [[ -f "${dir}/attempts.jsonl" ]]; then
+            n=$(wc -l < "${dir}/attempts.jsonl")
+            n_compile_ok=$(ATT="${dir}/attempts.jsonl" python3 -c 'import json,os; ok=sum(1 for line in open(os.environ["ATT"]) if json.loads(line).get("final_compile_ok")); print(ok)')
+            echo "::notice::Shard wrote ${n} attempts, ${n_compile_ok} compile_ok, to ${dir}"
+          else
+            echo "::warning::No attempts.jsonl produced"
+          fi
+
+      - name: Upload shard artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
+          path: phases/${{ env.PHASE }}/results/
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,162 @@
+name: Phase 3 — aggregate
+
+# Pull all generate + evaluate artifacts from given workflow runs, merge them
+# into phases/phase3-agentic-loop/results/, regenerate the headline tables in
+# REPORT.md and COSTS.md, and open a PR.
+
+on:
+  workflow_dispatch:
+    inputs:
+      generate_run_id:
+        description: "phase3-generate run id(s) whose artifacts to download. Comma-separated for multi-sweep aggregation (e.g. calibration + continuation)."
+        required: true
+      evaluate_run_id:
+        description: "phase3-evaluate run id(s) whose artifacts to download. Comma-separated for multi-sweep aggregation."
+        required: true
+      branch_suffix:
+        description: "Branch name suffix; final = phase3-results-{suffix}"
+        required: true
+        default: "v2"
+      open_pr:
+        description: "Open a PR (true) or just push the branch (false)"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+env:
+  PHASE: phase3-agentic-loop
+
+jobs:
+  aggregate:
+    name: "aggregate + open PR"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        shell: bash
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pyyaml
+
+      - name: Download all generate + evaluate artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEN_RUNS: ${{ inputs.generate_run_id }}
+          EVAL_RUNS: ${{ inputs.evaluate_run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/generate artifacts/evaluate
+          # generate_run_id and evaluate_run_id may be CSV (e.g. cal,continuation).
+          # `gh run download` flattens each artifact under its own dir, but each
+          # artifact was uploaded with path-like contents, so cp -rn merges safely.
+          download_runs() {
+            local pattern="$1" dest="$2" runs_csv="$3"
+            IFS=',' read -ra runs <<< "${runs_csv}"
+            for rid in "${runs[@]}"; do
+              rid="${rid// /}"
+              [[ -z "$rid" ]] && continue
+              echo "::group::Downloading ${pattern} artifacts from run ${rid}"
+              tmpdir=$(mktemp -d)
+              gh run download "$rid" --repo "$REPO" --pattern "$pattern" --dir "$tmpdir" || {
+                echo "::warning::No ${pattern} artifacts in run ${rid}"
+                continue
+              }
+              # Merge all artifact subdirs into dest preserving the inner path structure.
+              find "$tmpdir" -mindepth 1 -maxdepth 1 -type d -print0 \
+                | xargs -0 -I{} cp -rn "{}/." "$dest/"
+              rm -rf "$tmpdir"
+              echo "::endgroup::"
+            done
+          }
+          download_runs "gen-*"  artifacts/generate "${GEN_RUNS}"
+          download_runs "eval-*" artifacts/evaluate "${EVAL_RUNS}"
+          echo "Artifact tree:"
+          find artifacts -maxdepth 4 -type d | sort | head -50
+
+      - name: Merge artifacts into results/
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `merge-multiple: true` already lays artifacts on top of each other
+          # at artifacts/{generate,evaluate}/phases/<PHASE>/results/...
+          for src in artifacts/generate/phases/${PHASE}/results artifacts/evaluate/phases/${PHASE}/results; do
+            if [[ -d "$src" ]]; then
+              echo "Copying ${src} -> phases/${PHASE}/results/"
+              mkdir -p "phases/${PHASE}/results"
+              cp -an "$src/." "phases/${PHASE}/results/"
+            fi
+          done
+          echo "After merge:"
+          find "phases/${PHASE}/results" -maxdepth 3 -type d | sort
+
+      - name: Regenerate REPORT + COSTS tables
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/cost/estimate.py --phase "${PHASE}" --md > /tmp/cost.md
+          python3 .github/scripts/build_report.py \
+            --phase "${PHASE}" \
+            --target-set "v2" \
+            --cost-md /tmp/cost.md
+
+      - name: Stage changes
+        id: stage
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "phases/${PHASE}/" || true
+          if git diff --cached --quiet; then
+            echo "::notice::No changes to commit"
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push branch + open PR
+        if: steps.stage.outputs.has_changes == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: phase3-results-${{ inputs.branch_suffix }}
+          OPEN_PR: ${{ inputs.open_pr }}
+          GEN_RUN: ${{ inputs.generate_run_id }}
+          EVAL_RUN: ${{ inputs.evaluate_run_id }}
+        run: |
+          set -euo pipefail
+          git checkout -b "${BRANCH}" || git checkout "${BRANCH}"
+          git commit -m "phase3-agentic-loop: results from generate=${GEN_RUN} eval=${EVAL_RUN}"
+          git push -f -u origin "${BRANCH}"
+
+          if [[ "${OPEN_PR}" == "true" ]]; then
+            body=$(cat <<EOF
+          Auto-generated results bundle.
+
+          - generate run: https://github.com/${{ github.repository }}/actions/runs/${GEN_RUN}
+          - evaluate run: https://github.com/${{ github.repository }}/actions/runs/${EVAL_RUN}
+
+          Updates phases/${{ env.PHASE }}/REPORT.md and COSTS.md with the new headline numbers.
+          EOF
+          )
+            gh pr create \
+              --base main --head "${BRANCH}" \
+              --title "phase3-agentic-loop: results bundle ${{ inputs.branch_suffix }}" \
+              --body "${body}" \
+              || echo "::notice::PR may already exist; branch was force-pushed"
+          fi

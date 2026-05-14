@@ -1,0 +1,218 @@
+name: Phase 3 — evaluate
+
+# Compile + test + coverage every test.cs from a generate run.
+# Triggered manually after a successful phase3-generate run, or on push to a
+# branch carrying generation results. Builds inside the cloned repo so the
+# repo's nuget.config and Directory.Build.props apply.
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_set:
+        description: "Targets version (must match generate)"
+        required: true
+        default: "v2"
+      runs_per_cell:
+        description: "How many runs to evaluate per (model, repo)"
+        required: true
+        default: "3"
+      run_index_start:
+        description: "First run_index (default 1). Match the value used in phase3-generate to evaluate the right shards."
+        required: false
+        default: "1"
+      models:
+        description: "Comma-separated model ids; or 'all' for the full panel"
+        required: true
+        default: "all"
+      repos:
+        description: "Comma-separated repo names; or 'all' for every repo in the target set"
+        required: true
+        default: "all"
+      generate_run_id:
+        description: "If set, download artifacts from this phase3-generate run id (otherwise expects results/ already on the branch)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: "phase3-evaluate-${{ github.event.inputs.target_set }}"
+  cancel-in-progress: false
+
+env:
+  PHASE: phase3-agentic-loop
+
+jobs:
+
+  plan:
+    name: "Plan eval shards"
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Plan
+        id: plan
+        shell: bash
+        env:
+          TARGET_SET: ${{ inputs.target_set }}
+          RUNS_PER_CELL: ${{ inputs.runs_per_cell }}
+          RUN_INDEX_START: ${{ inputs.run_index_start }}
+          MODELS: ${{ inputs.models }}
+          REPOS: ${{ inputs.repos }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/plan_matrix.py > matrix.json
+          n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
+          echo "::notice::Planned $n eval shards (run_index_start=$RUN_INDEX_START, runs_per_cell=$RUNS_PER_CELL)"
+          {
+            echo "matrix<<__EOF__"
+            cat matrix.json
+            echo
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+  evaluate:
+    name: "eval ${{ matrix.model }} ${{ matrix.repo }} run${{ matrix.run_index }}"
+    needs: plan
+    runs-on: ubuntu-24.04
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/setup-workspace
+
+      - name: Install Python
+        shell: bash
+        run: |
+          apt-get update -qq
+          apt-get install -y --no-install-recommends python3 python3-pip >/dev/null
+
+      - name: Purge tracked pilot results so this shard only emits its own work
+        if: ${{ inputs.generate_run_id != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only purge when we're hydrating from an artifact. If no generate_run_id
+          # was supplied, we're evaluating data that's already committed on the branch.
+          rm -rf "phases/${PHASE}/results"
+          mkdir -p "phases/${PHASE}/results"
+
+      - name: Download generate artifact for this shard
+        if: ${{ inputs.generate_run_id != '' }}
+        uses: actions/download-artifact@v5
+        with:
+          name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
+          path: phases/${{ env.PHASE }}/results/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.generate_run_id }}
+
+      - name: Verify generated tests exist for this shard
+        shell: bash
+        env:
+          MODEL: ${{ matrix.model }}
+          REPO: ${{ matrix.repo }}
+          RUN_INDEX: ${{ matrix.run_index }}
+        run: |
+          set -euo pipefail
+          model_safe="${MODEL//\//__}"
+          dir="phases/${PHASE}/results/${model_safe}/run_${RUN_INDEX}/generated_tests/${REPO}"
+          if [[ ! -d "$dir" ]]; then
+            echo "::warning::No generated tests for ${MODEL} / ${REPO} / run ${RUN_INDEX} — nothing to evaluate"
+            echo "no_work=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          n=$(find "$dir" -name 'test.cs' | wc -l)
+          echo "::notice::Found ${n} test.cs files for this shard"
+          echo "no_work=false" >> "$GITHUB_ENV"
+
+      - name: Clone target repo at pinned SHA
+        if: env.no_work != 'true'
+        shell: bash
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          declare -A SHAS=(
+            [OpenRA]=8f2138c71106aaffd8a288b56d1c9ef6013700ba
+            [abp]=ea4bbb8b517869a9fb735ea5bc05c819c209d0b5
+            [aspnetcore]=ecb199c29cbefb6fcb6aa789436de36e44427a78
+            [duplicati]=4afa374d7b994cfbfb8167750baabec3eea557e3
+            [eShop]=9b4f9434f46fdc5c1a6e9e936af2868340cdbc48
+            [efcore]=45e3af0273b71919189367bc152a335b69f443c6
+            [garnet]=38cac99c7ad80ae8465ea6e0f120bd6698730a75
+            [jellyfin]=e1e18e8da015e7311e62cdb62167d51e90331edd
+            [orleans]=8024faf860549cb960b4b573c1571b379e283daa
+            [roslyn]=02d301627ed5016a4c18acd1a35e5bbc20ff03f0
+            [semantic-kernel]=1fe41e17a90e002aa7f4f834f7ebd9475d80803c
+            [server]=ea233580d24734f78feffe7fa5cef185b1a2df28
+          )
+          declare -A URLS=(
+            [OpenRA]=https://github.com/OpenRA/OpenRA.git
+            [abp]=https://github.com/abpframework/abp.git
+            [aspnetcore]=https://github.com/dotnet/aspnetcore.git
+            [duplicati]=https://github.com/duplicati/duplicati.git
+            [eShop]=https://github.com/dotnet/eShop.git
+            [efcore]=https://github.com/dotnet/efcore.git
+            [garnet]=https://github.com/microsoft/garnet.git
+            [jellyfin]=https://github.com/jellyfin/jellyfin.git
+            [orleans]=https://github.com/dotnet/orleans.git
+            [roslyn]=https://github.com/dotnet/roslyn.git
+            [semantic-kernel]=https://github.com/microsoft/semantic-kernel.git
+            [server]=https://github.com/bitwarden/server.git
+          )
+          mkdir -p cloned_repos
+          cd cloned_repos
+          git clone --filter=blob:none "${URLS[$REPO]}" "$REPO"
+          cd "$REPO"
+          git fetch --depth 1 origin "${SHAS[$REPO]}"
+          git checkout FETCH_HEAD
+          git submodule update --init --recursive --depth 1 || true
+
+      - uses: ./.github/actions/restore-nuget-cache
+        if: env.no_work != 'true'
+        with:
+          repo-name: ${{ matrix.repo }}
+          sha-prefix: eval-shared-${{ matrix.repo }}
+
+      - name: Run evaluator
+        if: env.no_work != 'true'
+        shell: bash
+        env:
+          MODEL: ${{ matrix.model }}
+          REPO: ${{ matrix.repo }}
+          RUN_INDEX: ${{ matrix.run_index }}
+          TARGET_SET: ${{ inputs.target_set }}
+          # Panel routing not strictly needed by the evaluator (it only compiles + runs
+          # tests), but kept for parity in case the harness ever calls back to Foundry.
+          FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
+          FOUNDRY_PANEL_OPENAI_RESPONSES: "gpt-5-codex"
+          FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
+        run: |
+          set -euo pipefail
+          model_safe="${MODEL//\//__}"
+          python3 tools/evaluation/evaluate.py \
+            --phase "${PHASE}" \
+            --model "${model_safe}" \
+            --run-index "${RUN_INDEX}" \
+            --target-set "${TARGET_SET}" \
+            --repo-filter "${REPO}" \
+            --build-timeout 240 \
+            --test-timeout 180
+
+      - name: Upload eval artifact
+        if: always() && env.no_work != 'true'
+        uses: actions/upload-artifact@v5
+        with:
+          name: eval-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
+          path: phases/${{ env.PHASE }}/results/
+          if-no-files-found: warn
+          retention-days: 30

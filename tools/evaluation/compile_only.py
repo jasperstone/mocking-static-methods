@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Compile-only check for a candidate generated test file.
+"""Candidate-test sandbox checks for the phase-3 agentic loop.
 
-Factored from tools/evaluation/evaluate.py for use inside the agentic loop:
-phase 3 needs to verify whether a model's submission compiles before deciding
-whether to ask for a fix-up. We deliberately stop after `dotnet build` — we
-do NOT run tests here. The full compile + run + coverage evaluator stays in
-evaluate.py and runs in its own workflow stage against the FINAL submission.
+Two public entry points:
 
-Public entry point:
+    compile_check(test_cs, repo_dir, target_file, timeout_s=240)
+        -> CompileResult                          # build only
 
-    compile_check(test_cs, repo_dir, target_file, timeout_s=240) -> CompileResult
+    compile_and_run_check(test_cs, repo_dir, target_file,
+                          build_timeout_s=240, run_timeout_s=60)
+        -> CompileRunResult                       # build + dotnet test
 
-Returns a small dataclass with .ok, .errors[], .build_ms, .stdout_tail.
-Re-entrant and side-effect-clean: every call creates+removes its own sandbox
-under {repo_dir}/.squad-eval/ (same convention as evaluate.py so parent
-Directory.Build.props / nuget.config apply).
+Both build a throwaway xUnit project under {repo_dir}/.squad-eval/ that
+ProjectReferences the production .csproj nearest to `target_file`, drop the
+candidate in as GeneratedTest.cs, run dotnet, and clean up. The full
+compile + run + coverage evaluator lives in evaluate.py and runs offline on
+the final submission; what's here is the in-loop fast path the model sees.
 """
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -193,3 +194,216 @@ def format_errors_for_model(errors: list[dict], max_errors: int = 6) -> str:
     if len(errors) > max_errors:
         lines.append(f"... and {len(errors) - max_errors} more errors")
     return "\n".join(lines)
+
+
+# ============================================================================
+# Compile + run check (phase 3 option B): build, then `dotnet test`, parse TRX.
+# ============================================================================
+
+_TRX_NS = {"vs": "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"}
+
+
+def _parse_trx_failures(trx_path: Path, max_failures: int = 5) -> tuple[dict, list[dict]]:
+    """Return (counters, failure_details) from a .trx file.
+
+    counters: {tests_total, tests_passed, tests_failed, tests_skipped}
+    failure_details: list of {test_name, message, stack_tail} for the first
+    `max_failures` failing test results, with messages trimmed to keep the
+    feedback block small enough for the model.
+    """
+    counters = {"tests_total": 0, "tests_passed": 0, "tests_failed": 0, "tests_skipped": 0}
+    failures: list[dict] = []
+    if not trx_path.exists():
+        return counters, failures
+    try:
+        root = ET.parse(trx_path).getroot()
+    except ET.ParseError as e:
+        counters["trx_error"] = str(e)
+        return counters, failures
+
+    c = root.find(".//vs:Counters", _TRX_NS)
+    if c is not None:
+        counters["tests_total"] = int(c.attrib.get("total", 0))
+        counters["tests_passed"] = int(c.attrib.get("passed", 0))
+        counters["tests_failed"] = int(c.attrib.get("failed", 0))
+        counters["tests_skipped"] = int(c.attrib.get("notExecuted", 0))
+
+    for ut in root.findall(".//vs:UnitTestResult", _TRX_NS):
+        outcome = (ut.attrib.get("outcome") or "").lower()
+        if outcome in ("passed", "notexecuted", "skipped"):
+            continue
+        test_name = ut.attrib.get("testName") or "(unknown)"
+        msg_el = ut.find(".//vs:ErrorInfo/vs:Message", _TRX_NS)
+        stack_el = ut.find(".//vs:ErrorInfo/vs:StackTrace", _TRX_NS)
+        message = (msg_el.text or "").strip() if msg_el is not None else ""
+        stack = (stack_el.text or "").strip() if stack_el is not None else ""
+        # Keep only the first 2-3 stack lines (cheap repro for the model).
+        stack_lines = [ln for ln in stack.splitlines() if ln.strip()][:3]
+        failures.append({
+            "test_name": test_name[:200],
+            "message": message[:500],
+            "stack_tail": "\n".join(stack_lines)[:600],
+        })
+        if len(failures) >= max_failures:
+            break
+    return counters, failures
+
+
+@dataclass
+class CompileRunResult:
+    compile_ok: bool = False
+    run_attempted: bool = False
+    run_ok: bool = False               # True iff compiled AND dotnet test exit==0 AND tests_total > 0
+    errors: list[dict] = field(default_factory=list)            # compile errors
+    test_failures: list[dict] = field(default_factory=list)     # runtime/assertion failures
+    tests_total: int = 0
+    tests_passed: int = 0
+    tests_failed: int = 0
+    tests_skipped: int = 0
+    build_ms: int = 0
+    run_ms: int = 0
+    stdout_tail: str = ""
+    error: str | None = None
+    prod_csproj: str | None = None
+    timeout: str | None = None         # "build" | "test" | None
+
+
+def compile_and_run_check(
+    test_cs_text: str,
+    repo_dir: Path,
+    target_file: str,
+    build_timeout_s: int = 240,
+    run_timeout_s: int = 60,
+) -> CompileRunResult:
+    """Compile, then run, the candidate test against the owning csproj.
+
+    Returns a CompileRunResult with both phases populated. If build fails the
+    test phase is skipped. If build succeeds and `dotnet test` runs, we parse
+    the TRX so the caller can feed failure messages back to the model. No
+    coverage collection here — that stays in evaluate.py for offline scoring.
+    """
+    rec = CompileRunResult()
+    repo_dir = repo_dir.resolve()
+    csproj_path = find_owning_csproj(repo_dir, target_file)
+    if csproj_path is None:
+        rec.error = f"no owning csproj found under {repo_dir}/{target_file}"
+        return rec
+    rec.prod_csproj = str(csproj_path.relative_to(repo_dir))
+
+    sandbox_root = repo_dir / ".squad-eval"
+    sandbox_root.mkdir(exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="compile_run_", dir=sandbox_root))
+    try:
+        (work / "TestProj.csproj").write_text(
+            CSPROJ_TEMPLATE.format(
+                nuget_cache=NUGET_CACHE,
+                prod_csproj=str(csproj_path),
+            )
+        )
+        (work / "GeneratedTest.cs").write_text(test_cs_text, encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DOTNET_NOLOGO"] = "1"
+        env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
+        env["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
+        env["NUGET_PACKAGES"] = NUGET_CACHE
+
+        # --- Build ---
+        t0 = time.monotonic()
+        try:
+            br = subprocess.run(
+                [DOTNET, "build", "-c", "Debug", "-v", "minimal", "--nologo",
+                 "/p:TreatWarningsAsErrors=false",
+                 "/p:GenerateDocumentationFile=false"],
+                cwd=work, capture_output=True, text=True,
+                timeout=build_timeout_s, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            rec.build_ms = int((time.monotonic() - t0) * 1000)
+            rec.timeout = "build"
+            rec.error = f"build timeout after {build_timeout_s}s"
+            return rec
+        rec.build_ms = int((time.monotonic() - t0) * 1000)
+        rec.compile_ok = (br.returncode == 0)
+        build_out = (br.stdout or "") + (br.stderr or "")
+        if not rec.compile_ok:
+            rec.errors = first_compile_errors(build_out)
+            rec.stdout_tail = build_out[-2000:]
+            return rec
+
+        # --- Test ---
+        rec.run_attempted = True
+        results_dir = work / "TestResults"
+        t0 = time.monotonic()
+        try:
+            tr = subprocess.run(
+                [DOTNET, "test", "--no-build", "-v", "minimal", "--nologo",
+                 "--logger", "trx;LogFileName=results.trx",
+                 "--results-directory", str(results_dir)],
+                cwd=work, capture_output=True, text=True,
+                timeout=run_timeout_s, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            rec.run_ms = int((time.monotonic() - t0) * 1000)
+            rec.timeout = "test"
+            rec.error = f"test run timeout after {run_timeout_s}s"
+            rec.stdout_tail = "<test run timed out>"
+            return rec
+        rec.run_ms = int((time.monotonic() - t0) * 1000)
+        test_out = (tr.stdout or "") + (tr.stderr or "")
+        rec.stdout_tail = test_out[-2000:]
+
+        trx_files = sorted(results_dir.rglob("results.trx"))
+        if trx_files:
+            counters, failures = _parse_trx_failures(trx_files[0])
+            rec.tests_total = counters.get("tests_total", 0)
+            rec.tests_passed = counters.get("tests_passed", 0)
+            rec.tests_failed = counters.get("tests_failed", 0)
+            rec.tests_skipped = counters.get("tests_skipped", 0)
+            rec.test_failures = failures
+
+        # run_ok = compiled, dotnet test exit 0, and at least one test executed.
+        rec.run_ok = (
+            tr.returncode == 0
+            and rec.tests_total > 0
+            and rec.tests_failed == 0
+        )
+        return rec
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def format_test_failures_for_model(
+    failures: list[dict],
+    counters: dict | None = None,
+    max_failures: int = 3,
+) -> str:
+    """Render test failures + counters as a compact block for the agent."""
+    parts: list[str] = []
+    if counters is not None:
+        parts.append(
+            f"Test counters: total={counters.get('tests_total', 0)} "
+            f"passed={counters.get('tests_passed', 0)} "
+            f"failed={counters.get('tests_failed', 0)} "
+            f"skipped={counters.get('tests_skipped', 0)}"
+        )
+    if not failures:
+        if counters and counters.get("tests_total", 0) == 0:
+            parts.append("No [Fact] methods executed. Make sure your test class has at least one [Fact] method.")
+        return "\n".join(parts) if parts else "(no test failures parsed)"
+
+    for f in failures[:max_failures]:
+        block = [f"FAILED: {f.get('test_name', '(unknown)')}"]
+        msg = f.get("message", "").strip()
+        if msg:
+            # Trim multi-line messages to first 3 lines.
+            msg_lines = [ln for ln in msg.splitlines() if ln.strip()][:3]
+            block.append("  Message: " + " | ".join(msg_lines))
+        stack = f.get("stack_tail", "").strip()
+        if stack:
+            for ln in stack.splitlines()[:3]:
+                block.append("  at " + ln.strip())
+        parts.append("\n".join(block))
+    if len(failures) > max_failures:
+        parts.append(f"... and {len(failures) - max_failures} more failed tests")
+    return "\n".join(parts)

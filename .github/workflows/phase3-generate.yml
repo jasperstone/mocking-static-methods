@@ -34,9 +34,13 @@ on:
         required: false
         default: ""
       max_compile_attempts:
-        description: "Max submit_test cycles per cell (1 = phase 2 behavior; 4 = full fix-up loop)"
+        description: "Max submit_test cycles per cell (1 = phase 2 behavior; 4 = full fix-up loop). Each cycle compiles AND runs the candidate."
         required: true
         default: "4"
+      run_timeout_s:
+        description: "Per-submission `dotnet test` timeout in seconds (default 60). Hung tests are reported back to the model as run_ok=false."
+        required: false
+        default: "60"
 
 permissions:
   contents: read
@@ -219,6 +223,7 @@ jobs:
           RUN_INDEX: ${{ matrix.run_index }}
           LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
           MAX_COMPILE_ATTEMPTS: ${{ inputs.max_compile_attempts }}
+          RUN_TIMEOUT_S: ${{ inputs.run_timeout_s }}
         run: |
           set -euo pipefail
           extra=()
@@ -233,10 +238,11 @@ jobs:
             --repo-filter "${REPO}" \
             --max-turns 12 \
             --max-reads 8 \
-            --max-compile-attempts "${MAX_COMPILE_ATTEMPTS}" \
+            --max-attempts "${MAX_COMPILE_ATTEMPTS}" \
             --max-output-tokens 4096 \
             --timeout-s 240 \
             --compile-timeout-s 240 \
+            --run-timeout-s "${RUN_TIMEOUT_S}" \
             "${extra[@]}"
 
       - name: Show shard summary

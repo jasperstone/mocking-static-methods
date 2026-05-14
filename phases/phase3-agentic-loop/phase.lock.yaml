@@ -2,15 +2,17 @@
 
 phase:
   id: phase3-agentic-loop
-  title: "Agentic loop with in-loop compile feedback (fix-up iterations)"
+  title: "Agentic loop with in-loop compile + run feedback (fix-up iterations)"
   strategy: |
     Same text-based tool protocol as phase 2 (read_file / list_dir /
     submit_test) but with one structural change: after each submit_test,
-    the runner compiles the candidate against the production project and,
-    if compilation fails, feeds the first compile errors back to the model
-    as a synthetic tool result. The model may then read more files and
-    submit a revised version. Budget: max 12 turns, max 8 reads, max 4
-    submit_test cycles. Same 6-model panel as phase 2 v2 sweep (no codex).
+    the runner compiles the candidate against the production project AND
+    runs `dotnet test` on it. If compilation fails, the first compile
+    errors are fed back. If compilation succeeds but tests fail or throw,
+    the test failures (message + stack tail) are fed back. The model may
+    then read more files and submit a revised version. Budget: max 12
+    turns, max 8 reads, max 4 submit_test cycles. Same 6-model panel as
+    phase 2 v2 sweep (no codex).
   start_date: "2026-05-13"
   seal_date: ""
   git_tag: ""
@@ -74,12 +76,13 @@ generation:
 
   agent_loop_max_iterations: 12
   agent_max_reads: 8
-  agent_max_compile_attempts: 4
+  agent_max_attempts: 4
+  agent_run_timeout_s: 60                # per-submission `dotnet test` cap
   agent_tools_allowed:
     - read_file
     - list_dir
     - submit_test
-  agent_feedback_kind: "compile_only"   # post-submit dotnet build, errors fed back
+  agent_feedback_kind: "compile_and_run" # post-submit dotnet build + dotnet test, failures fed back
 
 ci_runs:
   coverage_orchestrator_run_id: ""

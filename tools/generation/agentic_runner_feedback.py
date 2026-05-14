@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Agentic-loop runner WITH compile feedback (phase 3).
+"""Agentic-loop runner WITH compile + run feedback (phase 3, option B).
 
 Same I/O shape as tools/generation/agentic_runner.py so downstream tooling
-(evaluate.py, aggregator, build_report.py) keeps working. New per-attempt
-fields capture the compile-feedback loop forensics:
+(evaluate.py, aggregator, build_report.py) keeps working. Each cell records
+the full submission-feedback loop forensics:
 
-    compile_attempts_n       — how many submit→compile cycles fired
+    submission_attempts_n    — how many submit→check cycles fired
     final_compile_ok         — did the last submission compile?
-    compile_iterations       — list of {turn, ok, build_ms, n_errors, code_sha}
+    final_run_ok             — did the last submission compile AND pass tests?
+    submission_iterations    — list of per-attempt records:
+        {attempt_index, turn_index, compile_ok, run_ok,
+         tests_total/passed/failed/skipped,
+         build_ms, run_ms, n_compile_errors, first_compile_errors[:5],
+         n_test_failures, first_test_failures[:3], code_sha256, timeout}
 
 Output layout (unchanged from phase 2 agentic):
 
@@ -83,14 +88,16 @@ def main() -> int:
     ap.add_argument("--target-set", required=True)
     ap.add_argument("--max-turns", type=int, default=12)
     ap.add_argument("--max-reads", type=int, default=8)
-    ap.add_argument("--max-compile-attempts", type=int, default=4,
-                    help="how many submit_test → compile cycles per cell (1 = phase 2 behavior)")
+    ap.add_argument("--max-attempts", type=int, default=4,
+                    help="how many submit_test → check cycles per cell (1 = phase 2 behavior)")
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--top-p", type=float, default=1.0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-output-tokens", type=int, default=4096)
     ap.add_argument("--timeout-s", type=int, default=180)
     ap.add_argument("--compile-timeout-s", type=int, default=240)
+    ap.add_argument("--run-timeout-s", type=int, default=60,
+                    help="per-submission `dotnet test` timeout in seconds")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--target-ids", default=None)
     ap.add_argument("--repo-filter", default=None)
@@ -130,7 +137,7 @@ def main() -> int:
     if args.repo_filter:
         repo_filter = {r.strip() for r in args.repo_filter.split(",") if r.strip()}
 
-    n_ok = n_fail = n_compile_ok = 0
+    n_ok = n_fail = n_compile_ok = n_run_ok = 0
     with targets_csv.open() as fh, attempts_path.open("w") as out:
         rows = list(csv.DictReader(fh))
         if target_whitelist:
@@ -153,25 +160,28 @@ def main() -> int:
                 n_fail += 1
                 continue
 
-            # Bind compile callback to this cell's repo + target file.
-            def compile_fn(candidate_text: str, _repo_dir=repo_dir,
-                           _target_file=row["file"],
-                           _timeout=args.compile_timeout_s):
-                return _compile_only.compile_check(
-                    candidate_text, _repo_dir, _target_file, timeout_s=_timeout,
+            # Bind compile + run callback to this cell's repo + target file.
+            def check_fn(candidate_text: str, _repo_dir=repo_dir,
+                         _target_file=row["file"],
+                         _build_timeout=args.compile_timeout_s,
+                         _run_timeout=args.run_timeout_s):
+                return _compile_only.compile_and_run_check(
+                    candidate_text, _repo_dir, _target_file,
+                    build_timeout_s=_build_timeout,
+                    run_timeout_s=_run_timeout,
                 )
 
             t0 = time.monotonic()
             loop = agentic_loop_feedback.run(
                 generate=foundry.generate,
-                compile_fn=compile_fn,
+                check_fn=check_fn,
                 model_id=args.model,
                 system_prompt=sys_prompt,
                 user_prompt=user_msg,
                 repo_root=repo_dir,
                 max_turns=args.max_turns,
                 max_reads=args.max_reads,
-                max_compile_attempts=args.max_compile_attempts,
+                max_attempts=args.max_attempts,
                 max_output_tokens=args.max_output_tokens,
                 temperature=args.temperature,
                 top_p=args.top_p,
@@ -206,6 +216,8 @@ def main() -> int:
                 n_ok += 1
                 if loop.final_compile_ok:
                     n_compile_ok += 1
+                if loop.final_run_ok:
+                    n_run_ok += 1
             else:
                 n_fail += 1
 
@@ -215,17 +227,27 @@ def main() -> int:
                     model_snap = turn.model_snapshot
                     break
 
-            compile_iters = [
+            submission_iters = [
                 {
                     "attempt_index": a.attempt_index,
                     "turn_index": a.turn_index,
                     "compile_ok": a.compile_ok,
+                    "run_attempted": a.run_attempted,
+                    "run_ok": a.run_ok,
                     "build_ms": a.build_ms,
-                    "n_errors": len(a.errors),
-                    "first_errors": a.errors[:5],
+                    "run_ms": a.run_ms,
+                    "tests_total": a.tests_total,
+                    "tests_passed": a.tests_passed,
+                    "tests_failed": a.tests_failed,
+                    "tests_skipped": a.tests_skipped,
+                    "n_compile_errors": len(a.errors),
+                    "first_compile_errors": a.errors[:5],
+                    "n_test_failures": len(a.test_failures),
+                    "first_test_failures": a.test_failures[:3],
                     "code_sha256": a.code_sha256,
+                    "timeout": a.timeout,
                 }
-                for a in loop.compile_attempts
+                for a in loop.attempts
             ]
 
             _record(
@@ -236,9 +258,10 @@ def main() -> int:
                 turns_used=len(loop.turns),
                 tool_calls=tool_calls,
                 reads_done=loop.reads_done,
-                compile_attempts_n=len(loop.compile_attempts),
+                submission_attempts_n=len(loop.attempts),
                 final_compile_ok=loop.final_compile_ok,
-                compile_iterations=compile_iters,
+                final_run_ok=loop.final_run_ok,
+                submission_iterations=submission_iters,
                 total_prompt_tokens=loop.total_prompt_tokens,
                 total_completion_tokens=loop.total_completion_tokens,
                 total_latency_ms=loop.total_latency_ms,
@@ -253,14 +276,16 @@ def main() -> int:
                 f"{target_id:<30} {args.model:<25} "
                 f"turns={len(loop.turns)} reads={loop.reads_done} "
                 f"submitted={loop.submitted} compile_ok={loop.final_compile_ok} "
-                f"attempts={len(loop.compile_attempts)} halt={loop.halt_reason} "
+                f"run_ok={loop.final_run_ok} attempts={len(loop.attempts)} "
+                f"halt={loop.halt_reason} "
                 f"p_tok={loop.total_prompt_tokens} c_tok={loop.total_completion_tokens} "
                 f"wall={wall_ms}ms"
             )
 
     print(
-        f"\ndone: {n_ok} submitted ({n_compile_ok} compile_ok), "
-        f"{n_fail} failures, attempts.jsonl at {attempts_path}"
+        f"\ndone: {n_ok} submitted ({n_compile_ok} compile_ok, "
+        f"{n_run_ok} run_ok), {n_fail} failures, "
+        f"attempts.jsonl at {attempts_path}"
     )
     return 0
 
@@ -275,7 +300,7 @@ def _record(out, target_id: str, args, sys_sha: str, tmpl_sha: str, **fields) ->
         "strategy": "agentic_loop_feedback",
         "max_turns": args.max_turns,
         "max_reads": args.max_reads,
-        "max_compile_attempts": args.max_compile_attempts,
+        "max_attempts": args.max_attempts,
         "temperature": args.temperature,
         "top_p": args.top_p,
         "seed": args.seed,

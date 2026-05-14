@@ -1,26 +1,28 @@
-"""Agentic-loop strategy WITH compile feedback (phase 3).
+"""Agentic-loop strategy WITH compile + run feedback (phase 3, option B).
 
 Same text-based tool protocol as agentic_loop.py:
   - read_file(path)
   - list_dir(path)
   - submit_test(LANG)
 
-But on `submit_test`, instead of returning immediately, we run a compile-only
-check on the candidate and — if it fails — feed the compile errors back as a
-synthetic tool result and let the model continue the conversation. The model
-can then read more files, then call submit_test again with a revised version.
+On `submit_test`, instead of returning immediately, we hand the candidate to
+an injected `check_fn`. The function compiles the candidate AND runs it
+(`dotnet test`) and returns a result with both compile and run information.
+On failure (either phase) the runner feeds a synthetic tool-result back into
+the conversation and lets the model revise. The model can read more files,
+then call submit_test again with a corrected version.
 
 Budgets:
   - max_turns:               total assistant turns across initial + fix-up phase
   - max_reads:               total read_file calls
-  - max_compile_attempts:    how many submit_test cycles we run compile_check on
-                             (1 = same as phase 2; >1 = phase 3 fix-up loop)
+  - max_attempts:            how many submit_test cycles we check
+                             (1 = phase 2 behavior; >1 = phase 3 fix-up loop)
 
 Halt reasons (in addition to phase-2 set):
-  - "submitted_compile_ok"           — submit_test succeeded AND compile passed
-  - "submitted_compile_failed"       — final submission still didn't compile,
-                                       fix-up budget exhausted
-  - "max_turns_exhausted"            — ran out of conversation turns
+  - "submitted_run_ok"        — submit_test compiled AND all tests passed
+  - "submitted_run_failed"    — compiled but tests failed/threw; budget exhausted
+  - "submitted_compile_failed"— never compiled; budget exhausted
+  - "max_turns_exhausted"     — ran out of conversation turns
 """
 from __future__ import annotations
 
@@ -40,14 +42,23 @@ from tools.generation.strategies.agentic_loop import (
 
 
 @dataclass
-class CompileAttempt:
-    """One submit_test → compile cycle."""
+class SubmissionAttempt:
+    """One submit_test → compile (+ optionally run) cycle."""
     attempt_index: int           # 1-based
     turn_index: int              # the assistant turn that produced this submission
     compile_ok: bool
+    run_attempted: bool
+    run_ok: bool
     build_ms: int
-    errors: list[dict] = field(default_factory=list)
+    run_ms: int
+    errors: list[dict] = field(default_factory=list)             # compile errors
+    test_failures: list[dict] = field(default_factory=list)      # test failures
+    tests_total: int = 0
+    tests_passed: int = 0
+    tests_failed: int = 0
+    tests_skipped: int = 0
     code_sha256: str | None = None
+    timeout: str | None = None
 
 
 @dataclass
@@ -60,12 +71,19 @@ class FeedbackLoopResult:
     total_latency_ms: int = 0
     halt_reason: str = ""
     reads_done: int = 0
-    # Phase 3 additions:
-    compile_attempts: list[CompileAttempt] = field(default_factory=list)
+    # Phase 3 additions (compile + run):
+    attempts: list[SubmissionAttempt] = field(default_factory=list)
     final_compile_ok: bool = False
+    final_run_ok: bool = False
 
 
-CompileFn = Callable[[str], "object"]  # text -> CompileResult-like (has .ok, .errors, .build_ms)
+CheckFn = Callable[[str], "object"]
+"""text -> CompileRunResult-like. Attributes used:
+  .compile_ok, .run_attempted, .run_ok, .build_ms, .run_ms,
+  .errors[], .test_failures[],
+  .tests_total, .tests_passed, .tests_failed, .tests_skipped,
+  .error, .timeout
+"""
 
 
 def _format_errors_block(errors: list[dict], max_errors: int = 6) -> str:
@@ -80,28 +98,59 @@ def _format_errors_block(errors: list[dict], max_errors: int = 6) -> str:
     return "\n".join(lines)
 
 
+def _format_test_failures_block(
+    failures: list[dict], counters: dict, max_failures: int = 3
+) -> str:
+    parts: list[str] = []
+    parts.append(
+        f"  Test counters: total={counters.get('tests_total', 0)} "
+        f"passed={counters.get('tests_passed', 0)} "
+        f"failed={counters.get('tests_failed', 0)} "
+        f"skipped={counters.get('tests_skipped', 0)}"
+    )
+    if not failures:
+        if counters.get("tests_total", 0) == 0:
+            parts.append(
+                "  No [Fact] methods executed. Your test class must have at "
+                "least one [Fact]-attributed public method."
+            )
+        return "\n".join(parts)
+    for f in failures[:max_failures]:
+        parts.append(f"  FAILED: {f.get('test_name', '(unknown)')}")
+        msg = (f.get("message") or "").strip()
+        if msg:
+            msg_lines = [ln for ln in msg.splitlines() if ln.strip()][:3]
+            parts.append("    Message: " + " | ".join(msg_lines))
+        stack = (f.get("stack_tail") or "").strip()
+        for ln in stack.splitlines()[:3]:
+            parts.append("    at " + ln.strip())
+    if len(failures) > max_failures:
+        parts.append(f"  ... and {len(failures) - max_failures} more failed tests")
+    return "\n".join(parts)
+
+
 def run(
     *,
     generate,
-    compile_fn: CompileFn,
+    check_fn: CheckFn,
     model_id: str,
     system_prompt: str,
     user_prompt: str,
     repo_root: Path,
     max_turns: int = 12,
     max_reads: int = 8,
-    max_compile_attempts: int = 4,
+    max_attempts: int = 4,
     max_output_tokens: int = 4096,
     temperature: float = 0.0,
     top_p: float = 1.0,
     seed: int = 42,
     timeout_s: int = 180,
 ) -> FeedbackLoopResult:
-    """Drive the agentic loop with compile feedback.
+    """Drive the agentic loop with compile + run feedback.
 
-    `compile_fn(candidate_text) -> CompileResult` is injected: it should
-    compile the candidate against the correct production project and return
-    an object with `.ok: bool`, `.errors: list[dict]`, `.build_ms: int`.
+    `check_fn(candidate_text) -> CompileRunResult` is injected: it should
+    compile the candidate against the correct production project, run
+    `dotnet test`, and return a result with both phases populated.
     """
     import hashlib
 
@@ -110,7 +159,7 @@ def run(
 
     result = FeedbackLoopResult(submitted=False, final_code=None)
     conversation: list[str] = [user_prompt]
-    compile_attempts_used = 0
+    attempts_used = 0
 
     for turn_i in range(1, max_turns + 1):
         composed_user = "\n\n".join(conversation)
@@ -181,50 +230,91 @@ def run(
                 )
                 continue
 
-            # We have a candidate. Run compile.
-            compile_attempts_used += 1
-            cres = compile_fn(chosen)
+            # We have a candidate. Run compile + (if compile_ok) tests.
+            attempts_used += 1
+            cres = check_fn(chosen)
+            compile_ok = bool(getattr(cres, "compile_ok", False))
+            run_attempted = bool(getattr(cres, "run_attempted", False))
+            run_ok = bool(getattr(cres, "run_ok", False))
             errors_list = list(getattr(cres, "errors", []) or [])
-            attempt = CompileAttempt(
-                attempt_index=compile_attempts_used,
+            failures_list = list(getattr(cres, "test_failures", []) or [])
+            counters = {
+                "tests_total": int(getattr(cres, "tests_total", 0) or 0),
+                "tests_passed": int(getattr(cres, "tests_passed", 0) or 0),
+                "tests_failed": int(getattr(cres, "tests_failed", 0) or 0),
+                "tests_skipped": int(getattr(cres, "tests_skipped", 0) or 0),
+            }
+            attempt = SubmissionAttempt(
+                attempt_index=attempts_used,
                 turn_index=turn_i,
-                compile_ok=bool(getattr(cres, "ok", False)),
+                compile_ok=compile_ok,
+                run_attempted=run_attempted,
+                run_ok=run_ok,
                 build_ms=int(getattr(cres, "build_ms", 0) or 0),
+                run_ms=int(getattr(cres, "run_ms", 0) or 0),
                 errors=errors_list,
+                test_failures=failures_list,
+                tests_total=counters["tests_total"],
+                tests_passed=counters["tests_passed"],
+                tests_failed=counters["tests_failed"],
+                tests_skipped=counters["tests_skipped"],
                 code_sha256=_sha(chosen),
+                timeout=getattr(cres, "timeout", None),
             )
-            result.compile_attempts.append(attempt)
+            result.attempts.append(attempt)
             # Always keep latest candidate as final_code so the runner can persist it.
             result.final_code = chosen
             result.submitted = True
 
-            if attempt.compile_ok:
+            if run_ok:
                 assistant_turn.tool_ok = True
                 result.final_compile_ok = True
-                result.halt_reason = "submitted_compile_ok"
+                result.final_run_ok = True
+                result.halt_reason = "submitted_run_ok"
                 return result
 
-            # Compile failed. Decide whether we can give them another shot.
-            attempts_left = max_compile_attempts - compile_attempts_used
+            # Either compile failed or tests failed. Decide whether we can give them another shot.
+            attempts_left = max_attempts - attempts_used
             if attempts_left <= 0:
                 assistant_turn.tool_ok = False
-                result.final_compile_ok = False
-                result.halt_reason = "submitted_compile_failed"
+                result.final_compile_ok = compile_ok
+                result.final_run_ok = False
+                result.halt_reason = (
+                    "submitted_compile_failed" if not compile_ok else "submitted_run_failed"
+                )
                 return result
 
-            # Feed errors back and let them revise.
+            # Feed the right kind of error back and let them revise.
             assistant_turn.tool_ok = False
-            err_block = _format_errors_block(errors_list)
             extra = (getattr(cres, "error", None) or "").strip()
-            extra_line = f"\n{extra}\n" if extra else ""
-            conversation.append(
-                f"<tool-result turn={turn_i} tool=submit_test compile_ok=false>"
-                f"\nYour test did not compile. First errors:\n{err_block}{extra_line}\n"
-                f"You have {attempts_left} more submission attempt(s). "
-                f"You may call read_file() to inspect related code, "
-                f"or call submit_test again with a revised file."
-                f"</tool-result>"
-            )
+            if not compile_ok:
+                err_block = _format_errors_block(errors_list)
+                extra_line = f"\n  {extra}\n" if extra else ""
+                conversation.append(
+                    f"<tool-result turn={turn_i} tool=submit_test compile_ok=false run_ok=false>"
+                    f"\nYour test did not compile. First errors:\n{err_block}{extra_line}\n"
+                    f"You have {attempts_left} more submission attempt(s). "
+                    f"You may call read_file() to inspect related code, "
+                    f"or call submit_test again with a revised file."
+                    f"</tool-result>"
+                )
+            else:
+                fail_block = _format_test_failures_block(failures_list, counters)
+                timeout_line = ""
+                if attempt.timeout == "test":
+                    timeout_line = (
+                        f"\n  Test run timed out — your test likely hangs (waits on async/IO without timeout)."
+                    )
+                extra_line = f"\n  {extra}" if extra else ""
+                conversation.append(
+                    f"<tool-result turn={turn_i} tool=submit_test compile_ok=true run_ok=false>"
+                    f"\nYour test compiled but did not pass when run:\n{fail_block}{timeout_line}{extra_line}\n"
+                    f"You have {attempts_left} more submission attempt(s). "
+                    f"Revise your test (fix the assertion, add the missing setup/mocks, "
+                    f"or change the input data) and resubmit. You may also read_file() "
+                    f"to look at the production code more carefully."
+                    f"</tool-result>"
+                )
             continue
 
         if tool_name == "read_file":
@@ -248,10 +338,14 @@ def run(
             )
             continue
 
-    # Out of turns. If we had a successful submission but never compiled OK, we
-    # still record final_code; halt_reason describes what stopped us.
-    if result.submitted and not result.final_compile_ok:
-        result.halt_reason = "submitted_compile_failed"
+    # Out of turns. If we had a successful submission but never ran clean,
+    # record final_code; halt_reason describes what stopped us.
+    if result.submitted and not result.final_run_ok:
+        last = result.attempts[-1] if result.attempts else None
+        if last and last.compile_ok:
+            result.halt_reason = "submitted_run_failed"
+        else:
+            result.halt_reason = "submitted_compile_failed"
     else:
         result.halt_reason = f"max_turns_exhausted after {max_turns}"
     return result

@@ -24,10 +24,12 @@ Submitting:
 - Use xUnit. Target net10.0.
 - It's fine to use Moq or NSubstitute if needed for dependencies.
 
-Compile feedback (this is new):
-- After you call submit_test, the build system will immediately try to compile your test file against the real production project.
-- If it compiles, you're done.
-- If it does NOT compile, you'll get a tool-result message containing the first compile errors (file, line, error code, message) and a count of remaining submission attempts. You may then call read_file to look at related types, then call submit_test again with a corrected version.
-- You get up to 4 total submission attempts per task. Use them. A first guess that doesn't compile is fine — fix the errors and resubmit.
+Compile + run feedback (this is new):
+- After you call submit_test, the build system will immediately try to BOTH compile and RUN your test against the real production project (`dotnet build` then `dotnet test`).
+- If it compiles and all tests pass, you're done.
+- If it does NOT compile, you'll get a tool-result message containing the first compile errors (file, line, error code, message) and a count of remaining submission attempts.
+- If it compiles but a test fails (assertion failure, thrown exception, hung test, no `[Fact]` methods found, etc.), you'll get a tool-result with the test counters and the message + first stack frames of the first few failing tests.
+- In either case you may then call read_file to inspect related types or the production code more carefully, then call submit_test again with a corrected version.
+- You get up to 4 total submission attempts per task. Use them. A first guess that doesn't compile, or that throws at runtime, is fine — fix the problem and resubmit.
 
-This is a normal coding task. Just read what you need, write the tests, and iterate if the compiler points out something.
+This is a normal coding task. Just read what you need, write the tests, and iterate if the compiler or the test runner points out something.

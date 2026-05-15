@@ -20,26 +20,28 @@ The experiment progresses in phases. Each phase fixes the input set and varies o
 
 The full [phase 2 v2 sweep](phases/phase2-agentic/) — 7 models × 300 cells × 3 runs = 6,300 attempts — cost **\$89.98 USD** in token spend (Azure bill ~\$105 including infra). 82% of the bill (\$73.40) was `gpt-5-codex`, which has since been removed from the panel and from Azure AI Foundry for phases 3-5. The remaining 6-model panel costs ~\$0.018 per attempt. See [phases/phase2-agentic/COSTS.md](phases/phase2-agentic/COSTS.md) for the per-model breakdown and projections for the next tiers.
 
-### Phase 3 calibration — preliminary (run_1 only, awaiting evaluator pass)
+### Phase 3 calibration — preliminary (run_1 only, runs 2 + 3 in flight)
 
-The phase 3 calibration sweep ran the same 300 v2 targets, single-run, against the same 6-model panel as phase 2 (no codex), with one structural change: after every `submit_test` the runner does `dotnet build` AND `dotnet test`, then feeds either the compile errors or the failing-test messages back to the model. The model gets up to 4 submission attempts per cell. These are **runner self-reported numbers** from `attempts.jsonl` (the canonical evaluator pass is currently running).
+The phase 3 calibration sweep ran the same 300 v2 targets, single-run, against the same 6-model panel as phase 2 (no codex), with one structural change: after every `submit_test` the runner does `dotnet build` AND `dotnet test`, then feeds either the compile errors or the failing-test messages back to the model. The model gets up to 4 submission attempts per cell. These are **canonical evaluator numbers** (`evaluation.jsonl` from the dedicated evaluator workflow that builds each test against the real production csproj).
 
 | Model | Cells (n) | Submitted | Compile-OK | **Run-OK** | Compile% | Run% |
 |---|---:|---:|---:|---:|---:|---:|
-| `codestral-2501`         | 300 | 285 | 38 |  9 | 12.7% | 3.0% |
-| `gpt-4.1-mini`           | 300 | 234 | 54 | **31** | 18.0% | **10.3%** |
-| `gpt-4.1-nano`           | 300 | 277 | 11 |  7 |  3.7% | 2.3% |
-| `grok-4-1-fast`          | 300 | 299 | 76 | 24 | 25.3% | 8.0% |
-| `llama-3.3-70b-instruct` | 300 | 298 | 50 | 14 | 16.7% | 4.7% |
-| `phi-4`                  | 300 | 295 | 23 |  6 |  7.7% | 2.0% |
-| **TOTAL**                | **1,800** | **1,688** | **252** | **91** | **14.0%** | **5.1%** |
+| `codestral-2501`         | 300 | 285 |  42 |  13 | 14.0% |  4.3% |
+| `gpt-4.1-mini`           | 300 | 234 |  62 | **39** | 20.7% | **13.0%** |
+| `gpt-4.1-nano`           | 300 | 277 |  16 |   8 |  5.3% |  2.7% |
+| `grok-4-1-fast`          | 300 | 299 |  76 |  44 | 25.3% | 14.7% |
+| `llama-3.3-70b-instruct` | 300 | 298 |  50 |  20 | 16.7% |  6.7% |
+| `phi-4`                  | 300 | 295 |  24 |   8 |  8.0% |  2.7% |
+| **TOTAL**                | **1,800** | **1,688** | **270** | **132** | **15.0%** | **7.3%** |
 
 Two takeaways:
 
-1. **The compile-vs-run gap is the headline number.** 252 cells compiled but only 91 ran successfully — roughly two thirds of tests that build cleanly fail at runtime (assertion failures, thrown exceptions, hung tests with no `[Fact]` actually executed, etc). This is the "compiles but doesn't run" failure mode that motivated routing test-runner output back into the loop, and the run-OK column is what the rest of the phase will optimise.
-2. **Compile-OK ≈ 3× phase 2; run-OK ≈ 3.6× phase 2.** Phase 2 (single shot, no feedback) hit 4.8% compile / 1.4% run across the same 6-model panel on this target set (259 / 75 out of 5,400 cells). Phase 3 calibration (1 run/cell with in-loop compile + run feedback) hits 14.0% compile / 5.1% run on 1,800 cells — i.e. the in-loop feedback is buying real ground, not just burning more tokens. The full 3-run sweep will tell us whether the gain holds with more attempts per cell.
+1. **The compile-vs-run gap is the headline number.** 270 cells compiled but only 132 ran successfully — roughly half of tests that build cleanly still fail at runtime (assertion failures, thrown exceptions, hung tests with no `[Fact]` actually executed, etc). This is the "compiles but doesn't run" failure mode that motivated routing test-runner output back into the loop, and the run-OK column is what the rest of the phase will optimise.
+2. **Compile-OK ≈ 3.1× phase 2; run-OK ≈ 5.3× phase 2.** Phase 2 (single shot, no feedback) hit 4.8% compile / 1.4% run across the same 6-model panel on this target set (259 / 75 out of 5,400 cells). Phase 3 calibration (1 run/cell with in-loop compile + run feedback) hits 15.0% compile / 7.3% run on 1,800 cells — i.e. the in-loop feedback is buying real ground, not just burning more tokens. The full 3-run sweep will tell us whether the gain holds with more attempts per cell.
 
-Cost is well under the \$250 tripwire. The continuation runs (runs 2 and 3) will be dispatched after the evaluator pass confirms these numbers.
+> **Note on the two compile counts.** The runner's in-loop sandbox (which decides what feedback to give the model) is more conservative than the canonical evaluator: 252 compile / 91 run-OK vs the evaluator's 270 / 132. The runner builds in a synthetic standalone csproj for speed; the evaluator builds inside the production csproj where transitive references resolve correctly. The evaluator numbers are the headline; the runner numbers are an internal feedback signal.
+
+Cost is well under the \$250 tripwire. Continuation runs (runs 2 and 3) are now in flight.
 
 ### Repository layout
 

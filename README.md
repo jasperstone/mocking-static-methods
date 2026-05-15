@@ -10,7 +10,7 @@ The experiment progresses in phases. Each phase fixes the input set and varies o
 |---|---|---|
 | 1 — baseline | No generation. Measure existing test suites. | ✅ sealed · [REPORT](phases/phase1-baseline/REPORT.md) |
 | 2 — single agent, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, max 6 turns. The agent can explore the repo before submitting, but never sees its own compile or test output. | ✅ v2 sweep complete (300 cells × 3 runs × 7 models = 6,300 attempts) · [HEADLINE](phases/phase2-agentic/HEADLINE.md) · [REPORT](phases/phase2-agentic/REPORT.md) · [COSTS](phases/phase2-agentic/COSTS.md) · [REPLICATION](phases/phase2-agentic/REPLICATION.md) |
-| 3 — agentic loop | Same single agent as phase 2, but compile errors and test results are fed back as additional turns so the agent can fix its own output. | not started |
+| 3 — agentic loop | Same single agent as phase 2, but compile errors **and `dotnet test` results** are fed back as additional turns so the agent can fix its own output (up to 4 submissions per cell). | 🔄 calibration sweep complete (run_1: 300 cells × 1 run × 6 models = 1,800 attempts); full sweep (3 runs) pending |
 | 4 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | not started |
 | 5 — multi-team | Multiple multi-agent teams compete or partition the target set. | not started |
 
@@ -19,6 +19,27 @@ The experiment progresses in phases. Each phase fixes the input set and varies o
 ### Cost so far
 
 The full [phase 2 v2 sweep](phases/phase2-agentic/) — 7 models × 300 cells × 3 runs = 6,300 attempts — cost **\$89.98 USD** in token spend (Azure bill ~\$105 including infra). 82% of the bill (\$73.40) was `gpt-5-codex`, which has since been removed from the panel and from Azure AI Foundry for phases 3-5. The remaining 6-model panel costs ~\$0.018 per attempt. See [phases/phase2-agentic/COSTS.md](phases/phase2-agentic/COSTS.md) for the per-model breakdown and projections for the next tiers.
+
+### Phase 3 calibration — preliminary (run_1 only, awaiting evaluator pass)
+
+The phase 3 calibration sweep ran the same 300 v2 targets, single-run, against the same 6-model panel as phase 2 (no codex), with one structural change: after every `submit_test` the runner does `dotnet build` AND `dotnet test`, then feeds either the compile errors or the failing-test messages back to the model. The model gets up to 4 submission attempts per cell. These are **runner self-reported numbers** from `attempts.jsonl` (the canonical evaluator pass is currently running).
+
+| Model | Cells (n) | Submitted | Compile-OK | **Run-OK** | Compile% | Run% |
+|---|---:|---:|---:|---:|---:|---:|
+| `codestral-2501`         | 300 | 285 | 38 |  9 | 12.7% | 3.0% |
+| `gpt-4.1-mini`           | 300 | 234 | 54 | **31** | 18.0% | **10.3%** |
+| `gpt-4.1-nano`           | 300 | 277 | 11 |  7 |  3.7% | 2.3% |
+| `grok-4-1-fast`          | 300 | 299 | 76 | 24 | 25.3% | 8.0% |
+| `llama-3.3-70b-instruct` | 300 | 298 | 50 | 14 | 16.7% | 4.7% |
+| `phi-4`                  | 300 | 295 | 23 |  6 |  7.7% | 2.0% |
+| **TOTAL**                | **1,800** | **1,688** | **252** | **91** | **14.0%** | **5.1%** |
+
+Two takeaways:
+
+1. **The compile-vs-run gap is the headline number.** 252 cells compiled but only 91 ran successfully — roughly two thirds of tests that build cleanly fail at runtime (assertion failures, thrown exceptions, hung tests with no `[Fact]` actually executed, etc). This is the "compiles but doesn't run" failure mode that motivated routing test-runner output back into the loop, and the run-OK column is what the rest of the phase will optimise.
+2. **Compile-OK ≈ 3× phase 2; run-OK ≈ 3.6× phase 2.** Phase 2 (single shot, no feedback) hit 4.8% compile / 1.4% run across the same 6-model panel on this target set (259 / 75 out of 5,400 cells). Phase 3 calibration (1 run/cell with in-loop compile + run feedback) hits 14.0% compile / 5.1% run on 1,800 cells — i.e. the in-loop feedback is buying real ground, not just burning more tokens. The full 3-run sweep will tell us whether the gain holds with more attempts per cell.
+
+Cost is well under the \$250 tripwire. The continuation runs (runs 2 and 3) will be dispatched after the evaluator pass confirms these numbers.
 
 ### Repository layout
 

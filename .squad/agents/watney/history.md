@@ -26,3 +26,6 @@ Build/infra agent. `.devcontainer/` exists. Each repo in `cloned_repos/` has its
 
 ### 2026-05-07 — Phase 1 baseline refresh
 Re-ran `aggregate_baseline.py` against CI run 25495265941 (commit 99c79c9, all 7 jobs green, post-Orleans-BVT-fix). Updated `RUN_IDS` constant to `["25495265941"]`, refreshed `baseline_artifacts/` from the new run's coverage XML, regenerated `BASELINE_COVERAGE.md`, `baseline_coverage.csv`, and per-repo `static_call_classes.json`. Orleans line coverage 6.07% → **9.98%**; all other repos held: roslyn 76.21%, aspnetcore 60.63%, abp 41.92%, efcore 27.06%, sk 12.12%, runtime 10.18%. No headline warning (every repo emitted real cobertura). TOTAL 40.46% lines / 17.79% branches.
+
+### 2026-05-16T00:00:00Z — Team update
+viz layout changed — see `tools/viz/README.md` and `.squad/decisions.md` (entry: 2026-05-16: tools/viz restructure). Per-plot files under `tools/viz/plots/`, shared helpers in `tools/viz/lib/`, new derived `tools/viz/data/per_model_phase.csv` from `aggregate_phase_results.py`. Four new plot families shipped.

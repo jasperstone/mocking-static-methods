@@ -350,3 +350,84 @@ Active matrix: **15 repos** (was 14 with MAUI deferred; -1 MAUI, +2 new = 15). T
 - **PowerToys** — All `*UnitTests*.csproj` discovered live under `src/modules/<windows-only-module>/` (colorPicker, fancyzones, registrypreview, AdvancedPaste, launcher plugins, previewpane handlers) and pull WinUI 3/WPF references transitively. None buildable in noble Linux container.
 
 A coverage job that can't run isn't useful baseline data. Excluded.
+
+
+### 2026-05-08: Mode #1 attribution diagnosis for Avalonia / eShop / duplicati / runtime
+**By:** Beck (requested by Brady)
+
+**Question:** Four repos in `tools/coverage_xref/UNIFIED_TABLE.md` show `Mode #1 covered = 0` despite coverage data being present. Attribution bug or real test gap?
+
+**Method:** Read-only diagnostic against locally-downloaded cobertura XML (run 25532664482 Avalonia, 25532665179 eShop, 25527102157 duplicati+runtime). Sampled and full-swept all Mode #1 sites against cobertura `<class filename="...">` and `<line hits=...>` entries.
+
+**Per-repo verdict:**
+- **Avalonia** — Empty instrumentation. XML has 1,606 classes / 92,411 lines / **0 hit-lines globally**. coverlet.console emitted structurally valid XML with no execution data. 9 Mode#1 sites are also in test data generators (`BiDiTestDataGenerator.cs`, `UnicodeDataGenerator.cs`) — dev utilities, not runtime paths.
+- **eShop** — Empty instrumentation (331 classes / 8,217 lines / 0 hits global). 49/94 sites file-match in `Ordering.API`/`Basket.API`/`Shared`; 45 in `WebhookClient`/`ClientApp`/`WebApp` are out-of-scope (no test projects reference them).
+- **duplicati** — Real test gap. XML has 34,597 hit-lines — real coverage. 21/34 sites matched and uncovered (Backend/Jottacloud, RestAPI/Database, OAuth, HttpClientExtensions). 13/34 are in `Duplicati/UnitTest/*` (test source, correctly absent from cov map).
+- **runtime** — Scope mismatch. 23,413 hit-lines, but instrumented assemblies are `FSharp.Compiler.Service`, illink, source generators — NOT `System.Net.Http`/`Microsoft.Extensions.*` where Mode#1 sites live. Libraries-tests subset not captured.
+
+**Recommendations:**
+1. Avalonia/eShop — fix coverlet.console silent-noop (collector not attached); afterward expect modest Mode#1 gain due to dev-only sites / out-of-scope projects.
+2. duplicati — accept as legitimate test-scope reality. No xref change needed.
+3. runtime — structurally impossible from this job; libraries-tests need separate pipeline.
+
+**Optional xref enhancement:** add `matched_zero_hits_global` status to flag instrumentation-broken repos. Out of scope for this task.
+
+**No CI runs triggered. Diagnostic only.**
+
+### 2026-05-08: Mode #1 attribution gap for duplicati / runtime — not a path-matcher bug
+**By:** Beck (requested by Brady)
+
+**Diagnosis:** The `find_site` suffix-matcher in `tools/coverage_xref/build_unified_table.py` works correctly for both repos. The "0 covered" outcome is **legitimate test-scope reality**, not a bug.
+
+- **duplicati (34 sites, 0 covered):** 21 sites status=`uncovered` (file IS in cobertura, every hit at site line is 0) — Backend/REST surface unit suite doesn't exercise. 13 sites status=`unknown_file` — test sources (`Duplicati/UnitTest/*`) correctly excluded from prod-only cobertura.
+- **runtime (33 sites, 0 `unknown_file`):** cobertura covers entirely different surface than Mode#1 sites. Cobertura top-dirs: `Microsoft.DotNet.HotReload.Utils.Generator*`, `arcade`, F# compiler, illink, source generators. Mode#1 sites live in `src/libraries/System.Net.Http/...` and `Microsoft.Extensions.{Hosting,Http,DI}/...` — zero matches in 50 MB cobertura. The libs were not instrumented by the `build.sh -subset libs+libs.tests -test` run.
+
+**Verdict:** No fix needed in `find_site`. Recommended (b) Accept as legitimate gap.
+
+**Follow-ups (Vogel territory):**
+1. **runtime** — investigate whether libs.tests subset is emitting per-library cobertura we're failing to download; if not, route through coverlet.collector on a focused subset (e.g. `System.Net.Http.Functional.Tests`).
+2. **duplicati** — small Mode1Analyzer/post-process improvement: skip files matching `*/UnitTest/*`, `*/Tests/*`, `*Test*.cs` at ingest to remove the 13 test-source self-references.
+
+### 2026-05-08: StockSharp flaky-test filter — partial fix; deeper coverlet/MTP blocker remains
+**By:** Vogel (CI/CD), requested by Brady
+
+**What was asked:** Add `FullyQualifiedName!~ClassName` exclusions to StockSharp coverlet FILTER so validate-cobertura gate passes.
+
+**Flaky classes identified** (run 25556051863): `AsyncExtensionsTests`, `ConnectorBasketTests`, `PathsTests`, `ReportTests`, `TransactionIdStorageTests`.
+
+**FILTER applied** (commit `4d07fc1`): added those five `FullyQualifiedName!~` exclusions. **Result:** suite went from ~50 failures → **0 failures, 4096 passed, 11 skipped, 4107 total** in 4m26s. Filter shape correct.
+
+**Blocker remains:** Run 25562087626 (filter-only) — tests all passed but coverlet emitted **231-byte cobertura with empty Module table**. coverlet.console did NOT auto-discover/instrument StockSharp.*/Ecng.* dependency assemblies in `Tests/bin/Release/net10.0/` despite ~80 DLLs being present and loaded.
+
+**Hypothesis:** MSTest.Sdk + MTP routes through a child testhost whose dependency probe path differs from coverlet's pre-instrumented copy. Avalonia/eShop work with same shape — likely smaller / co-located dep graphs.
+
+**Run 25562607958** added `--include "[StockSharp*]*"` + `--include "[Ecng*]*"` + diag `ls | head` line. Step exited 141 (SIGPIPE under `set -e -o pipefail`) before coverlet started. Reverted diag in commit `f82c22d`; explicit `--include` patterns remain, untested.
+
+**Stopped at 2 attempts per task instructions.** Workflow at commit `f82c22d` on `jasper/phase2`.
+
+**Next-action options:**
+1. Re-test `--include` patterns alone (one more dispatch).
+2. Switch to direct MTP exec under coverlet (`coverlet "$asm" --target dotnet --targetargs "exec $asm --treenode-filter ..."`).
+3. Drop coverlet, switch to `dotnet-coverage collect` (in-process Microsoft.CodeCoverage, MTP-aware).
+4. Whitelist a stable subset only (`FullyQualifiedName~StockSharp.Tests.Indicators`).
+
+### 2026-05-16: tools/viz restructure — per-plot files + new chart families
+**By:** Beck (requested by Brady)
+
+**What:** Split `tools/viz/render_phase3.R` into one file per plot under `tools/viz/plots/`, with shared helpers in `tools/viz/lib/`. Added four new plot families (`successful_tests_progression`, `coverage_baseline`, `cost_efficiency`, `cost_per_passing_test`). Added `tools/viz/aggregate_phase_results.py` producing `tools/viz/data/per_model_phase.csv` from raw jsonl. `render_phase3.R` retained as a one-line back-compat shim.
+
+**Why:** Make plot files individually editable without scrolling past unrelated charts. Add cost and progression views that didn't exist.
+
+**Conventions established (team-relevant):**
+1. **"Data duplication" defined:** copying a source-controlled file into `tools/viz/data/` is duplication and forbidden. Producing a NEW aggregated CSV (e.g. `per_model_phase.csv`) that doesn't exist anywhere else is NOT duplication — it's a derived artifact and is allowed.
+2. **Inputs read in place:** `baseline_coverage.csv` is read directly from the repo root by `lib/load.R::load_baseline_coverage()`. Other root-level CSVs should follow this pattern.
+3. **Single price table:** all cost calculations reuse `PRICES` from `tools/cost/estimate.py`. No fork. New scripts import via `from tools.cost.estimate import PRICES`.
+4. **Phase 3 cost is currently unavailable** — `phases/phase3-agentic-loop/results/` top level is empty, so per-attempt token counts don't exist. Aggregator emits blank `cost_usd` for phase 3 rows; cost-based plots filter them out. When phase 3 jsonl lands, add `phase3-agentic-loop` to `RAW_PHASES`.
+5. **Phase 2 totals come from inclusive `results*/**/attempts.jsonl` glob** to match published `phases/phase2-agentic/COSTS.md` (6,307 attempts, $89.98). Filtering `results_v1_oldprompt/` would drop 7 attempts / ~$0.11 and silently disagree.
+6. **ggrepel is not installed** in the main devcontainer. Plot files must not depend on it.
+
+**Files affected:**
+- New: `tools/viz/render_all.R`, `tools/viz/aggregate_phase_results.py`, `tools/viz/lib/{load,theme}.R`, `tools/viz/plots/*.R` (7 plot files), `tools/viz/data/per_model_phase.csv`.
+- Modified: `tools/viz/README.md` (new layout, devcontainer note).
+- Replaced: `tools/viz/render_phase3.R` is now a back-compat shim that sources `render_all.R`.
+- New PNGs: `progression-runok.png`, `coverage-baseline.png`, `cost-efficiency.png`, `cost-per-passing-test.png`. Existing phase-3 PNGs regenerate identical visual output.

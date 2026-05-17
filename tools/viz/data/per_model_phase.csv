@@ -6,9 +6,9 @@ phase2-agentic,gpt-5-codex,901,161,67,54,3245098,6934171,73.3981
 phase2-agentic,grok-4-1-fast,901,119,5,1,1231977,143947,0.3184
 phase2-agentic,llama-3.3-70b-instruct,901,769,44,11,6237905,849586,5.0321
 phase2-agentic,phi-4,901,848,41,4,6347714,1416975,1.5020
-phase3-agentic-loop,codestral-2501,285,285,42,13,0,0,
-phase3-agentic-loop,gpt-4.1-mini,234,234,62,39,0,0,
-phase3-agentic-loop,gpt-4.1-nano,277,277,16,8,0,0,
-phase3-agentic-loop,grok-4-1-fast,299,299,76,44,0,0,
-phase3-agentic-loop,llama-3.3-70b-instruct,298,298,50,20,0,0,
-phase3-agentic-loop,phi-4,295,295,24,8,0,0,
+phase3-agentic-loop,codestral-2501,300,285,42,13,17405275,1402922,6.4842
+phase3-agentic-loop,gpt-4.1-mini,300,234,62,39,11010292,618775,5.3942
+phase3-agentic-loop,gpt-4.1-nano,300,277,16,8,15976423,552088,1.8185
+phase3-agentic-loop,grok-4-1-fast,300,299,76,44,9588679,1030090,2.4328
+phase3-agentic-loop,llama-3.3-70b-instruct,300,298,50,20,14470334,1239805,11.1542
+phase3-agentic-loop,phi-4,300,295,24,8,8520923,1626406,1.8783

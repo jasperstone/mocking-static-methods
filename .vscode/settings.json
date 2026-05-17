@@ -1,0 +1,9 @@
+{
+  // R extension: watch R sessions so the Workspace Viewer auto-attaches
+  // when an R process starts in this workspace (no manual "attach" needed).
+  "r.sessionWatcher": true,
+  "r.alwaysUseActiveTerminal": true,
+  "r.bracketedPaste": true,
+  "r.rterm.linux": "/usr/local/bin/R",
+  "r.rpath.linux": "/usr/local/bin/R"
+}

@@ -1,0 +1,32 @@
+// R + tidyverse devcontainer for rendering Phase 3 figures.
+// Open separately from the main .NET devcontainer: in VS Code, run
+// "Dev Containers: Reopen in Container" and pick "R viz" from the picker.
+{
+	"name": "R viz (ggplot2)",
+
+	// rocker/tidyverse ships R 4.4 with tidyverse (ggplot2, dplyr, readr, ...)
+	// preinstalled, so the container starts ready to render.
+	"image": "rocker/tidyverse:4.4",
+
+	// Install a few extras commonly used for the figure styles we want.
+	"postCreateCommand": "Rscript -e 'install.packages(c(\"viridis\",\"scales\",\"patchwork\",\"ggtext\",\"ggrepel\",\"languageserver\"), repos=\"https://cloud.r-project.org\")'",
+
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"REditorSupport.r",
+				"RDebugger.r-debugger",
+				"mechatroner.rainbow-csv"
+			],
+			"settings": {
+				"r.rterm.linux": "/usr/local/bin/R",
+				"r.bracketedPaste": true,
+				"r.alwaysUseActiveTerminal": true
+			}
+		}
+	},
+
+	"remoteUser": "rstudio",
+
+	"runArgs": ["--name", "mocking-static-methods-r-viz"]
+}

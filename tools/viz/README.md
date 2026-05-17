@@ -4,9 +4,20 @@ R + `ggplot2` figures for the project. Renders into `assets/figures/`.
 
 ## Devcontainer
 
-R and all required packages (`readr`, `dplyr`, `tidyr`, `ggplot2`, `viridis`,
-`scales`, `patchwork`) are installed in the **main** devcontainer. The old
-separate "R viz (ggplot2)" devcontainer is no longer required.
+R work happens in the dedicated **R viz (ggplot2)** devcontainer
+([.devcontainer/r-viz/devcontainer.json](../../.devcontainer/r-viz/devcontainer.json)),
+not the main .NET devcontainer. The main container has no R toolchain.
+
+To render figures:
+
+1. In VS Code: **Dev Containers: Reopen in Container** → choose **R viz (ggplot2)**.
+2. First build pulls `rocker/tidyverse:4.4` and installs `viridis`, `scales`,
+   `patchwork`, `ggtext`, `ggrepel`, `languageserver` (takes a few minutes once).
+3. R 4.4 + tidyverse are preinstalled in the base image.
+
+The workspace-level [.vscode/settings.json](../../.vscode/settings.json) pins
+the R extension to the in-container R (`/usr/local/bin/R`) and enables the
+session watcher so the Workspace panel auto-attaches.
 
 ## Layout
 

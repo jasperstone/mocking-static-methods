@@ -9,13 +9,14 @@
 	"image": "rocker/tidyverse:4.4",
 
 	// Install a few extras commonly used for the figure styles we want.
-	"postCreateCommand": "Rscript -e 'install.packages(c(\"viridis\",\"scales\",\"patchwork\",\"ggtext\"), repos=\"https://cloud.r-project.org\")'",
+	"postCreateCommand": "Rscript -e 'install.packages(c(\"viridis\",\"scales\",\"patchwork\",\"ggtext\",\"ggrepel\",\"languageserver\"), repos=\"https://cloud.r-project.org\")'",
 
 	"customizations": {
 		"vscode": {
 			"extensions": [
 				"REditorSupport.r",
-				"RDebugger.r-debugger"
+				"RDebugger.r-debugger",
+				"mechatroner.rainbow-csv"
 			],
 			"settings": {
 				"r.rterm.linux": "/usr/local/bin/R",

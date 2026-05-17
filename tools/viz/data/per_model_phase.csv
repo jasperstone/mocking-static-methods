@@ -1,0 +1,14 @@
+phase,model,attempts,submitted,compile_ok,run_ok,prompt_tokens,completion_tokens,cost_usd
+phase2-agentic,codestral-2501,901,714,57,14,14738360,724628,5.0737
+phase2-agentic,gpt-4.1-mini,901,764,85,36,5246116,833896,3.4327
+phase2-agentic,gpt-4.1-nano,901,495,27,9,10331312,474799,1.2231
+phase2-agentic,gpt-5-codex,901,161,67,54,3245098,6934171,73.3981
+phase2-agentic,grok-4-1-fast,901,119,5,1,1231977,143947,0.3184
+phase2-agentic,llama-3.3-70b-instruct,901,769,44,11,6237905,849586,5.0321
+phase2-agentic,phi-4,901,848,41,4,6347714,1416975,1.5020
+phase3-agentic-loop,codestral-2501,285,285,42,13,0,0,
+phase3-agentic-loop,gpt-4.1-mini,234,234,62,39,0,0,
+phase3-agentic-loop,gpt-4.1-nano,277,277,16,8,0,0,
+phase3-agentic-loop,grok-4-1-fast,299,299,76,44,0,0,
+phase3-agentic-loop,llama-3.3-70b-instruct,298,298,50,20,0,0,
+phase3-agentic-loop,phi-4,295,295,24,8,0,0,

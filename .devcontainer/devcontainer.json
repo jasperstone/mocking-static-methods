@@ -30,13 +30,15 @@
 				"ms-python.python",
 				"ms-python.vscode-pylance",
 				"coverlet.vscode-coverlet",
-				"ms-azuretools.vscode-docker"
+				"ms-azuretools.vscode-docker",
+				"reditorsupport.r",
+				"mechatroner.rainbow-csv"
 			]
 		}
 	},
 	
 	// Run setup commands after container is created
-	"postCreateCommand": "bash -c 'pip install -r requirements.txt 2>/dev/null || true && dotnet tool install -g dotnet-reportgenerator-globaltool 2>/dev/null || true'",
+	"postCreateCommand": "bash -c 'pip install -r requirements.txt 2>/dev/null || true && dotnet tool install -g dotnet-reportgenerator-globaltool 2>/dev/null || true && R -e \"pkgs <- c(\\\"languageserver\\\", \\\"ggrepel\\\"); to_install <- pkgs[!sapply(pkgs, requireNamespace, quietly=TRUE)]; if (length(to_install)) install.packages(to_install, repos=\\\"https://cloud.r-project.org\\\")\" 2>/dev/null || true'",
 	
 	// Install mono-complete in background after container starts (won't block connection)
 	"postStartCommand": "bash -c 'echo \"Installing mono-complete (this may take 5-10 minutes)...\" && sudo apt-get update -qq && sudo apt-get install -y mono-complete && echo \"mono-complete installation complete!\"'",

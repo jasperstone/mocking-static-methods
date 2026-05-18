@@ -20,6 +20,10 @@ The experiment progresses in phases. Each phase fixes the input set and varies o
 
 The full [phase 2 v2 sweep](phases/phase2-agentic/) — 7 models × 300 cells × 3 runs = 6,300 attempts — cost **\$89.98 USD** in token spend (Azure bill ~\$105 including infra). 82% of the bill (\$73.40) was `gpt-5-codex`, which has since been removed from the panel and from Azure AI Foundry for phases 3-5. The remaining 6-model panel costs ~\$0.018 per attempt. See [phases/phase2-agentic/COSTS.md](phases/phase2-agentic/COSTS.md) for the per-model breakdown and projections for the next tiers.
 
+![Cost per passing test, per model](assets/figures/cost-per-passing-test.png)
+
+*Cost per passing generated test, by model. `gpt-5-codex` was the most expensive per attempt and the reason it was dropped from the panel for phases 3+.*
+
 ### Phase 3 calibration — preliminary (run_1 only, runs 2 + 3 in flight)
 
 The phase 3 calibration sweep ran the same 300 v2 targets, single-run, against the same 6-model panel as phase 2 (no codex), with one structural change: after every `submit_test` the runner does `dotnet build` AND `dotnet test`, then feeds either the compile errors or the failing-test messages back to the model. The model gets up to 4 submission attempts per cell. These are **canonical evaluator numbers** (`evaluation.jsonl` from the dedicated evaluator workflow that builds each test against the real production csproj).
@@ -34,10 +38,18 @@ The phase 3 calibration sweep ran the same 300 v2 targets, single-run, against t
 | `phi-4`                  | 300 | 295 |  24 |   8 |  8.0% |  2.7% |
 | **TOTAL**                | **1,800** | **1,688** | **270** | **132** | **15.0%** | **7.3%** |
 
+![Phase 3 run-OK heatmap, repo × model](assets/figures/phase3-heatmap-runok.png)
+
+*Run-OK rate by repo × model (phase 3 calibration run_1). Three "fortress" repos (`aspnetcore`, `roslyn`, `server`) sit at 0% across every model — naive standalone-csproj generation does not survive their build configurations. `eShop` is the inverse: tests compile but none run.*
+
 Two takeaways:
 
 1. **The compile-vs-run gap is the headline number.** 270 cells compiled but only 132 ran successfully — roughly half of tests that build cleanly still fail at runtime (assertion failures, thrown exceptions, hung tests with no `[Fact]` actually executed, etc). This is the "compiles but doesn't run" failure mode that motivated routing test-runner output back into the loop, and the run-OK column is what the rest of the phase will optimise.
 2. **Compile-OK ≈ 3.1× phase 2; run-OK ≈ 5.3× phase 2.** Phase 2 (single shot, no feedback) hit 4.8% compile / 1.4% run across the same 6-model panel on this target set (259 / 75 out of 5,400 cells). Phase 3 calibration (1 run/cell with in-loop compile + run feedback) hits 15.0% compile / 7.3% run on 1,800 cells — i.e. the in-loop feedback is buying real ground, not just burning more tokens. The full 3-run sweep will tell us whether the gain holds with more attempts per cell.
+
+![Run-OK progression across phases](assets/figures/progression-runok.png)
+
+*Run-OK rate per model across phase 2 (no feedback) and phase 3 (compile + run feedback in-loop). Every model in the panel gains; `grok-4-1-fast` and `llama-3.3-70b-instruct` gain the most.*
 
 > **Note on the two compile counts.** The runner's in-loop sandbox (which decides what feedback to give the model) is more conservative than the canonical evaluator: 252 compile / 91 run-OK vs the evaluator's 270 / 132. The runner builds in a synthetic standalone csproj for speed; the evaluator builds inside the production csproj where transitive references resolve correctly. The evaluator numbers are the headline; the runner numbers are an internal feedback signal.
 
@@ -70,6 +82,11 @@ RESULTS.md               Cross-phase comparison table (the headline scoreboard)
 ### Why we target only uncovered sites
 
 The phase 1 baseline detected 5,154 Mode #1 static-call sites in production code across 15 repos. 1,087 (21.1%) are already line-covered by the existing test suites. The input set in [`targets/v1/targets.csv`](targets/v1/targets.csv) deliberately excludes those, scoping each later phase to **3,147 sites that are not currently covered**. The headline metric for each phase is:
+
+![Baseline coverage by repo](assets/figures/coverage-baseline.png)
+
+*Phase 1 baseline coverage by repository. The target set is the uncovered remainder; phases 2+ aim to convert dark bars into light ones with generated tests.*
+
 
 > "Of the 3,147 targets, how many did this phase newly cover with a passing generated test?"
 

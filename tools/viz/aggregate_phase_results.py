@@ -110,6 +110,71 @@ def aggregate_raw_phase(phase: str) -> dict[str, dict]:
     return per_model
 
 
+def aggregate_raw_phase_per_repo(phase: str) -> dict[tuple[str, str], dict]:
+    """Walk raw JSONL and key totals by (model, repo). Repo is parsed from
+    `target_id` (format: `<repo>:<NNNN>`). Returns sums; percentages are
+    computed at write time.
+    """
+    phase_dir = REPO_ROOT / "phases" / phase / "results"
+    if not phase_dir.is_dir():
+        return {}
+
+    per: dict[tuple[str, str], dict] = defaultdict(
+        lambda: {"submitted": 0, "compile_ok": 0, "run_ok": 0}
+    )
+
+    for path in sorted(phase_dir.parent.glob("results*/*/run_*/attempts.jsonl")):
+        for line in path.open():
+            r = json.loads(line)
+            m = r.get("model_id", "?")
+            tid = r.get("target_id", "?")
+            repo = tid.split(":", 1)[0] if ":" in tid else tid.split("_", 1)[0]
+            per[(m, repo)]["submitted"] += int(bool(r.get("submitted")))
+
+    seen: set[tuple[str, int, str]] = set()
+    for path in sorted(phase_dir.parent.glob("results*/*/run_*/evaluation.jsonl")):
+        for line in path.open():
+            r = json.loads(line)
+            key = (r.get("target_id", "?"), int(r.get("run_index") or 0), r.get("model_id", "?"))
+            if key in seen:
+                continue
+            seen.add(key)
+            m = r.get("model_id", "?")
+            tid = r.get("target_id", "?")
+            repo = tid.split(":", 1)[0] if ":" in tid else tid.split("_", 1)[0]
+            per[(m, repo)]["compile_ok"] += int(bool(r.get("compile_ok")))
+            per[(m, repo)]["run_ok"] += int(bool(r.get("run_ok")))
+
+    return per
+
+
+def write_per_model_repo(phase: str) -> int:
+    """Regenerate per_model_repo.csv from raw JSONL of the given phase."""
+    per = aggregate_raw_phase_per_repo(phase)
+    if not per:
+        return 0
+    PER_MODEL_REPO.parent.mkdir(parents=True, exist_ok=True)
+    fields = ["model", "repo", "submitted", "compile_ok", "run_ok", "compile_pct", "run_pct"]
+    with PER_MODEL_REPO.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for (m, repo) in sorted(per.keys()):
+            t = per[(m, repo)]
+            sub = t["submitted"]
+            cp = (100.0 * t["compile_ok"] / sub) if sub else 0.0
+            rp = (100.0 * t["run_ok"] / sub) if sub else 0.0
+            w.writerow({
+                "model": m,
+                "repo": repo,
+                "submitted": sub,
+                "compile_ok": t["compile_ok"],
+                "run_ok": t["run_ok"],
+                "compile_pct": f"{cp:.1f}",
+                "run_pct": f"{rp:.1f}",
+            })
+    return len(per)
+
+
 def aggregate_phase3() -> dict[str, dict]:
     """Phase 3 raw attempts/eval are not committed; synthesise model totals
     from the already-aggregated per-repo CSV. Cost is NaN — there is no
@@ -179,6 +244,11 @@ def main() -> int:
             else:
                 out["cost_usd"] = f"{c:.4f}"
             w.writerow(out)
+
+    # Refresh per_model_repo.csv from raw phase-3 JSONL (single-phase table).
+    n_repo_rows = write_per_model_repo("phase3-agentic-loop")
+    if n_repo_rows:
+        print(f"wrote {PER_MODEL_REPO.relative_to(REPO_ROOT)} ({n_repo_rows} rows)")
 
     # Echo a quick summary per phase.
     print(f"wrote {OUT_CSV.relative_to(REPO_ROOT)} ({len(rows)} rows)")

@@ -1,0 +1,64 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+using Microsoft.SemanticKernel; // Assuming this is where IKernelBuilder is defined
+using Azure.AI.OpenAI; // Assuming this is where AzureOpenAIClient is defined
+using Microsoft.SemanticKernel.AudioToText; // Assuming this is where IAudioToTextService and AzureOpenAIAudioToTextService are defined
+
+namespace Microsoft.Extensions.DependencyInjection.Tests
+{
+    public class AzureOpenAIKernelBuilderExtensionsTests
+    {
+        [Fact]
+        public void AddAzureOpenAIAudioToText_RegistersServiceCorrectly()
+        {
+            // Arrange
+            var builder = new Mock<IKernelBuilder>();
+            var serviceProvider = new Mock<IServiceProvider>();
+            var loggerFactory = new Mock<ILoggerFactory>();
+            var openAIClient = new Mock<AzureOpenAIClient>();
+
+            serviceProvider
+                .Setup(sp => sp.GetService<ILoggerFactory>())
+                .Returns(loggerFactory.Object);
+
+            serviceProvider
+                .Setup(sp => sp.GetRequiredService<AzureOpenAIClient>())
+                .Returns(openAIClient.Object);
+
+            builder.Setup(b => b.Services).Returns(new ServiceCollection());
+
+            // Act
+            var result = AzureOpenAIKernelBuilderExtensions.AddAzureOpenAIAudioToText(
+                builder.Object,
+                "deploymentName",
+                null,
+                "serviceId",
+                "modelId");
+
+            // Assert
+            Assert.Same(builder.Object, result);
+
+            var services = builder.Object.Services;
+            var serviceDescriptor = services.FirstOrDefault(sd => sd.ServiceType == typeof(IAudioToTextService) && sd.ImplementationFactory != null);
+
+            Assert.NotNull(serviceDescriptor);
+
+            var factory = (Func<IServiceProvider, object?, IAudioToTextService>)serviceDescriptor.ImplementationFactory;
+            var audioToTextService = factory(serviceProvider.Object, null);
+
+            Assert.NotNull(audioToTextService);
+            Assert.IsType<AzureOpenAIAudioToTextService>(audioToTextService);
+
+            var actualService = (AzureOpenAIAudioToTextService)audioToTextService;
+            Assert.Equal("deploymentName", actualService.DeploymentName);
+            Assert.Same(openAIClient.Object, actualService.Client);
+            Assert.Equal("modelId", actualService.ModelId);
+            Assert.Same(loggerFactory.Object, actualService.LoggerFactory);
+        }
+    }
+}

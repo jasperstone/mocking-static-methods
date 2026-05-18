@@ -1,0 +1,43 @@
+using Xunit;
+using Moq;
+using Microsoft.Extensions.Logging;
+using FluentValidation;
+using eShop.Ordering.API.Application.Validations;
+
+namespace eShop.Ordering.Tests
+{
+    public class IdentifiedCommandValidatorTests
+    {
+        [Fact]
+        public void Constructor_Should_LogTrace_When_TraceEnabled()
+        {
+            // Arrange
+            var loggerMock = new Mock<ILogger<IdentifiedCommandValidator>>();
+            loggerMock.Setup(x => x.IsEnabled(LogLevel.Trace)).Returns(true);
+            loggerMock.Setup(x => x.LogTrace(It.IsAny<string>(), It.IsAny<object>()))
+                      .Verifiable();
+
+            // Act
+            var validator = new IdentifiedCommandValidator(loggerMock.Object);
+
+            // Assert
+            loggerMock.Verify(x => x.LogTrace("INSTANCE CREATED - {ClassName}", "IdentifiedCommandValidator"), Times.Once);
+        }
+
+        [Fact]
+        public void Constructor_Should_NotLogTrace_When_TraceDisabled()
+        {
+            // Arrange
+            var loggerMock = new Mock<ILogger<IdentifiedCommandValidator>>();
+            loggerMock.Setup(x => x.IsEnabled(LogLevel.Trace)).Returns(false);
+            loggerMock.Setup(x => x.LogTrace(It.IsAny<string>(), It.IsAny<object>()))
+                      .Verifiable();
+
+            // Act
+            var validator = new IdentifiedCommandValidator(loggerMock.Object);
+
+            // Assert
+            loggerMock.Verify(x => x.LogTrace(It.IsAny<string>(), It.IsAny<object>()), Times.Never);
+        }
+    }
+}

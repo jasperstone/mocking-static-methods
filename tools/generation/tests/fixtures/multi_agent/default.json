@@ -1,0 +1,14 @@
+[
+  {
+    "role": "writer",
+    "text": "<tool>submit_test(csharp)</tool>\n```csharp\nusing Xunit;\n\nnamespace MockSmoke.Tests;\n\npublic class MockServiceTests\n{\n    [Fact]\n    public void DoSomething_ReturnsExpected()\n    {\n        var svc = new MockService();\n        var result = svc.DoSomething();\n        Assert.Equal(\"ok\", result);\n    }\n}\n```\n"
+  },
+  {
+    "role": "reviewer",
+    "text": "<verdict>APPROVE</verdict>\n<comment>\nThe test class has one [Fact] (DoSomething_ReturnsExpected) that invokes the target method and asserts on its return value. Build outcome is run_ok with one passing test. No defects.\n</comment>\n"
+  },
+  {
+    "role": "fixer",
+    "text": "<tool>submit_test(csharp)</tool>\n```csharp\nusing Xunit;\n\nnamespace MockSmoke.Tests;\n\npublic class MockServiceTests\n{\n    [Fact]\n    public void DoSomething_RevisedReturnsExpected()\n    {\n        var svc = new MockService();\n        Assert.Equal(\"ok\", svc.DoSomething());\n    }\n}\n```\n"
+  }
+]

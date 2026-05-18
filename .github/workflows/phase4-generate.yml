@@ -1,0 +1,113 @@
+name: Phase 4 — generate (writer / reviewer / fixer)
+
+# Multi-agent generator for phase 4. workflow_dispatch ONLY — no schedules,
+# no push triggers, no PR triggers. Default behavior runs the mock-LLM
+# smoke test only, which makes NO Azure / Foundry calls.
+#
+# ⚠️ AZURE FREEZE: real Foundry dispatch is gated by TWO explicit
+# confirmations and the freeze end date (2026-06-08). The default value
+# of `mode` is "mock" so an accidental "Run workflow" click from the
+# GitHub UI cannot spend tokens.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Execution mode. 'mock' runs the smoke test only (no Azure). 'foundry' calls the real models (requires explicit confirmations below)."
+        required: true
+        default: "mock"
+        type: choice
+        options:
+          - mock
+          - foundry
+      target_set:
+        description: "Targets version (used in foundry mode only)."
+        required: false
+        default: "v2"
+      runs_per_cell:
+        description: "Independent runs per (model, target) cell (foundry mode)."
+        required: false
+        default: "3"
+      models:
+        description: "Comma-separated model ids; or 'all' (foundry mode)."
+        required: false
+        default: "none"
+      repos:
+        description: "Comma-separated repo names; or 'all' (foundry mode)."
+        required: false
+        default: "none"
+      limit_per_repo:
+        description: "Per-repo cap (foundry mode shakedown). Empty = no cap."
+        required: false
+        default: "1"
+      max_review_cycles:
+        description: "Max (review, fix, check) triples per cell."
+        required: false
+        default: "3"
+      i_understand_this_will_spend_money:
+        description: "Type 'yes' to acknowledge that 'foundry' mode WILL spend Azure tokens."
+        required: false
+        default: "no"
+      confirm_after_freeze:
+        description: "Type 'yes' to confirm the date is on or after the 2026-06-08 freeze end."
+        required: false
+        default: "no"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}"
+  cancel-in-progress: false
+
+env:
+  PHASE: phase4-multiagent
+
+jobs:
+
+  smoke:
+    name: "Mock-LLM smoke test (no Azure calls)"
+    if: ${{ github.event.inputs.mode == 'mock' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run multi-agent smoke test
+        run: |
+          set -euo pipefail
+          python3 -m pytest tools/generation/tests/test_multi_agent_smoke.py -v
+      - name: Sanity-print runner help (foundry mode is gated)
+        run: |
+          python3 tools/generation/multi_agent_runner.py --help
+
+  guard-foundry:
+    name: "Guard: confirm foundry-mode preconditions"
+    if: ${{ github.event.inputs.mode == 'foundry' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require explicit cost acknowledgement
+        run: |
+          if [ "${{ github.event.inputs.i_understand_this_will_spend_money }}" != "yes" ]; then
+            echo "::error::foundry mode requires i_understand_this_will_spend_money=yes"
+            exit 1
+          fi
+      - name: Require freeze-end confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_after_freeze }}" != "yes" ]; then
+            echo "::error::foundry mode requires confirm_after_freeze=yes (freeze ends 2026-06-08)"
+            exit 1
+          fi
+      - name: Check the date is actually on/after 2026-06-08
+        run: |
+          today=$(date -u +%Y-%m-%d)
+          if [ "$today" \< "2026-06-08" ]; then
+            echo "::error::Today ($today) is before the 2026-06-08 freeze end. Refusing to dispatch."
+            exit 1
+          fi
+      - name: ⚠️ Print dispatch plan
+        run: |
+          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | runs/cell: ${{ github.event.inputs.runs_per_cell }} | max_review_cycles: ${{ github.event.inputs.max_review_cycles }}"
+          echo "::warning::Production matrix plan + per-shard job wiring will be added in a follow-up PR before the first paid dispatch."

@@ -1,0 +1,119 @@
+using System;
+using System.IO;
+using System.Threading.Tasks;
+using ICSharpCode.SharpZipLib.Zip;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Volo.Abp.Cli.Commands.Services;
+using Volo.Abp.Cli.ProjectBuilding;
+using Volo.Abp.Cli.ProjectBuilding.Building;
+using Xunit;
+
+namespace Volo.Abp.Cli.Core.Tests.Commands.Services
+{
+    public class SourceCodeDownloadServiceTests
+    {
+        private readonly Mock<ILogger<SourceCodeDownloadService>> _loggerMock;
+        private readonly Mock<ModuleProjectBuilder> _moduleProjectBuilderMock;
+        private readonly Mock<NugetPackageProjectBuilder> _nugetPackageProjectBuilderMock;
+        private readonly Mock<NpmPackageProjectBuilder> _npmPackageProjectBuilderMock;
+        private readonly SourceCodeDownloadService _sourceCodeDownloadService;
+
+        public SourceCodeDownloadServiceTests()
+        {
+            _loggerMock = new Mock<ILogger<SourceCodeDownloadService>>();
+            _moduleProjectBuilderMock = new Mock<ModuleProjectBuilder>();
+            _nugetPackageProjectBuilderMock = new Mock<NugetPackageProjectBuilder>();
+            _npmPackageProjectBuilderMock = new Mock<NpmPackageProjectBuilder>();
+
+            _sourceCodeDownloadService = new SourceCodeDownloadService(
+                _moduleProjectBuilderMock.Object,
+                _nugetPackageProjectBuilderMock.Object,
+                _npmPackageProjectBuilderMock.Object)
+            {
+                Logger = _loggerMock.Object
+            };
+        }
+
+        [Fact]
+        public async Task DownloadModuleAsync_ShouldLogSuccessMessage()
+        {
+            // Arrange
+            var moduleName = "TestModule";
+            var outputFolder = Path.Combine(Path.GetTempPath(), "TestModule");
+            var version = "1.0.0";
+            var gitHubAbpLocalRepositoryPath = string.Empty;
+            var gitHubVoloLocalRepositoryPath = string.Empty;
+            var options = new AbpCommandLineOptions();
+
+            var projectBuildResult = new ProjectBuildResult
+            {
+                ZipContent = new byte[0]
+            };
+
+            _moduleProjectBuilderMock
+                .Setup(x => x.BuildAsync(It.IsAny<ProjectBuildArgs>()))
+                .ReturnsAsync(projectBuildResult);
+
+            // Act
+            await _sourceCodeDownloadService.DownloadModuleAsync(moduleName, outputFolder, version, gitHubAbpLocalRepositoryPath, gitHubVoloLocalRepositoryPath, options);
+
+            // Assert
+            _loggerMock.Verify(
+                x => x.LogInformation(It.Is<string>(s => s.Contains($"'{moduleName}' has been successfully downloaded to '{outputFolder}'"))),
+                Times.Once);
+        }
+
+        [Fact]
+        public async Task DownloadNugetPackageAsync_ShouldLogSuccessMessage()
+        {
+            // Arrange
+            var packageName = "TestPackage";
+            var outputFolder = Path.Combine(Path.GetTempPath(), "TestPackage");
+            var version = "1.0.0";
+
+            var projectBuildResult = new ProjectBuildResult
+            {
+                ZipContent = new byte[0]
+            };
+
+            _nugetPackageProjectBuilderMock
+                .Setup(x => x.BuildAsync(It.IsAny<ProjectBuildArgs>()))
+                .ReturnsAsync(projectBuildResult);
+
+            // Act
+            await _sourceCodeDownloadService.DownloadNugetPackageAsync(packageName, outputFolder, version);
+
+            // Assert
+            _loggerMock.Verify(
+                x => x.LogInformation(It.Is<string>(s => s.Contains($"'{packageName}' has been successfully downloaded to '{outputFolder}'"))),
+                Times.Once);
+        }
+
+        [Fact]
+        public async Task DownloadNpmPackageAsync_ShouldLogSuccessMessage()
+        {
+            // Arrange
+            var packageName = "TestPackage";
+            var outputFolder = Path.Combine(Path.GetTempPath(), "TestPackage");
+            var version = "1.0.0";
+
+            var projectBuildResult = new ProjectBuildResult
+            {
+                ZipContent = new byte[0]
+            };
+
+            _npmPackageProjectBuilderMock
+                .Setup(x => x.BuildAsync(It.IsAny<ProjectBuildArgs>()))
+                .ReturnsAsync(projectBuildResult);
+
+            // Act
+            await _sourceCodeDownloadService.DownloadNpmPackageAsync(packageName, outputFolder, version);
+
+            // Assert
+            _loggerMock.Verify(
+                x => x.LogInformation(It.Is<string>(s => s.Contains($"'{packageName}' has been successfully downloaded to '{outputFolder}'"))),
+                Times.Once);
+        }
+    }
+}

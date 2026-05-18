@@ -18,10 +18,9 @@ Sources:
   * `phases/phase2-agentic/results/<model>/run_*/evaluation.jsonl` (compile_ok,
     run_ok). Joined on (target_id, run_index, model_id).
   * `phases/phase2-singleshot/results/...` — same shape if/when it ever fills.
-  * `phases/phase3-agentic-loop/results/...` — top-level is empty in this repo,
-    so phase 3 attempts/eval are not available raw. We synthesise the phase 3
-    attempts/submitted/compile_ok/run_ok totals from the already-aggregated
-    `tools/viz/data/per_model_repo.csv`, and leave `cost_usd` blank (NaN).
+  * `phases/phase3-agentic-loop/results/...` — same shape as phase 2;
+    attempts.jsonl carries `total_prompt_tokens` / `total_completion_tokens`
+    so cost_usd is computed the same way.
 """
 from __future__ import annotations
 
@@ -43,7 +42,7 @@ PER_MODEL_REPO = REPO_ROOT / "tools" / "viz" / "data" / "per_model_repo.csv"
 
 # Phases that have raw attempts/evaluation jsonl under
 # `phases/<phase>/results/<model>/run_*/`.
-RAW_PHASES = ["phase2-agentic", "phase2-singleshot"]
+RAW_PHASES = ["phase2-agentic", "phase2-singleshot", "phase3-agentic-loop"]
 
 
 def aggregate_raw_phase(phase: str) -> dict[str, dict]:
@@ -151,9 +150,12 @@ def main() -> int:
         for m, t in sorted(per_model.items()):
             rows.append({"phase": phase, "model": m, **t})
 
-    p3 = aggregate_phase3()
-    for m, t in sorted(p3.items()):
-        rows.append({"phase": "phase3-agentic-loop", "model": m, **t})
+    # Phase 3 fallback path (synthesise from per_model_repo.csv) only fires if
+    # the raw aggregation found nothing.
+    if not any(r["phase"] == "phase3-agentic-loop" for r in rows):
+        p3 = aggregate_phase3()
+        for m, t in sorted(p3.items()):
+            rows.append({"phase": "phase3-agentic-loop", "model": m, **t})
 
     fields = [
         "phase",

@@ -1,10 +1,10 @@
 # Phase 3 — Agentic Loop with Compile + Run Feedback: Costs
 
-> **Status: final.** This document covers the full 5,390-attempt phase 3 sweep
-> (3 runs × ~1,800 attempts). One 9-cell shard
-> (`llama-3.3-70b-instruct × duplicati × run_3`) failed at container init and
-> is being re-dispatched as a fix shard; the cost rises by ~$0.15 when it
-> lands.
+> **Status: final.** This document covers the full 5,400-attempt phase 3 sweep
+> (3 runs × 1,800 attempts). The 9-cell `llama × duplicati × run_3` and
+> 1-cell `gpt-4.1-nano × efcore × run_3` shards that failed at container
+> init in the original sweep have been re-dispatched as fix shards and
+> their results merged.
 
 The full design and findings are in [REPORT.md](REPORT.md). This file focuses on **what it costs to reproduce on a small Azure budget** so other students and researchers can plan accordingly.
 
@@ -17,36 +17,36 @@ phase 2 ([phase 2 COSTS](../phase2-agentic/COSTS.md)). Token counts are
 captured in `results/<model>/run_{1,2,3}/attempts.jsonl` and priced against
 published Azure list rates (captured 2026-05-12, identical to phase 2).
 
-Scope: **300 cells × 3 runs × 6 models ≈ 5,400 generation attempts**;
-**5,390 landed** (one 9-cell shard failed at container init). Dispatched via
-GitHub Actions matrix across calibration (run [25877016877](https://github.com/jasperstone/mocking-static-methods/actions/runs/25877016877)) and the runs 2+3 sweep (run [25921948154](https://github.com/jasperstone/mocking-static-methods/actions/runs/25921948154)). The 6-model panel is
+Scope: **300 cells × 3 runs × 6 models = 5,400 generation attempts** (all
+landed after the two fix shards). Dispatched via GitHub Actions matrix
+across calibration (run [25877016877](https://github.com/jasperstone/mocking-static-methods/actions/runs/25877016877)) and the runs 2+3 sweep (run [25921948154](https://github.com/jasperstone/mocking-static-methods/actions/runs/25921948154)), with fix shards landed via runs [26048493558](https://github.com/jasperstone/mocking-static-methods/actions/runs/26048493558) and [26048496818](https://github.com/jasperstone/mocking-static-methods/actions/runs/26048496818). The 6-model panel is
 the phase 2 panel minus `gpt-5-codex` ([phase 2 COSTS §"Decision: drop gpt-5-codex"](../phase2-agentic/COSTS.md#decision-drop-gpt-5-codex-from-phases-3-5)).
 
 | Model | Calls | Submit rate | Prompt tokens | Completion tokens | Cost (USD) | % of spend |
 |-------|------:|-------:|--------------:|------------------:|-----------:|-----------:|
-| `llama-3.3-70b-instruct` |   891 | 99.3% | 42,601,973 | 3,630,539 | **$32.83** | **40%** |
+| `llama-3.3-70b-instruct` |   900 | 99.3% | 42,846,465 | 3,655,273 | **$33.02** | **40%** |
 | `codestral-2501`         |   900 | 95.0% | 50,986,768 | 4,206,602 | $19.08 | 23% |
 | `gpt-4.1-mini`           |   900 | 70.8% | 27,069,565 | 1,570,369 | $13.34 | 16% |
 | `grok-4-1-fast`          |   900 | 99.9% | 27,610,167 | 3,048,918 |  $7.05 |  9% |
 | `phi-4`                  |   900 | 96.6% | 25,191,436 | 4,784,526 |  $5.54 |  7% |
-| `gpt-4.1-nano`           |   899 | 77.9% | 36,346,455 | 1,289,605 |  $4.15 |  5% |
-| **Total**                | **5,390** | **89.9%** | **209,806,364** | **18,530,559** | **$81.99** | 100% |
+| `gpt-4.1-nano`           |   900 | 77.9% | 36,464,180 | 1,290,688 |  $4.16 |  5% |
+| **Total**                | **5,400** | **89.9%** | **210,168,581** | **18,556,376** | **$82.19** | 100% |
 
 > Regenerate this table with `python3 tools/cost/estimate.py --phase phase3-agentic-loop --md`,
 > or refresh the cross-phase CSV with `python3 tools/viz/aggregate_phase_results.py`.
 
 ### Headline reading
 
-- **`llama-3.3-70b-instruct` consumed 40% of phase 3 spend** — $32.83 for
-  50 green tests, the worst $/green ratio in the panel. The reason is
+- **`llama-3.3-70b-instruct` consumed 40% of phase 3 spend** — $33.02 for
+  52 green tests, the worst $/green ratio in the panel. The reason is
   structural: the in-loop feedback turns add compile-error and TRX-failure
   context to every retry, and on a 70B model the prompt tokens for those
   turns are not cheap. Llama's submit rate climbed to 99.3% (vs phase 2's
   85.4%), so it spent more attempts in the multi-turn fix loop instead of
   refusing early.
 - **Compile-vs-run improvement is real:** phase 2 6-model panel hit 4.8% / 1.4%
-  on 5,400 cells for $16.58; phase 3 hits 14.5% / 7.1% on 5,390 cells for
-  $81.99. That's **3.0× compile and 5.1× run-OK for 4.95× cost.**
+  on 5,400 cells for $16.58; phase 3 hits 14.6% / 7.1% on 5,400 cells for
+  $82.19. That's **3.0× compile and 5.1× run-OK for 4.96× cost.**
 - **Submit rate convergence:** phase 2 submit rates ranged from 13.6%
   (grok) to 94.1% (phi-4). In phase 3, every model except `gpt-4.1-mini`
   submits above 77%, and four of six are above 95%. The feedback loop
@@ -56,14 +56,14 @@ the phase 2 panel minus `gpt-5-codex` ([phase 2 COSTS §"Decision: drop gpt-5-co
   - `grok-4-1-fast`: $7.05 / 133 = **$0.053 per green test** ← cheapest
   - `gpt-4.1-mini`: $13.34 / 109 = $0.122 per green test
   - `phi-4`: $5.54 / 30 = $0.185 per green test
-  - `gpt-4.1-nano`: $4.15 / 19 = $0.218 per green test
+  - `gpt-4.1-nano`: $4.16 / 19 = $0.219 per green test
   - `codestral-2501`: $19.08 / 43 = $0.444 per green test
-  - `llama-3.3-70b-instruct`: $32.83 / 50 = $0.657 per green test
-  - **Panel average: $81.99 / 384 = $0.214 per green test.**
+  - `llama-3.3-70b-instruct`: $33.02 / 52 = $0.635 per green test
+  - **Panel average: $82.19 / 386 = $0.213 per green test.**
 
 Compare to phase 2 (ex-codex): $16.58 / 75 = $0.221 per green test. **The
 cost-per-green-test is identical between phase 2 and phase 3 to the cent.**
-Phase 3 buys 5.1× more passing tests at 4.95× the cost — exactly the same
+Phase 3 buys 5.1× more passing tests at 4.96× the cost — exactly the same
 efficiency-frontier ratio. The in-loop feedback is a **strict pareto
 improvement**, not a cheaper-per-test improvement.
 
@@ -74,7 +74,7 @@ lag). Expected breakdown (using phase 2 ratios):
 
 | Source | Amount | Notes |
 |---|---:|---|
-| Foundry Models (token cost — measured) | $81.99 | Above table |
+| Foundry Models (token cost — measured) | $82.19 | Above table |
 | Foundry / Cognitive Services overhead | ~$8-12 | Pro-rated; phase 2 ran ~$11 for a 3-month window |
 | Storage / misc | ~$2 | Logs, blob, key vault |
 | **Estimated Azure total** | **~$92-96** | Will reconcile when the bill posts |
@@ -98,27 +98,28 @@ lag). Expected breakdown (using phase 2 ratios):
    phase 2 would have multiplied through the feedback loop; preserving codex
    under chain-of-feedback is not what this phase tests. The reasoning-tier
    comparison can be re-opened in a targeted later phase.
-5. **One container-init failure** (`llama × duplicati × run_3`, 9 cells)
-   consumed $0.00 in tokens. Re-dispatched as a fix shard; budget impact <$0.20.
+5. **Two container-init failures** (9-cell `llama × duplicati × run_3` plus
+   1-cell `gpt-4.1-nano × efcore × run_3`) consumed $0.00 in tokens in the
+   original sweep. Re-dispatched as fix shards; combined budget impact <$0.25.
 
 ---
 
 ## Cost projections — looking ahead to phase 4 / 5
 
-Phase 3 final = $81.99 across 5,390 attempts. Looking further out (same
+Phase 3 final = $82.19 across 5,400 attempts. Looking further out (same
 300-cell v2 sample, no resampling):
 
 | Phase | Strategy | Chain mult. vs phase 3 | Est. cost (~5,400 attempts) |
 |---|---|---:|---:|
-| Phase 3 | Agentic loop + compile + run feedback | 1.0× | **$81.99 (actual)** |
+| Phase 3 | Agentic loop + compile + run feedback | 1.0× | **$82.19 (actual)** |
 | Phase 4 | Multi-agent (writer / reviewer / fixer) | 2-3× | ~$165-245 |
 | Phase 5 | Multi-team coordination | 3-5× | ~$245-410 |
 
 Phase 4 is the next decision point on whether to keep all six models or trim
-the panel further. `gpt-4.1-nano` produced 19 green tests for $4.15 — fewer
+the panel further. `gpt-4.1-nano` produced 19 green tests for $4.16 — fewer
 absolute wins than every other model except phi-4. If phase 4 confirms the
 ordering, gpt-4.1-nano is a candidate for removal in phase 5. `llama` is the
-opposite question — 50 green tests but 40% of spend; phase 4 will reveal
+opposite question — 52 green tests but 40% of spend; phase 4 will reveal
 whether the extra cost buys differentiated coverage or duplicates the
 cheaper models.
 

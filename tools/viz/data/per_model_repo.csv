@@ -28,7 +28,7 @@ gpt-4.1-nano,abp,102,8,2,7.8,2.0
 gpt-4.1-nano,aspnetcore,94,0,0,0.0,0.0
 gpt-4.1-nano,duplicati,23,8,8,34.8,34.8
 gpt-4.1-nano,eShop,27,8,0,29.6,0.0
-gpt-4.1-nano,efcore,2,1,1,50.0,50.0
+gpt-4.1-nano,efcore,3,2,1,66.7,33.3
 gpt-4.1-nano,garnet,101,4,4,4.0,4.0
 gpt-4.1-nano,jellyfin,144,2,1,1.4,0.7
 gpt-4.1-nano,orleans,31,2,0,6.5,0.0
@@ -50,7 +50,7 @@ grok-4-1-fast,server,66,0,0,0.0,0.0
 llama-3.3-70b-instruct,OpenRA,21,1,1,4.8,4.8
 llama-3.3-70b-instruct,abp,122,25,5,20.5,4.1
 llama-3.3-70b-instruct,aspnetcore,116,0,0,0.0,0.0
-llama-3.3-70b-instruct,duplicati,18,8,5,44.4,27.8
+llama-3.3-70b-instruct,duplicati,27,12,7,44.4,25.9
 llama-3.3-70b-instruct,eShop,33,12,0,36.4,0.0
 llama-3.3-70b-instruct,efcore,3,1,1,33.3,33.3
 llama-3.3-70b-instruct,garnet,127,21,21,16.5,16.5

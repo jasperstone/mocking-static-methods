@@ -450,3 +450,6 @@ Mode1Analyzer/eshop_test.csv
 phases/phase2-agentic/results_v1_oldprompt/
 # Smoke-test scratch outputs
 tools/generation/ping_results.json
+
+# Dissertation context bundle (regenerable via tools/bundle_dissertation_context.py)
+dissertation_bundle/

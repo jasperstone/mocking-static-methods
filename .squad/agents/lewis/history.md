@@ -33,3 +33,6 @@ Vogel removed MAUI from `coverage-orchestrator.yml` (authorized by Brady after 4
 
 ### 2026-05-16T00:00:00Z — Team update
 viz layout changed — see `tools/viz/README.md` and `.squad/decisions.md` (entry: 2026-05-16: tools/viz restructure). Per-plot files under `tools/viz/plots/`, shared helpers in `tools/viz/lib/`, new derived `tools/viz/data/per_model_phase.csv` from `aggregate_phase_results.py`. Four new plot families shipped.
+
+### 2026-06-10 — Budget alert (decision pending your call)
+Vogel re-grounded `tools/cost/estimate.py` against the actual May Azure bill. **Phase-4 full-scope projection ≈ $1,197 = 479% of the $250 cap** (~$1,047 to the card); even halving Foundry-Tools overhead leaves ~$806 (322%). Jasper's framing: soft cap $150–250, stagger phase 4→June / phase 5→July, no scope cuts. **Scope-vs-staging decision is open and yours to drive.** No spend incurred, no workflow dispatched. See `.squad/decisions.md` entry "2026-06-10: Cost estimator models the actual Azure bill".

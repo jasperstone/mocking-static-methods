@@ -65,11 +65,12 @@ submit         Fixer (revised draft) → check → Reviewer → ...
 
 | Budget | Default | Rationale |
 |---|---:|---|
-| `max_review_cycles` | 3 | Each cycle is one (review, fix, check) triple. 3 is empirically the point where phase 3 fix-loop returns plateaued. |
+| `max_review_cycles` | **1 (frozen)** | **Frozen at 1 by Jasper (2026-06-10).** Each cycle is one (review, fix, check) triple. The multi-agent agent-invocation overhead is the dominant cost driver; cycles=1 minimizes it while still exercising writer→reviewer→fixer once. This is sealed — it does not change after run_1 calibration. See [Cost projection](#cost-projection) and decision `2026-06-10: phase-4 calibration is run_1`. |
 | `max_turns` (per agent) | 6 | Lower than phase 3's 12 because each agent has a narrower job. |
 | `max_reads` (per agent) | 4 | Half of phase 3 — most cells in phase 3 used ≤4 reads in the writer phase. |
 | `max_attempts` (submissions) | 4 | Same as phase 3. |
 | `run_timeout_s` | 60 | Same as phase 3. |
+| `runs_per_cell` | **3 (target), dispatched as run_1 → 2+3** | Writer invocations scale linearly with this. The 3-run target is dispatched incrementally: **run_1 = calibration** (300 cells × 6 models × 1 run = 1,800 writer calls) to get the first measured multi-agent cost + run-OK point, then a go/no-go, then **runs 2+3** with identical sealed config. run_1 is poolable with runs 2+3 only if nothing changes after calibration (see Reusability below). |
 
 ### Termination conditions
 
@@ -104,22 +105,110 @@ Conservative estimate: **2.0–2.5× run-OK lift over phase 3** (i.e.
 
 ## Cost projection
 
-Phase 3 cost $82.19 for 5,400 attempts. Multi-agent multiplies tokens
-roughly by **(1 + review_cycles × 2)**: each cycle adds a reviewer call
-and a fixer call. With `max_review_cycles = 3` and typical cycle count
-~1.8 (most cells will pass review on cycle 1 or 2), the effective
-multiplier is ~4.6×.
+> **Updated 2026-06-10** after the May Azure bill posted and
+> `tools/cost/estimate.py` was re-calibrated against it. The earlier
+> token-only "~$210" figure was **5× too low** — it modelled only Foundry
+> *Models* (token) cost and ignored the Foundry *Tools* / agent-runtime line,
+> which was the single biggest item on the bill ($182.26) and scales with
+> **agent invocations**, not tokens. The multi-agent loop multiplies
+> invocations per cell, so that term — not tokens — dominates phase 4.
+> Reproduce all numbers below with:
+> `python3 tools/cost/estimate.py --project-phase4 --cap 250`.
 
-| Source | Estimate | Notes |
-|---|---:|---|
-| Writer | $82.19 | Same as phase 3 single agent |
-| Reviewer (avg 1.8 cycles) | $50 | Shorter prompts, fewer tokens than writer |
-| Fixer (avg 1.5 cycles) | $80 | Similar to writer; produces full test file each time |
-| **Phase 4 total** | **~$210** | Within $250 tripwire |
+### Per-cell agent invocation count (the multiplier)
 
-If the writer / reviewer / fixer turn counts hold to projection, phase 4
-clears the tripwire with $40 headroom. If reviewer cycles average 2.5+
-instead of 1.8, phase 4 lands at ~$260 and we cut runs from 3 to 2.
+Phase 3 = a single writer agent per cell. Phase 4 adds a reviewer and a fixer
+inside a review loop bounded by `max_review_cycles` (C):
+
+```
+calls/cell = 1 writer + (reviewer per cycle × C) + (fixer per cycle × C)
+```
+
+**Theoretical max** is `1 + 2·C` (every cycle fires both a review and a fix):
+
+| `max_review_cycles` | Theoretical max calls/cell (`1 + 2C`) |
+|---:|---:|
+| 1 | 3 |
+| 2 | 5 |
+| 3 | 7 |
+
+**Realized average is lower** — most cells pass review before exhausting the
+cycle budget (early exit). The May-calibrated realized per-cycle rates are
+**0.6 reviewer / cycle** and **0.5 fixer / cycle**, giving `1 + 1.1·C`:
+
+| `max_review_cycles` | Reviewer (`0.6C`) | Fixer (`0.5C`) | Realized calls/cell (`1 + 1.1C`) |
+|---:|---:|---:|---:|
+| 1 | 0.6 | 0.5 | **2.1** |
+| 2 | 1.2 | 1.0 | **3.2** |
+| 3 | 1.8 | 1.5 | **4.3** |
+
+The `cycles=3` row (4.3 = 1 writer + 1.8 reviewer + 1.5 fixer) is the anchor
+that reproduces the published full-scope ~$1,197 projection. **The frozen design
+runs cycles=1 → 2.1 calls/cell (1 writer + 0.6 reviewer + 0.5 fixer), a −51% cut
+on the dominant overhead term** vs the cycles=3 anchor.
+
+`runs_per_cell` (R) is the other lever: writer invocations — and therefore the
+whole agent-invocation count and the Foundry Tools overhead — scale **linearly**
+with R. The phase-3 base of 5,400 writer invocations is `300 cells × 6 models ×
+3 runs`, i.e. R=3. **Cutting runs 3 → 1 divides the overhead base by 3.**
+
+### Bill-calibrated cost model
+
+Per config, combined cost = Foundry Tools overhead + Foundry Models (token):
+
+- **Foundry Tools overhead** = `total_agent_invocations × $0.03375` (May anchor:
+  $182.26 / 5,400 phase-3 writer calls). `total_agent_invocations = 1,800·R ×
+  (1 + 1.1·C)`.
+- **Foundry Models (token)** = per-role token-list × `1.95` recon factor. Role
+  token-list rates are derived from the runs=3/cycles=3 anchors (writer $82.19,
+  reviewer $50, fixer $80) and scale with each role's invocation count.
+- **Billing split:** token spend keeps the phase-3 marketplace fraction (~72%
+  marketplace: codestral + llama + grok); the Foundry Tools overhead is wholly
+  credit (Azure-side agent runtime). The **combined** total is what the cap
+  measures and is split-independent.
+
+### The decision: freeze cycles=1, dispatch calibration as run_1, keep the full 6-model panel
+
+Jasper's directive (2026-06-10): preserve the cross-model comparison — **never
+drop models** — and cut cost via review cycles, with the 3-run target dispatched
+incrementally so the calibration spend is not repeated. **`max_review_cycles` is
+frozen at 1**; the calibration is **run_1 of the real 3-run set**, not a throwaway.
+
+| Config | runs | cycles | Combined | % of $250 cap | To card | Notes |
+|---|---:|---:|---:|---:|---:|---|
+| **A — run_1 calibration** (first dispatch) | 1 | 1 | **~$209** | **84% (under cap)** | ~$59 | first measured multi-agent point; poolable into B |
+| **B — full 3-run set** (runs 2+3 after go/no-go) | 3 | 1 | **~$628** | 251% | ~$478 | run_1 + runs 2+3, pooled final result set |
+| **C — original full scope** (reference, pre-freeze) | 3 | 3 | **~$1,197** | 479% | ~$1,047 | the pre-freeze number we cut from |
+
+Freezing cycles at 1 takes the **calibration** projection from the old cycles=2
+~$304 down to **~$209 — under the $250 combined cap** (implied card spend only
+~$59, well inside the monthly $150 credit), making run_1 a clean go. The pooled
+full 3-run set (Config B) lands at **~$628** (251% of cap, ~$478 to card); that
+is the real go/no-go decision after run_1 reports its measured bill. Config C is
+the pre-freeze reference only.
+
+### Calibration is run_1 (reusability discipline)
+
+The calibration dispatch **is** run_1 of the frozen 3-run design, so the spend
+is not duplicated. run_1 is poolable with runs 2+3 **only if the harness,
+prompts, and config are frozen at one SHA and nothing changes after
+calibration.** Any prompt edit, cycle-count change, or model swap after
+calibration invalidates run_1 as a member of the 3-run set and forces a re-run.
+
+**Sequence:** smoke test (1 cell, correctness, <$0.10) → **run_1 = calibration**
+on the sealed harness (real adapter, full 6-model panel, cycles=1) → measure the
+actual bill across all meters → go/no-go vs the soft $150–250 combined cap →
+dispatch **runs 2+3** with identical config. Calibration replaces the *derived*
+Foundry Tools overhead factor in `tools/cost/estimate.py` with a *measured* one —
+phases 2/3 were single-agent, so the reviewer+fixer tool traffic (the $182 May
+Foundry Tools line) has never been directly measured and cannot be substituted
+from prior-phase data.
+
+> **Honest caveat:** the Foundry Tools overhead carries a known phase-2
+> over-attribution (some of the May $182 belongs to phase-2 agentic runs).
+> Halving it lowers every figure ~33–40% (Config A → ~$210) but does not change
+> the ranking or the conclusion that full scope blows the cap. The headline
+> figures above use full attribution (conservative for a go/no-go).
 
 ## Azure freeze
 

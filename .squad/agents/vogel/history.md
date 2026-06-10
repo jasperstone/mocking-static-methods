@@ -89,43 +89,15 @@ so calibration spend is not repeated. Captured the full frozen design + opened a
   origin. **NO Azure spend; no experiment workflow dispatched.**
 
 
-Jasper chose to cut phase-4 cost via **runs + review cycles, NOT by dropping models**
-(full 6-model panel preserved for the cross-model comparison). Extended
-`tools/cost/estimate.py` with a parametrized projection so the configs are reproducible.
-
-- **Per-cell agent call-count multiplier** (the dominant cost lever, drives Foundry
-  Tools overhead). Theoretical max = `1 + 2·C`; realized = `1 + 1.1·C` using
-  May-calibrated per-cycle rates (reviewer 0.6/cycle, fixer 0.5/cycle):
-  - cycles=1 → 2.1 calls/cell (max 3)
-  - cycles=2 → 3.2 calls/cell (max 5)
-  - cycles=3 → 4.3 calls/cell (max 7) ← anchor that reproduces $1,197
-  `runs_per_cell` scales writer invocations (and overhead) **linearly**; phase-3 base
-  5,400 = 300 cells × 6 models × **3 runs**, so base corresponds to runs=3.
-- **Projected configs (full 6-model panel, combined = cap metric):**
-  - **Config A — calibration (R=1, C=2):** ~**$304** combined, 122% of $250 cap,
-    ~$154 to card (≈ the $150 credit). Recommended next dispatch.
-  - **Config B — full sweep reduced cycles (R=3, C=2):** ~**$913**, 365% of cap,
-    ~$763 to card.
-  - **Config C — original full scope (R=3, C=3):** ~**$1,197**, 479% of cap,
-    ~$1,047 to card. Reproduces the published headline (consistency check ✓ — exact
-    $1,197.49).
-  - Cutting C 3→2 and R 3→1 = **$1,197 → $304 (3.9× reduction)** with no model drop.
-    None fit *under* the $250 combined cap; A is closest. (Half-Tools sensitivity →
-    A ≈ $210.)
-- **New CLI knobs** (backward-compatible; `--phase`/`--md`/`--cap` unchanged):
-  - `--project-phase4` → prints Configs A/B/C + comparison table (per-role decomposed
-    invocations + token-list + token-recon, Foundry Tools overhead, credit/marketplace
-    split, combined, cap% + credit utilization, implied card spend).
-  - `--runs N --review-cycles N` → ad-hoc config (e.g. R=2,C=2 → $608/243%).
-  - `--phase` now defaults to `phase3-agentic-loop` (was required); plain
-    `python3 tools/cost/estimate.py` still renders phase-3 + auto full-scope projection.
-  - Refactored `project_phase4(p3, cap, runs, review_cycles, label, md)` — derives
-    per-invocation token rates from the runs=3/cycles=3 anchors so token cost scales
-    correctly with both R and C; overhead = total_agent_inv × $0.03375.
-- **Files:** `tools/cost/estimate.py` (extended), `phases/phase4-multiagent/PLAN.md`
-  (rewrote Cost projection: 1+2C / 1+1.1C math, A/B/C table; budgets table notes
-  C=2/R=1 first dispatch), `phases/phase3-agentic-loop/COSTS.md` (forward projection now
-  bill-calibrated, $82.19 = token-only vs ~$342.71 actual). NO Azure spend; no dispatch.
+**Superseded intermediate (cycles=2 exploration):** Before the cycles=1 freeze above,
+the cut was framed as runs 3→1 + cycles 3→2 (Config A ≈ $304/122%, B ≈ $913, C ≈ $1,197).
+The cycles=1 freeze replaced it (A run_1 ≈ $209). Per-cell multiplier model retained in
+`estimate.py`: invocations/cell = `1 + reviewer×C + fixer×C`, realized `1 + 1.1·C`
+(reviewer 0.6/cycle, fixer 0.5/cycle) → C1=2.1, C2=3.2, C3=4.3 (C3 anchor reproduces
+$1,197); `runs_per_cell` scales writer calls + Foundry Tools overhead linearly. CLI:
+`--project-phase4 --cap 250` (decomposed A/B/C table), `--runs N --review-cycles N`
+(ad-hoc); `--phase` defaults to phase3-agentic-loop. Full historical detail in decisions.md
+("Phase-4 cost cut via runs + review-cycles" — SUPERSEDED) and `history-archive.md`.
 
 ### 2026-06-10 — Cost estimator rebuilt to project the ACTUAL Azure bill (not token-only)
 `tools/cost/estimate.py` modelled only per-token cost ($82.19 phase 3) while the real
@@ -186,11 +158,8 @@ Added 2 new jobs:
 
 Active matrix: **15 repos**. Triggered runs: OpenRA=25552129165, StockSharp=25552132370.
 
-### 2026-05-08 — StockSharp coverlet.console fix — commit d3c765d
-Run 25552132370: 178-byte cobertura stub while 4239/4263 tests passed. MSTest 4.x SDK choice triggers MTP routing → data-collector silent-no-op. Swapped to canonical coverlet.console wrap. Built assembly is `StockSharp.Tests.dll` (RootNamespace from `common_target_tests.props` overrides). New run: 25556051863.
-
-### 2026-05-08 — StockSharp flaky-filter (partial); coverlet+MTP empty-modules blocker — commits 4d07fc1, a89d57e, f82c22d
-Added `FullyQualifiedName!~` exclusions for 5 flaky classes (`AsyncExtensionsTests`, `ConnectorBasketTests`, `PathsTests`, `ReportTests`, `TransactionIdStorageTests`). **Filter worked**: run 25562087626 went 0 failures / 4096 passed / 11 skipped. **But cobertura 231 bytes with empty Module table** — coverlet ran but instrumented zero modules despite ~80 dependency DLLs in `Tests/bin/Release/net10.0/`. Round 2 (run 25562607958) added `--include "[StockSharp*]*"` + `--include "[Ecng*]*"`. Self-inflicted SIGPIPE bug from `ls | head` killed step before coverlet started — reverted diag in `f82c22d`. `--include` patterns remain, unproven. Stopped at 2 attempts. Full diagnosis: decision `2026-05-08: StockSharp flaky-test filter — partial fix`.
+### 2026-05-08 — StockSharp coverlet.console fix + MTP empty-modules blocker — commits d3c765d, 4d07fc1, a89d57e, f82c22d
+Run 25552132370: 178-byte cobertura stub while 4239/4263 tests passed — MSTest 4.x SDK triggers MTP routing → data-collector silent-no-op. Swapped to canonical coverlet.console wrap (built assembly `StockSharp.Tests.dll`, RootNamespace override). Then added `FullyQualifiedName!~` exclusions for 5 flaky classes (`AsyncExtensionsTests`, `ConnectorBasketTests`, `PathsTests`, `ReportTests`, `TransactionIdStorageTests`) → run 25562087626 went 0 failures / 4096 passed. **But cobertura 231 bytes, empty Module table** — coverlet ran yet instrumented zero modules despite ~80 dependency DLLs. Round 2 added `--include "[StockSharp*]*"`/`[Ecng*]*` (unproven); self-inflicted SIGPIPE from `ls | head` killed the step (reverted in `f82c22d`). Stopped at 2 attempts. Full diagnosis: decisions.md "2026-05-08: StockSharp flaky-test filter — partial fix".
 
 ### Earlier entries
 - 2026-05-06 — Silent empty-cobertura fix (commit 7885485)

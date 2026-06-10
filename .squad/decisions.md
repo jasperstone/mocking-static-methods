@@ -82,3 +82,109 @@ staging must be reconsidered before any dispatch.**
 **Validation:** `python3 tools/cost/estimate.py --phase phase3-agentic-loop --md` runs clean,
 prints the decomposed table + subtotals + cap utilization; phase-3 combined = $342.53
 (residual −$0.18 vs actual). Plain output, `--cap`, and `--md` all preserved.
+
+### 2026-06-10: Phase-4 cost cut via runs + review-cycles, NOT model drop  *(SUPERSEDED)*
+
+> **Superseded by the 2026-06-10 "Phase-4 calibration is run_1 of the frozen design" entry
+> below.** This entry's cycles=2 framing (Config A ≈ $304) was the intermediate exploration;
+> the final frozen design uses `max_review_cycles = 1` (Config A run_1 ≈ $209). Retained for
+> the audit trail of how the design converged. Numbers below are historical.
+
+**By:** Vogel (CI/CD), requested by Jasper
+
+**What:** Full-scope phase 4 (300-cell v2 × full 6-model panel × runs_per_cell=3 ×
+max_review_cycles=3) projects ~**$1,197 combined = 479% of the $250 cap**. Jasper's
+decision: preserve the cross-model comparison (**keep the full 6-model panel — never
+drop models**) and cut cost via **runs (3→1) and review cycles (3→2)** instead. Extended
+`tools/cost/estimate.py` with a reproducible, bill-calibrated phase-4 projection
+parametrized by runs_per_cell and max_review_cycles.
+
+**The multiplier math (documented inline in PLAN.md):** per-cell agent invocations =
+`1 writer + reviewer×cycles + fixer×cycles`. Theoretical max = `1 + 2·C`; realized =
+`1 + 1.1·C` using May-calibrated per-cycle rates (reviewer 0.6/cycle, fixer 0.5/cycle):
+cycles=1 → 2.1, cycles=2 → 3.2, cycles=3 → 4.3 (the cycles=3 anchor reproduces $1,197).
+`runs_per_cell` scales writer invocations — and the dominant Foundry Tools overhead —
+**linearly** (phase-3 base 5,400 writer calls = 300×6×3 = runs=3).
+
+**Projected configs at this stage (cycles=2 framing — historical):**
+
+| Config | runs | cycles | Combined | % of $250 cap | To card |
+|---|---:|---:|---:|---:|---:|
+| A — calibration | 1 | 2 | ~$304 | 122% | ~$154 |
+| B — full sweep, reduced cycles | 3 | 2 | ~$913 | 365% | ~$763 |
+| C — original full scope (reference) | 3 | 3 | ~$1,197 | 479% | ~$1,047 |
+
+Consistency check: the estimator's cycles=3 / runs=3 path reproduces $1,197.49 exactly.
+**No Azure spend incurred. No workflow dispatched.** Estimator-only.
+
+**Files:** `tools/cost/estimate.py`, `phases/phase4-multiagent/PLAN.md`,
+`phases/phase3-agentic-loop/COSTS.md`.
+
+### 2026-06-10: Phase-4 calibration is run_1 of the frozen design (not a throwaway)
+
+**By:** Vogel (CI/CD), requested by Jasper
+
+**What:** Reframe the phase-4 calibration pass as **run_1 of the real experiment**
+so the calibration work and spend are not repeated. The phase-4 config is **frozen
+now** (sealed at one SHA before run_1) and does not change after calibration.
+
+**Frozen phase-4 config (decided now — do not touch after calibration):**
+- `max_review_cycles = 1` — down from the original 3. Jasper's decision: the
+  multi-agent tool overhead (Foundry Tools / agent-runtime invocations) is the
+  dominant cost driver; cycles=1 minimizes it while still exercising the
+  writer → reviewer → fixer loop once.
+- `runs_per_cell = 3` total target, dispatched incrementally as **run_1
+  (calibration) → go/no-go → runs 2+3**.
+- **Full 6-model panel, no models dropped** (codestral-2501, gpt-4.1-mini,
+  gpt-4.1-nano, grok-4-1-fast, llama-3.3-70b-instruct, phi-4). Keeping the panel
+  full preserves the cross-model comparison.
+- Per-cell params unchanged from phases 2/3: temperature 0.0, top_p 1.0, seed 42,
+  max_output_tokens 4096.
+
+**Calibration = run_1 (the framing change):** The calibration is dispatched early
+to get the first real multi-agent cost + run-OK data point, then **pooled into the
+final result set** as run_1 of the 3-run design. This supersedes the earlier
+"Config A calibration is a separate ~$150 spend" framing — calibration is now
+run_1, i.e. spend we would make anyway, with a go/no-go checkpoint attached.
+
+**Reusability condition (the discipline):** run_1 is poolable with runs 2+3 **only
+if the harness, prompts, and config are frozen at one SHA and nothing changes after
+calibration.** Any prompt edit, cycle-count change, or model swap after calibration
+invalidates run_1 as a member of the 3-run set and forces a re-run.
+
+**Sequence:** smoke test (1 cell, correctness, <$0.10) → **run_1 = calibration** on
+the sealed harness (real adapter, full panel, cycles=1) → measure actual bill across
+all meters → go/no-go vs the soft $150–250 combined cap → dispatch **runs 2+3** with
+identical config.
+
+**Why prior-phase data can't substitute:** phases 2/3 were single-agent; phase 4's
+reviewer+fixer tool traffic (the $182 May "Foundry Tools" line) has never been
+directly measured. Calibration replaces the *derived* overhead factor in
+`tools/cost/estimate.py` with a *measured* one.
+
+**Bill-calibrated projections (full 6-model panel; combined = cap metric; reproduce
+with `python3 tools/cost/estimate.py --project-phase4 --cap 250`):**
+
+| Config | runs | cycles | Combined | % of $250 cap | To card |
+|---|---:|---:|---:|---:|---:|
+| **A — run_1 calibration** (first dispatch) | 1 | 1 | **~$209** | **84% (under cap)** | ~$59 |
+| **B — full 3-run set** (runs 2+3 after go/no-go) | 3 | 1 | **~$628** | 251% | ~$478 |
+| **C — original full scope** (reference, pre-freeze) | 3 | 3 | **~$1,197** | 479% | ~$1,047 |
+
+Freezing cycles at 1 brings the **calibration** (run_1) under the $250 combined cap
+(~$209, ~$59 to card — inside the $150 credit), a clean go. The pooled full 3-run
+set (~$628) is the real go/no-go after run_1's measured bill lands.
+
+**No Azure spend incurred. No workflow dispatched.** Estimator config and PLAN docs
+only; dispatch is gated on the smoke test + run_1 go/no-go after the ~Jun 11 credit
+reset.
+
+**Files:** `tools/cost/estimate.py` (named configs A/B aligned to frozen cycles=1),
+`phases/phase4-multiagent/PLAN.md` (budgets table cycles=1 frozen + runs_per_cell
+run_1 framing; cost projection table + calibration-as-run_1 section).
+
+**Git provenance:** Committed to branch `jasper/phase4-scaffold` as commit `aea5d165`,
+pushed to origin, recorded on open **PR #28**
+(https://github.com/jasperstone/mocking-static-methods/pull/28). PLAN.md exists only on
+the scaffold branch, so the cost-calibration work legitimately rides PR #28 rather than a
+fresh branch off `main`. (See orchestration log for the git-discipline process note.)

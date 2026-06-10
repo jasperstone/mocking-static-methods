@@ -188,3 +188,35 @@ pushed to origin, recorded on open **PR #28**
 (https://github.com/jasperstone/mocking-static-methods/pull/28). PLAN.md exists only on
 the scaffold branch, so the cost-calibration work legitimately rides PR #28 rather than a
 fresh branch off `main`. (See orchestration log for the git-discipline process note.)
+
+### 2026-06-10: phase4-tripwire-250 Azure budget created (combined soft cap = $250, alert-only)
+
+**By:** Vogel (CI/CD), requested by Jasper
+
+**What:** Created the Azure budget `phase4-tripwire-250` referenced by
+`phases/phase4-multiagent/phase.lock.yaml` and `REPLICATION.md §2`. Budget creation is a
+FREE control-plane operation — no token/compute spend.
+
+- **Scope:** subscription (`/subscriptions/9490eefa-f2af-4485-983f-63397bfb5386`) — the
+  same scope as `phase3-tripwire-250`. Subscription scope tracks **total monthly spend**,
+  which is exactly the combined soft cap: both marketplace (card) and credit spend count
+  toward it.
+- **Amount / grain:** $250, Monthly. timePeriod 2026-06-01 → 2027-06-01 UTC.
+- **Notifications:** Actual **50% ($125) / 80% ($200) / 100% ($250)** + a **Forecasted 100%** alert.
+- **Email:** reused the contactEmail already configured on `phase3-tripwire-250` (retrieved
+  via `az rest get`). No email invented; `git config user.email` not read.
+
+**Why combined cap = $250:** per Jasper's decision, marketplace + credit spend both count
+toward one soft cap. A single subscription-scoped budget at $250 measures the combined total
+directly (split-independent), matching the cost estimator's "combined = cap metric" model.
+
+**Enforcement caveat (important):** Azure budgets **ALERT only** — they do NOT hard-stop spend.
+A true at-cap kill requires wiring the 100% alert → action group → webhook/runbook that cancels
+the dispatch (larger infra, NOT built — proposed as a follow-up). The real hard stop remains the
+subscription **spending-limit toggle**, currently OFF to allow the soft-cap (credit-overage) strategy.
+
+**Git provenance:** also committed the outstanding `.squad` bookkeeping (calibration-as-run_1
+decision merge + cross-agent history) as commit `9d07268` on `jasper/phase4-scaffold` (PR #28),
+pushed to origin.
+
+**No Azure spend. No generation/eval workflow dispatched. No Foundry model invoked.**

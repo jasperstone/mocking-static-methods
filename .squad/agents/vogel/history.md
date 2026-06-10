@@ -56,93 +56,64 @@ CI/CD agent. Owns `.github/workflows/` (coverage-orchestrator, test-discovery), 
 
 ## Recent Updates
 
-### 2026-06-10 — Phase-4 calibration reframed as run_1; cycles=1 frozen; on PR #28
-Jasper reframed the phase-4 calibration pass as **run_1 of the real 3-run experiment**
-so calibration spend is not repeated. Captured the full frozen design + opened a PR.
+### 2026-06-10 — phase4-tripwire-250 budget created + PR #28 squad bookkeeping committed
+- **Squad bookkeeping commit:** staged ONLY the 4 intended `.squad` paths (lewis +
+  vogel history, decisions.md, deleted inbox `vogel-phase4-calibration-is-run1.md`),
+  committed as **`9d07268`** ("squad: merge calibration-as-run_1 decision + Scribe
+  bookkeeping") and pushed to `jasper/phase4-scaffold` (PR #28), range
+  `aea5d165..9d072682`. Gotcha: `.squad/decisions/inbox/` is gitignored, so the
+  deletion of the tracked inbox file was already staged from the working-tree delete
+  (`D` in index) — `git add`/`git rm --cached`/`git add -u` all error on the ignored
+  pathspec, but the deletion lands in the commit anyway. `.squad/log/` and
+  `.squad/orchestration-log/` are **gitignored** (`git check-ignore` returns them) —
+  Scribe's session/orchestration logs are NOT committed; that's the established repo
+  behavior, leave them.
+- **phase4-tripwire-250 created** (Azure budget = FREE control-plane op, no spend):
+  scope = **subscription** (`/subscriptions/9490eefa-f2af-4485-983f-63397bfb5386`),
+  same scope as phase3-tripwire-250 so it tracks total monthly spend = the combined
+  $250 soft cap (marketplace + credit both count). Amount **$250 Monthly**,
+  timePeriod 2026-06-01 → 2027-06-01 UTC. Notifications: **Actual 50% / 80% / 100%**
+  + **Forecasted 100%**. Created via `az rest --method put` on the
+  `Microsoft.Consumption/budgets` provider, api-version 2024-08-01. Verified with
+  `az consumption budget show/list` (currentSpend $0).
+- **Email handling:** reused the contactEmail already configured on
+  **phase3-tripwire-250** (fetched via `az rest get`, 1 distinct address) — did NOT
+  invent one or read `git config user.email`. Stashed to a temp file, used in the
+  PUT body, then deleted the temp file. Never printed in the summary (PII).
+- **Enforcement caveat:** Azure budgets **ALERT only** — they do NOT hard-stop spend.
+  A true at-cap kill = wire the 100% alert → action group → webhook/runbook that
+  cancels the dispatch (larger infra, NOT built here — flagged as a follow-up). The
+  real hard stop remains the subscription **spending-limit toggle** (currently OFF
+  for the soft-cap strategy).
+- **No token/compute spend:** no generation/eval workflow dispatched, no Foundry
+  model invoked. Budget creation + git only.
 
-- **Frozen phase-4 config (sealed before run_1, no changes after):**
-  `max_review_cycles = 1` (down from 3 — multi-agent tool overhead is the dominant
-  cost driver; cycles=1 minimizes it while still firing writer→reviewer→fixer once);
-  `runs_per_cell = 3` target dispatched as **run_1 → go/no-go → runs 2+3**; full
-  6-model panel (no drops); temp 0.0, top_p 1.0, seed 42, max_output_tokens 4096.
-- **Calibration = run_1.** Not a throwaway — pooled into the final result set.
-  **Reusability discipline:** run_1 is poolable with runs 2+3 ONLY if harness/prompts/
-  config are frozen at one SHA; any prompt edit / cycle change / model swap after
-  calibration invalidates run_1 and forces a re-run.
-- **Bill-calibrated cycles=1 figures** (`estimate.py --project-phase4`):
-  run_1 calibration (R=1,C=1) = **$209 / 84% of $250 cap — UNDER the cap**, ~$59 to
-  card (inside the $150 credit) → clean go. Full 3-run set (R=3,C=1) = **$628 / 251%**,
-  ~$478 to card → the real go/no-go after run_1's measured bill. Reference original
-  (R=3,C=3) = $1,197 / 479%. Freezing cycles 2→1 dropped the calibration from the old
-  ~$304 to $209.
-- **Code/doc changes:** `tools/cost/estimate.py` — realigned named `P4_CONFIGS` to the
-  frozen design (A=run_1 R1/C1, B=full set R3/C1, C=reference R3/C3); `P4_DEFAULT_*`
-  left at R3/C3 so plain-run still reproduces the $1,197 consistency check.
-  `phases/phase4-multiagent/PLAN.md` — budgets table (`max_review_cycles` = 1 frozen,
-  `runs_per_cell` run_1 framing), cost projection table + new "Calibration is run_1"
-  section. Decision recorded in inbox `vogel-phase4-calibration-is-run1.md`.
-- **Git:** PLAN.md lives only on `jasper/phase4-scaffold` (open PR #28), not on
-  `main` — a branch off main couldn't carry the PLAN.md edits coherently. Per
-  Jasper's call (Option C), committed the cost-calibration work directly onto
-  `jasper/phase4-scaffold` so it rides the existing **PR #28**
-  (https://github.com/jasperstone/mocking-static-methods/pull/28). Pushed to
-  origin. **NO Azure spend; no experiment workflow dispatched.**
+### 2026-06-10 — Phase-4 calibration reframed as run_1; cycles=1 frozen; on PR #28 *(condensed)*
+Jasper froze the phase-4 design and reframed the calibration pass as **run_1** of the real
+3-run set (not a throwaway). Frozen config: `max_review_cycles = 1`, `runs_per_cell = 3`
+(run_1 → go/no-go → runs 2+3), full 6-model panel (no drops), temp 0.0 / top_p 1.0 / seed 42 /
+max_output_tokens 4096. Bill-calibrated: run_1 (R1,C1) ≈ **$209 / 84%** — under the $250 cap
+(clean go, ~$59 to card); full 3-run set (R3,C1) ≈ **$628 / 251%** is the real go/no-go.
+Reusability discipline: run_1 poolable ONLY if harness/prompts/config frozen at one SHA.
+Code: `estimate.py` `P4_CONFIGS` realigned (A=R1/C1, B=R3/C1, C=R3/C3), `P4_DEFAULT_*` left
+at R3/C3; `PLAN.md` budgets/projection tables. Committed onto `jasper/phase4-scaffold` (PR #28).
+**NO Azure spend.** Full text → `history-archive.md`; canonical → decisions.md
+("Phase-4 calibration is run_1 of the frozen design").
 
-
-**Superseded intermediate (cycles=2 exploration):** Before the cycles=1 freeze above,
-the cut was framed as runs 3→1 + cycles 3→2 (Config A ≈ $304/122%, B ≈ $913, C ≈ $1,197).
-The cycles=1 freeze replaced it (A run_1 ≈ $209). Per-cell multiplier model retained in
-`estimate.py`: invocations/cell = `1 + reviewer×C + fixer×C`, realized `1 + 1.1·C`
-(reviewer 0.6/cycle, fixer 0.5/cycle) → C1=2.1, C2=3.2, C3=4.3 (C3 anchor reproduces
-$1,197); `runs_per_cell` scales writer calls + Foundry Tools overhead linearly. CLI:
-`--project-phase4 --cap 250` (decomposed A/B/C table), `--runs N --review-cycles N`
-(ad-hoc); `--phase` defaults to phase3-agentic-loop. Full historical detail in decisions.md
-("Phase-4 cost cut via runs + review-cycles" — SUPERSEDED) and `history-archive.md`.
-
-### 2026-06-10 — Cost estimator rebuilt to project the ACTUAL Azure bill (not token-only)
-`tools/cost/estimate.py` modelled only per-token cost ($82.19 phase 3) while the real
-May Foundry bill was ~$342 (5×). Rebuilt it to reconcile against the May anchors.
-
-- **Two reconciliation knobs (May-calibrated, tunable constants):**
-  - `TOKEN_RECON_FACTOR = 1.95` — Foundry Models $160.45 / phase-3 token-list $82.19 = 1.952.
-    Slight over-attribution (phase 2 tokens also in the May 12–16 window), so true
-    phase-3-only factor is bounded ~1.6–1.95×; defaulted to the upper anchor (conservative
-    for a go/no-go — never under-states the bill).
-  - `TOOLS_SURCHARGE_PER_CALL = $182.26 / 5,400 = $0.03375` per **agent-role invocation**.
-    Foundry Tools ($182, the biggest line, previously unmodeled) is NOT token-based — it's
-    the agent/tool runtime surface. Modeled it to scale with agent invocations per cell,
-    not tokens. Phase 3 = 1 writer invocation/record → reproduces $182 by construction.
-- **Multi-agent overhead model (phase 4):** invocations/cell = 1 writer + 1.8 reviewer +
-  1.5 fixer = **4.3×** (avg-cycle assumptions from `phase4-multiagent/PLAN.md`). Overhead
-  scales on the invocation count, which is why phase 4 explodes: Foundry Tools alone →
-  23,220 invocations × $0.03375 = **$783**. Token (list) base $212 (PLAN itemized:
-  writer $82 + reviewer $50 + fixer $80) × 1.95 = $414.
-- **Billing split** in a `BILLING` dict (auditable, one-line editable): credit =
-  {gpt-4.1-mini, gpt-4.1-nano, phi-4, gpt-5-codex}; marketplace = {codestral, llama, grok}
-  per the user's directive. Overhead assigned wholly to the **credit** bucket (Azure-side
-  agent runtime). `--cap` default 250; reports credit vs marketplace subtotals + combined +
-  cap/credit utilization + implied card spend. **Azure AI Search excluded entirely.**
-- **az evidence captured (free read-only `az consumption usage list`, sub authenticated):**
-  Only **codestral** routes through `Microsoft.SaaS` (Codestral 25.01 paygo-inference meters).
-  **llama + grok bill as "Azure Llama/Grok Models" via `Microsoft.CognitiveServices`** — the
-  first-party (credit) surface. The actual May SaaS line was only **$24.22**, reconciling to
-  codestral-token alone (~$19×1.27), NOT all three (~$59). So the bill contradicts the stated
-  split: llama+grok likely belong in `credit`. Left the dict at the user's directive (combined
-  total — the cap number — is split-independent) but flagged it loudly. Dollar amounts are
-  NOT queryable via `az` on this MSDN credit sub (`pretaxCost` returns "None"); Cost Mgmt
-  portal remains the only dollar source. No Azure AI Search meters appeared in the May 12–16
-  window → confirms it's cleanly excludable.
-- **Residual gap:** phase-3 model combined = **$342.53** vs actual **$342.71** (−$0.18, by
-  construction). Remaining unmodeled: phase-2 token overlap inside the May window and
-  sub-$7 Container Registry/storage. What would close it: per-day per-model dollar data
-  (unavailable on this sub) to disentangle phase-2 from phase-3 in the shared window.
-- **Phase-4 projection: ~$1,197 combined (479% of $250 cap; credit side $900 = 6× the $150
-  credit → ~$750 card overage + $298 marketplace = ~$1,047 to card).** Even halving Foundry
-  Tools (phase-2 attribution) → ~$806, still 322% of cap. **Full-scope phase 4 blows the cap
-  by a wide margin — this is the real go/no-go signal.**
-- **Files:** `tools/cost/estimate.py` (rebuilt), `phases/phase3-agentic-loop/COSTS.md`
-  (the $82-vs-bill discussion), `phases/phase4-multiagent/PLAN.md` (multiplier reasoning).
-  NO Azure spend, NO workflow dispatched.
+### 2026-06-10 — Cost estimator rebuilt to project the ACTUAL Azure bill *(condensed)*
+Rebuilt `tools/cost/estimate.py` from token-only ($82.19 phase 3) to reconcile against the
+real ~$342 May Foundry bill. Two May-calibrated knobs: `TOKEN_RECON_FACTOR = 1.95` (Foundry
+Models $160.45 / token-list $82.19) and `TOOLS_SURCHARGE_PER_CALL = $0.03375` ($182.26 / 5,400
+agent-role invocations — Foundry Tools is the biggest line, NOT token-based). Multi-agent
+overhead (phase 4) = 4.3 invocations/cell. `BILLING` dict splits credit vs marketplace; AI
+Search excluded. az evidence: only codestral routes via `Microsoft.SaaS`; llama+grok bill via
+`Microsoft.CognitiveServices` (credit surface), so the May SaaS line ($24.22) suggests they
+belong in credit — flagged but left per directive (combined/cap number is split-independent;
+dollars not queryable via az on this MSDN sub). Phase-3 model = $342.53 vs actual $342.71
+(−$0.18). Full-scope phase-4 projection ≈ **$1,197 / 479%** — the go/no-go signal. Files:
+`estimate.py`, `phase3-agentic-loop/COSTS.md`, `phase4-multiagent/PLAN.md`. **NO Azure spend.**
+Full text → `history-archive.md`; canonical → decisions.md ("Cost estimator models the actual
+Azure bill").
 
 ### 2026-05-16T00:00:00Z — Team update (viz layout)
 viz layout changed — see `tools/viz/README.md` and `.squad/decisions.md` (entry: 2026-05-16: tools/viz restructure). Per-plot files under `tools/viz/plots/`, shared helpers in `tools/viz/lib/`, new derived `tools/viz/data/per_model_phase.csv` from `aggregate_phase_results.py`. Four new plot families shipped.

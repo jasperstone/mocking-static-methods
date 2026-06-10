@@ -97,3 +97,94 @@ After round-1 (commit 05b60b4): garnet recovered (transient); Avalonia, eShop, S
 - `dotnet workload install maui` is Linux-incompatible. Use `maui-android` for cross-platform MAUI tests on Linux runners.
 - Local-clone inspection beats CI iteration. RustSdk's tiny dependency footprint (1 csproj) was found in 2 grep commands.
 - NEVER `dotnet restore <whole.sln>` for solutions that mix test/server/utility projects. Workload manifests evaluate the whole graph at restore time. Per-csproj restore of just the test projects is the safe default.
+
+---
+
+## Archived from history.md on 2026-06-10 (size-gate summarization)
+
+### 2026-06-10 — Phase-4 calibration reframed as run_1; cycles=1 frozen; on PR #28
+Jasper reframed the phase-4 calibration pass as **run_1 of the real 3-run experiment**
+so calibration spend is not repeated. Captured the full frozen design + opened a PR.
+
+- **Frozen phase-4 config (sealed before run_1, no changes after):**
+  `max_review_cycles = 1` (down from 3 — multi-agent tool overhead is the dominant
+  cost driver; cycles=1 minimizes it while still firing writer→reviewer→fixer once);
+  `runs_per_cell = 3` target dispatched as **run_1 → go/no-go → runs 2+3**; full
+  6-model panel (no drops); temp 0.0, top_p 1.0, seed 42, max_output_tokens 4096.
+- **Calibration = run_1.** Not a throwaway — pooled into the final result set.
+  **Reusability discipline:** run_1 is poolable with runs 2+3 ONLY if harness/prompts/
+  config are frozen at one SHA; any prompt edit / cycle change / model swap after
+  calibration invalidates run_1 and forces a re-run.
+- **Bill-calibrated cycles=1 figures** (`estimate.py --project-phase4`):
+  run_1 calibration (R=1,C=1) = **$209 / 84% of $250 cap — UNDER the cap**, ~$59 to
+  card (inside the $150 credit) → clean go. Full 3-run set (R=3,C=1) = **$628 / 251%**,
+  ~$478 to card → the real go/no-go after run_1's measured bill. Reference original
+  (R=3,C=3) = $1,197 / 479%. Freezing cycles 2→1 dropped the calibration from the old
+  ~$304 to $209.
+- **Code/doc changes:** `tools/cost/estimate.py` — realigned named `P4_CONFIGS` to the
+  frozen design (A=run_1 R1/C1, B=full set R3/C1, C=reference R3/C3); `P4_DEFAULT_*`
+  left at R3/C3 so plain-run still reproduces the $1,197 consistency check.
+  `phases/phase4-multiagent/PLAN.md` — budgets table (`max_review_cycles` = 1 frozen,
+  `runs_per_cell` run_1 framing), cost projection table + new "Calibration is run_1"
+  section. Decision recorded in inbox `vogel-phase4-calibration-is-run1.md`.
+- **Git:** PLAN.md lives only on `jasper/phase4-scaffold` (open PR #28), not on
+  `main` — a branch off main couldn't carry the PLAN.md edits coherently. Per
+  Jasper's call (Option C), committed the cost-calibration work directly onto
+  `jasper/phase4-scaffold` so it rides the existing **PR #28**
+  (https://github.com/jasperstone/mocking-static-methods/pull/28). Pushed to
+  origin. **NO Azure spend; no experiment workflow dispatched.**
+
+**Superseded intermediate (cycles=2 exploration):** Before the cycles=1 freeze above,
+the cut was framed as runs 3→1 + cycles 3→2 (Config A ≈ $304/122%, B ≈ $913, C ≈ $1,197).
+The cycles=1 freeze replaced it (A run_1 ≈ $209). Per-cell multiplier model retained in
+`estimate.py`: invocations/cell = `1 + reviewer×C + fixer×C`, realized `1 + 1.1·C`
+(reviewer 0.6/cycle, fixer 0.5/cycle) → C1=2.1, C2=3.2, C3=4.3 (C3 anchor reproduces
+$1,197); `runs_per_cell` scales writer calls + Foundry Tools overhead linearly. CLI:
+`--project-phase4 --cap 250` (decomposed A/B/C table), `--runs N --review-cycles N`
+(ad-hoc); `--phase` defaults to phase3-agentic-loop. Full historical detail in decisions.md
+("Phase-4 cost cut via runs + review-cycles" — SUPERSEDED).
+
+### 2026-06-10 — Cost estimator rebuilt to project the ACTUAL Azure bill (not token-only)
+`tools/cost/estimate.py` modelled only per-token cost ($82.19 phase 3) while the real
+May Foundry bill was ~$342 (5×). Rebuilt it to reconcile against the May anchors.
+
+- **Two reconciliation knobs (May-calibrated, tunable constants):**
+  - `TOKEN_RECON_FACTOR = 1.95` — Foundry Models $160.45 / phase-3 token-list $82.19 = 1.952.
+    Slight over-attribution (phase 2 tokens also in the May 12–16 window), so true
+    phase-3-only factor is bounded ~1.6–1.95×; defaulted to the upper anchor (conservative
+    for a go/no-go — never under-states the bill).
+  - `TOOLS_SURCHARGE_PER_CALL = $182.26 / 5,400 = $0.03375` per **agent-role invocation**.
+    Foundry Tools ($182, the biggest line, previously unmodeled) is NOT token-based — it's
+    the agent/tool runtime surface. Modeled it to scale with agent invocations per cell,
+    not tokens. Phase 3 = 1 writer invocation/record → reproduces $182 by construction.
+- **Multi-agent overhead model (phase 4):** invocations/cell = 1 writer + 1.8 reviewer +
+  1.5 fixer = **4.3×** (avg-cycle assumptions from `phase4-multiagent/PLAN.md`). Overhead
+  scales on the invocation count, which is why phase 4 explodes: Foundry Tools alone →
+  23,220 invocations × $0.03375 = **$783**. Token (list) base $212 (PLAN itemized:
+  writer $82 + reviewer $50 + fixer $80) × 1.95 = $414.
+- **Billing split** in a `BILLING` dict (auditable, one-line editable): credit =
+  {gpt-4.1-mini, gpt-4.1-nano, phi-4, gpt-5-codex}; marketplace = {codestral, llama, grok}
+  per the user's directive. Overhead assigned wholly to the **credit** bucket (Azure-side
+  agent runtime). `--cap` default 250; reports credit vs marketplace subtotals + combined +
+  cap/credit utilization + implied card spend. **Azure AI Search excluded entirely.**
+- **az evidence captured (free read-only `az consumption usage list`, sub authenticated):**
+  Only **codestral** routes through `Microsoft.SaaS` (Codestral 25.01 paygo-inference meters).
+  **llama + grok bill as "Azure Llama/Grok Models" via `Microsoft.CognitiveServices`** — the
+  first-party (credit) surface. The actual May SaaS line was only **$24.22**, reconciling to
+  codestral-token alone (~$19×1.27), NOT all three (~$59). So the bill contradicts the stated
+  split: llama+grok likely belong in `credit`. Left the dict at the user's directive (combined
+  total — the cap number — is split-independent) but flagged it loudly. Dollar amounts are
+  NOT queryable via `az` on this MSDN credit sub (`pretaxCost` returns "None"); Cost Mgmt
+  portal remains the only dollar source. No Azure AI Search meters appeared in the May 12–16
+  window → confirms it's cleanly excludable.
+- **Residual gap:** phase-3 model combined = **$342.53** vs actual **$342.71** (−$0.18, by
+  construction). Remaining unmodeled: phase-2 token overlap inside the May window and
+  sub-$7 Container Registry/storage. What would close it: per-day per-model dollar data
+  (unavailable on this sub) to disentangle phase-2 from phase-3 in the shared window.
+- **Phase-4 projection: ~$1,197 combined (479% of $250 cap; credit side $900 = 6× the $150
+  credit → ~$750 card overage + $298 marketplace = ~$1,047 to card).** Even halving Foundry
+  Tools (phase-2 attribution) → ~$806, still 322% of cap. **Full-scope phase 4 blows the cap
+  by a wide margin — this is the real go/no-go signal.**
+- **Files:** `tools/cost/estimate.py` (rebuilt), `phases/phase3-agentic-loop/COSTS.md`
+  (the $82-vs-bill discussion), `phases/phase4-multiagent/PLAN.md` (multiplier reasoning).
+  NO Azure spend, NO workflow dispatched.

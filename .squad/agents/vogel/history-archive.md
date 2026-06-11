@@ -188,3 +188,59 @@ May Foundry bill was ~$342 (5×). Rebuilt it to reconcile against the May anchor
 - **Files:** `tools/cost/estimate.py` (rebuilt), `phases/phase3-agentic-loop/COSTS.md`
   (the $82-vs-bill discussion), `phases/phase4-multiagent/PLAN.md` (multiplier reasoning).
   NO Azure spend, NO workflow dispatched.
+
+---
+
+## Archived 2026-06-11T20:42:57Z (moved from history.md — size gate)
+
+### 2026-06-10 — phase4-tripwire-250 budget created + PR #28 squad bookkeeping (full text)
+- **Squad bookkeeping commit:** staged ONLY the 4 intended `.squad` paths (lewis +
+  vogel history, decisions.md, deleted inbox `vogel-phase4-calibration-is-run1.md`),
+  committed as **`9d07268`** ("squad: merge calibration-as-run_1 decision + Scribe
+  bookkeeping") and pushed to `jasper/phase4-scaffold` (PR #28), range
+  `aea5d165..9d072682`. Gotcha: `.squad/decisions/inbox/` is gitignored, so the
+  deletion of the tracked inbox file was already staged from the working-tree delete
+  (`D` in index) — `git add`/`git rm --cached`/`git add -u` all error on the ignored
+  pathspec, but the deletion lands in the commit anyway. `.squad/log/` and
+  `.squad/orchestration-log/` are **gitignored** (`git check-ignore` returns them) —
+  Scribe's session/orchestration logs are NOT committed; that's the established repo
+  behavior, leave them.
+- **phase4-tripwire-250 created** (Azure budget = FREE control-plane op, no spend):
+  scope = **subscription** (`/subscriptions/9490eefa-f2af-4485-983f-63397bfb5386`),
+  same scope as phase3-tripwire-250 so it tracks total monthly spend = the combined
+  $250 soft cap (marketplace + credit both count). Amount **$250 Monthly**,
+  timePeriod 2026-06-01 → 2027-06-01 UTC. Notifications: **Actual 50% / 80% / 100%**
+  + **Forecasted 100%**. Created via `az rest --method put` on the
+  `Microsoft.Consumption/budgets` provider, api-version 2024-08-01. Verified with
+  `az consumption budget show/list` (currentSpend $0).
+- **Email handling:** reused the contactEmail already configured on
+  **phase3-tripwire-250** (fetched via `az rest get`, 1 distinct address) — did NOT
+  invent one or read `git config user.email`. Stashed to a temp file, used in the
+  PUT body, then deleted the temp file. Never printed in the summary (PII).
+- **Enforcement caveat:** Azure budgets **ALERT only** — they do NOT hard-stop spend.
+  A true at-cap kill = wire the 100% alert → action group → webhook/runbook that
+  cancels the dispatch (larger infra, NOT built here — flagged as a follow-up). The
+  real hard stop remains the subscription **spending-limit toggle** (currently OFF
+  for the soft-cap strategy).
+- **No token/compute spend:** no generation/eval workflow dispatched, no Foundry
+  model invoked. Budget creation + git only.
+
+### 2026-06-11 — phase3-tripwire-250 budget DELETED (redundant after phase 3 sealed) (full text)
+- Jasper confirmed phase 3 is done; `phase3-tripwire-250` became an exact redundant
+  twin of `phase4-tripwire-250` (same subscription scope, same $250 Monthly amount,
+  tracking the same total monthly spend). Deleted ONLY phase3.
+- **Prior config (captured before delete, for the record):** amount **$250**,
+  timeGrain **Monthly**, timePeriod **2026-05-01 → 2027-12-31 UTC**, currentSpend
+  **$6.27**, notifications **Actual 50% / 75% / 90% + Forecasted 100%**. (Note: phase3
+  used 50/75/90 thresholds; phase4 uses 50/80/100 — they were NOT identical on
+  thresholds, only on scope/amount/spend-tracking, which is what made phase3
+  redundant once phase 3 was sealed.)
+- Deleted via `az consumption budget delete --budget-name phase3-tripwire-250`
+  (subscription scope is the `az consumption budget` default; EXIT=0, no explicit
+  scope or `az rest` fallback needed).
+- **Remaining 3-budget set (verified via `az consumption budget list`):**
+  `VS_Credit_Budget` ($150, BillingMonth), `budget-mockstatic-50` ($50, Monthly),
+  `phase4-tripwire-250` ($250, Monthly). All intact, none touched.
+- Did NOT alter phase4 thresholds (a possible tweak is pending Jasper, separate task).
+- **No token/compute spend:** budget delete is a FREE control-plane op; no workflow
+  dispatched, no Foundry model invoked.

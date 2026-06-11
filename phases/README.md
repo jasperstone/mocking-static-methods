@@ -9,8 +9,8 @@ Each phase varies one thing — the test-generation strategy — against a fixed
 | 1 — baseline | No generation. Measure existing test suites against detected Mode#1 sites. | ✅ sealed ([`phase1-baseline/`](phase1-baseline/)) |
 | 2 — agentic, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, ≤6 turns. Can explore the repo before submitting; never sees its own compile or test output. | ✅ v2 sweep complete — 300 cells × 3 runs × 7 models = 6,300 attempts ([`phase2-agentic/`](phase2-agentic/)) |
 | 3 — agentic loop | Same single agent as phase 2, but compile errors **and `dotnet test` results** are fed back as additional turns so the agent can fix its own output, ≤4 submissions per cell. | ✅ v2 sweep complete — 300 cells × 3 runs × 6 models = 5,400 attempts ([`phase3-agentic-loop/`](phase3-agentic-loop/)) |
-| 4 — multi-agent | Writer / reviewer / fixer specialist agents collaborate per target. | 🟡 scaffold only — design in [`phase4-multiagent/PLAN.md`](phase4-multiagent/PLAN.md); Azure dispatch frozen until ~2026-06-08 |
-| 5 — multi-team | Multiple multi-agent teams compete or partition the target set. | not started |
+| 4 — agentic loop + testability refactoring | The phase-3 single agent, plus an `apply_refactor` tool that can introduce a testability seam into the production code (extract-and-override, wrapper interface, dependency parameterization) before testing it. Isolates the effect of a refactoring *capability*; prompts stay generic. | design in progress |
+| 5 — multi-agent | Writer / reviewer / fixer specialist agents collaborate per target. | 🟡 scaffold only — design in [`phase5-multiagent/PLAN.md`](phase5-multiagent/PLAN.md); Azure dispatch frozen until ~2026-06-08 |
 
 Every phase 2+ runs the **same 300-cell v2 sample** so cross-phase deltas reflect generation strategy, not target drift.
 
@@ -44,14 +44,15 @@ Each phase ships **its own** GitHub Actions workflow:
   coverage-orchestrator.yml         # always current — measures whatever's there
   phase2-agentic.yml                # frozen at seal of phase 2
   phase3-agentic-loop.yml           # frozen at seal of phase 3
-  phase4-multiagent.yml             # scaffolded, defaults to mock adapter
+  phase4-refactoring.yml            # planned — agentic loop + refactoring tool
+  phase5-{generate,evaluate,aggregate}.yml   # scaffolded (multi-agent), defaults to mock adapter
 ```
 
 Why one workflow per phase, not one parameterized workflow:
 
 - An older strategy can be re-run by checking out its git tag and dispatching its workflow. No `if:` branches, no flags, no chance of accidental cross-contamination.
 - The workflow file is listed in `phase.lock.yaml.infrastructure.generator_workflow_sha` — re-running a phase always means dispatching the file at exactly that SHA.
-- Future-you fixing a bug in `phase4-multiagent.yml` cannot accidentally change phase 2's behavior.
+- Future-you fixing a bug in `phase5-generate.yml` cannot accidentally change phase 2's behavior.
 
 ## To start a new phase
 

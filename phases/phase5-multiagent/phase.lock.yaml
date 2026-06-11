@@ -1,11 +1,11 @@
 # Snapshot of every input that affects this phase's reproducibility.
-# Phase 4 — Multi-agent (writer / reviewer / fixer) with in-loop compile + run feedback
+# Phase 5 — Multi-agent (writer / reviewer / fixer) with in-loop compile + run feedback
 #
 # STATUS: scaffold only. No production runs yet.
 # AZURE FREEZE: no real Foundry dispatch before ~2026-06-08.
 
 phase:
-  id: phase4-multiagent
+  id: phase5-multiagent
   title: "Multi-agent (writer / reviewer / fixer) with compile + run feedback"
   strategy: |
     Three-agent loop replacing phase 3's single-agent fix loop. A
@@ -17,7 +17,7 @@ phase:
     a "fixer" agent revises the test based on the reviewer's comment.
     The (review, fix, check) cycle repeats up to max_review_cycles. Same
     6-model panel and same v2 target set (300 cells, frozen SHAs) as
-    phase 3 — phase 4 is an A/B against phase 3 on the multi-agent
+    phase 3 — phase 5 is an A/B against phase 3 on the multi-agent
     structure alone.
   start_date: "2026-05-18"
   seal_date: ""
@@ -30,7 +30,7 @@ inputs:
 
 infrastructure:
   sdk_image: "mcr.microsoft.com/dotnet/sdk:10.0-noble"
-  sdk_image_digest: ""       # captured at workflow runtime; see phase4-generate.yml logs
+  sdk_image_digest: ""       # captured at workflow runtime; see phase5-generate.yml logs
   dotnet_sdk_version: "10.0.x"
   python_version: "3.12"
   orchestrator_workflow_sha: ""
@@ -132,7 +132,7 @@ cost:
     Budget alert "phase4-tripwire-250" — emails on 50/75/90% actual +
     100% forecast. $250 is a $40 headroom over the $210 PLAN.md
     projection. Same Foundry account as phases 2 and 3 — phase 3 spend
-    ($82.19) is already booked against this account; the phase 4 budget
+    ($82.19) is already booked against this account; the phase 5 budget
     is on top.
 
 results:

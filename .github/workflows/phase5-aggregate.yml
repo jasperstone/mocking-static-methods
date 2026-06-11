@@ -1,13 +1,13 @@
-name: Phase 4 — aggregate (scaffold)
+name: Phase 5 — aggregate (scaffold)
 
-# Aggregate phase 4 attempts.jsonl shards into per_model_phase.csv etc.
+# Aggregate phase 5 attempts.jsonl shards into per_model_phase.csv etc.
 # workflow_dispatch ONLY.
 #
 # This is a SCAFFOLD job. tools/viz/aggregate_phase_results.py already
 # picks up new phases automatically once their results/ directory has
 # rows, so this workflow is a thin wrapper that runs the aggregator and
 # uploads the regenerated CSVs as an artifact. It does NOT call the LLM
-# adapters; it is safe to run at any time but is a no-op until phase 4
+# adapters; it is safe to run at any time but is a no-op until phase 5
 # has results.
 
 on:
@@ -22,11 +22,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: "phase4-aggregate"
+  group: "phase5-aggregate"
   cancel-in-progress: false
 
 env:
-  PHASE: phase4-multiagent
+  PHASE: phase5-multiagent
 
 jobs:
   aggregate:
@@ -38,14 +38,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Detect whether phase 4 has results
+      - name: Detect whether phase 5 has results
         id: detect
         run: |
           if [ -d phases/${PHASE}/results ] && [ -n "$(find phases/${PHASE}/results -name 'attempts.jsonl' -print -quit 2>/dev/null)" ]; then
             echo "has_results=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_results=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::phase 4 has no attempts.jsonl yet — nothing to aggregate."
+            echo "::notice::phase 5 has no attempts.jsonl yet — nothing to aggregate."
           fi
       - name: Run aggregator
         if: ${{ steps.detect.outputs.has_results == 'true' }}
@@ -55,7 +55,7 @@ jobs:
         if: ${{ steps.detect.outputs.has_results == 'true' && github.event.inputs.upload_artifact == 'yes' }}
         uses: actions/upload-artifact@v4
         with:
-          name: phase4-aggregated-csvs
+          name: phase5-aggregated-csvs
           path: |
             tools/viz/data/*.csv
           if-no-files-found: warn

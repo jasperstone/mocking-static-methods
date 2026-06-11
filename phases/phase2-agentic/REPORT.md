@@ -143,9 +143,9 @@ For every (model, cell) pair, three artifact streams survive in `results/<model>
 
 Phase 2 establishes the no-feedback baseline: **8.2% compile, 3.3% run-green**, with the panel splitting cleanly into "strict but accurate" (codex) and "profligate but useless" (everything else). This sets up the phase 3-5 comparisons:
 
-1. **Phase 3 — agentic loop.** Same single agent, but compile errors fed back as additional turns. The hypothesis is that the cheap models' submission-happy behavior becomes useful once they can see their own mistakes — the gap between codex and the cheap panel should narrow.
-2. **Phase 4 — multi-agent (writer + reviewer).** A reviewer reads the candidate test and flags missing usings / wrong types before submission.
-3. **Phase 5 — multi-team.** One team writes the spec; a separate team writes the test from that spec.
+1. **Phase 3 — agentic loop.** Same single agent, but compile errors fed back as additional turns. The hypothesis is that the cheap models' submission-happy behavior becomes useful once they can see their own mistakes — the gap between codex and the cheap panel should narrow. *(Shipped: 14.6% compile / 7.1% run-OK.)*
+2. **Phase 4 — agentic loop + testability refactoring tool.** Adds an `apply_refactor` tool that introduces a testability seam into the production code before the test is written — extract-and-override, wrapper-interface/adapter, or dependency-parameterization. This isolates the effect of a refactoring *capability* on the fixed input set; the generation prompts stay generic (no per-target hints).
+3. **Phase 5 — multi-agent (writer + reviewer + fixer).** A reviewer reads the candidate test and flags missing usings / wrong types before submission, and a fixer agent applies the corrections.
 
 Each tier will run the **same 300 v2 cells** with the **same 6-model panel** (codex removed — see [COSTS.md](COSTS.md#decision-drop-gpt-5-codex-from-phases-3-5)). The phase 2 codex baseline is retained for reference; if a later phase specifically tests reasoning behavior it can re-include codex for a single targeted run.
 

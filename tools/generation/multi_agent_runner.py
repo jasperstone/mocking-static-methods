@@ -24,7 +24,7 @@ Output layout
 
 Usage (smoke):
     python3 tools/generation/multi_agent_runner.py \
-        --phase phase4-multiagent \
+        --phase phase5-multiagent \
         --model mock-llm \
         --run-index 0 \
         --target-set v2 \
@@ -34,7 +34,7 @@ Usage (smoke):
 
 Usage (real Foundry — DO NOT RUN BEFORE 2026-06-08):
     python3 tools/generation/multi_agent_runner.py \
-        --phase phase4-multiagent \
+        --phase phase5-multiagent \
         --model gpt-4.1-mini \
         --run-index 0 \
         --target-set v2 \

@@ -254,3 +254,94 @@ remain unchanged (Actual 50% / 80% / 100% + Forecasted 100%).
 - `phase4-tripwire-250` — $250, Monthly — KEPT (surviving combined soft-cap tripwire)
 
 **No Azure spend incurred. No workflow dispatched. No Foundry model invoked.**
+
+### 2026-06-11: Phase ladder renumbered in the reports (forward-looking roadmap labels only)
+
+**By:** Lewis (Lead), requested by Jasper (autopilot)
+
+**What:** Brought the stale forward-looking roadmap narrative in the published reports into line with the renumbered canonical phase ladder. Only FORWARD-LOOKING labels/projections changed; measured phase-2/phase-3 RESULTS numbers (compile/run rates, costs) were left untouched.
+
+**New canonical ladder:**
+- Phase 1 = baseline coverage
+- Phase 2 = agentic, no feedback
+- Phase 3 = agentic loop (compile+run feedback) — shipped, 14.6% compile / 7.1% run-OK
+- **Phase 4 = agentic loop + testability refactoring tool** (NEW; `apply_refactor` introduces a testability seam — extract-and-override / wrapper-interface-adapter / dependency-parameterization — into production code before testing; prompts stay generic; isolates the effect of a refactoring *capability* on the fixed input set)
+- **Phase 5 = multi-agent (writer + reviewer + fixer)** — moved here from old phase 4
+- **multi-team — DROPPED entirely**
+
+**Files changed (reports only):**
+- `phases/phase2-agentic/REPORT.md` — "## Next tiers" list rewritten (phase 4 = refactoring tool, phase 5 = multi-agent, multi-team removed); surrounding prose ("same 300 v2 cells, same 6-model panel, codex removed") preserved.
+- `phases/phase2-agentic/COSTS.md` — item 3 "Budget headroom" parenthetical → "(agentic loop with compile feedback, refactoring tool, multi-agent)"; projection table relabeled — Phase 4 = Agentic loop + refactoring tool (2-3×, ~$33-50, kept modest: one LLM agent + a local tool), Phase 5 = Multi-agent (writer + reviewer + fixer) (4-6×, ~$67-100); "Remaining phases total" → ~$133-200 for internal consistency. Table left explicitly ROUGH (precise phase-5 model lives in `tools/cost/estimate.py`).
+- `phases/phase3-agentic-loop/REPORT.md` — no-[Fact] closer "Phase 4" → "Phase 5" (reviewer behavior, not refactoring); runner/production-csproj parity "Phase 4 may close" → "A later phase may close" (sandbox parity, phase-agnostic); "## Next" heading + variance open-question phase labels updated (multi-agent worth-the-cost → phase 5; phase 4 reframed as immediate next refactoring-tool step, phase 5 multi-agent follows).
+
+**Deliberately NOT touched (naming mismatch left in place on purpose):**
+- Azure budget proper noun `phase4-tripwire-250` (preserve verbatim).
+- `.squad/` decisions + history that reference old phase4=multi-agent (append-only; not retroactively edited).
+- `phases/phase4-multiagent/` and `phases/phase5-multiagent/` directory names and their internal docs (out of scope for this edit). `phases/README.md` already reads multi-agent = phase 5, which happens to be consistent with the new ladder.
+
+**Why:** Jasper renumbered the ladder ("update the report, it's not final yet"). The reports were the public-facing forward-looking narrative still describing the OLD roadmap.
+
+**Follow-up flagged (not done):** internal `.squad` decision history and the `phases/phase4-multiagent/` directory still encode the OLD numbering (phase4=multi-agent). If/when the ladder is finalized, a future pass should reconcile directory names and the phase-4 cost-calibration decisions, keeping `phase4-tripwire-250` as a fixed proper noun.
+
+**No Azure spend. No workflow dispatched. Documentation edits only.**
+
+### 2026-06-11: Phase-4 (agentic loop + refactoring tool) cost model added to estimate.py
+
+**By:** Vogel (CI/CD), requested by Jasper (autopilot)
+
+**What:** Added a phase-4 cost projection to `tools/cost/estimate.py` and wired
+`--project-phase4` (the flag freed up by the phase-4→phase-5 multi-agent rename).
+NEW phase 4 = the SAME single writer agent as phase 3 PLUS a LOCAL `apply_refactor`
+tool (no LLM behind it) that introduces a testability seam (extract-and-override,
+wrapper-interface/adapter, dependency-parameterization) in production source before
+the test is written and the owning csproj is recompiled by the existing compile_only
+harness.
+
+**Modeling choices (the defensible model, documented in the `project_phase4`
+docstring; cites `phases/phase4-refactoring/PLAN.md`):**
+- **Exactly ONE LLM role (writer).** No reviewer, no fixer LLM — so unlike phase 5
+  there is no second/third model role multiplying token spend. This is the single
+  biggest reason phase 4 is far cheaper than phase 5.
+- **Token inflation, not an extra agent.** `P4R_TOKEN_INFLATION = 1.5` — a flat
+  multiplier on the phase-3 writer token base. Refactoring makes the writer take
+  more turns per cell (inspect target → choose seam → call apply_refactor → read
+  result → write/iterate test), so it emits ~50% more tokens per cell. Modest
+  (range ~1.4–1.6), not a whole extra agent.
+- **apply_refactor adds to invocation-scaled Foundry Tools overhead.**
+  `P4R_REFACTOR_CALLS_PER_CELL = 1.2` apply_refactor calls per cell (≈ one seam per
+  cell, occasional second), billed at the EXISTING `TOOLS_SURCHARGE_PER_CALL`
+  ($0.03375/invocation) exactly like read_file/list_dir. The tool is local
+  (zero-token) but the agent-runtime/tool surface still bills.
+- **Billing split unchanged in convention:** token spend keeps the phase-3
+  marketplace fraction; Foundry Tools overhead is wholly credit (same as
+  `project_phase5`).
+- **Default dispatch = run_1 (`P4R_DEFAULT_RUNS = 1`), the go/no-go,** mirroring the
+  frozen phase-5 run_1 design. NOTE the modeling tension: the phase-3 combined base
+  alone is ~$342 (> the $250 cap), so a full 3-run phase-4 sweep CANNOT be under cap.
+  Defaulting to run_1 is the honest resolution — it is the dispatch you actually run
+  first, and it lands under cap.
+
+**Projected numbers:**
+- **Phase 4 run_1 (runs=1) = $213.79 combined → 85.5% of the $250 cap, UNDER by
+  $36.21** (credit $156.13 / marketplace $57.67; ~$63.79 to card). Clean go.
+- Same-runs phase-3 single-writer baseline = $114.18, so phase 4 run_1 is ~1.87× the
+  phase-3 base — modestly above, as expected for added refactoring turns + tool calls.
+- For context, the full 3-run set (runs=3) projects ~$641 (257% of cap) — over cap
+  but ~54% of phase 5's $1,197, i.e. roughly half. The single-LLM-role design is the
+  whole reason it is far below the multi-agent phase 5.
+
+**Implementation:** `P4R_*` constants near the `P5_*` block; `def project_phase4(p3,
+cap, runs, refactor_calls, inflation, label, md)` mirroring `project_phase5`'s
+structure (per-role table, Foundry Tools/Models breakdown, credit/marketplace split,
+cap + $150-credit utilization, printed sanity check). `--project-phase4` and
+`--refactor-calls` wired in `main()`; `--runs` now shared across phase-4/phase-5
+ad-hoc projections. Normal runs auto-print the phase-4 go/no-go block alongside the
+existing auto phase-5 full-scope projection.
+
+**Nothing existing was renamed or broken:** `--project-phase5` / `project_phase5` /
+`P5_*` / `P3_RUNS_PER_CELL` / `FOUNDRY_*` / `TOKEN_RECON_FACTOR` / `CREDIT_USD` are
+all untouched. Verified: `--project-phase4 --cap 250` (EXIT 0, $213.79),
+`--project-phase5 --cap 250` (EXIT 0, Config C still $1,197.49), normal run (EXIT 0,
+phase-3 residual still −$0.18).
+
+**No Azure spend. Estimator-only change.**

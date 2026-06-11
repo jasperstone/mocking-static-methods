@@ -1,12 +1,12 @@
-name: Phase 4 — evaluate (scaffold)
+name: Phase 5 — evaluate (scaffold)
 
-# Canonical evaluator for phase 4 runs. workflow_dispatch ONLY.
+# Canonical evaluator for phase 5 runs. workflow_dispatch ONLY.
 #
-# This is a SCAFFOLD job that will mirror phase3-evaluate.yml once phase 4
+# This is a SCAFFOLD job that will mirror phase3-evaluate.yml once phase 5
 # has results to evaluate. Until then it prints a notice and exits.
 #
 # Wiring this end-to-end is a follow-up PR; it depends on the production
-# multi_agent_runner output landing in phases/phase4-multiagent/results/.
+# multi_agent_runner output landing in phases/phase5-multiagent/results/.
 
 on:
   workflow_dispatch:
@@ -28,22 +28,22 @@ permissions:
   contents: read
 
 concurrency:
-  group: "phase4-evaluate-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}"
+  group: "phase5-evaluate-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}"
   cancel-in-progress: false
 
 env:
-  PHASE: phase4-multiagent
+  PHASE: phase5-multiagent
 
 jobs:
   scaffold:
-    name: "Scaffold (no-op until phase 4 has results)"
+    name: "Scaffold (no-op until phase 5 has results)"
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
       - name: Notice
         run: |
-          echo "::notice::phase4-evaluate is a scaffold. It will mirror phase3-evaluate.yml once phases/phase4-multiagent/results/ has artifacts."
+          echo "::notice::phase5-evaluate is a scaffold. It will mirror phase3-evaluate.yml once phases/phase5-multiagent/results/ has artifacts."
           if [ -d phases/${PHASE}/results ] && [ -n "$(ls -A phases/${PHASE}/results 2>/dev/null)" ]; then
-            echo "::warning::phase 4 results directory is non-empty. Wire the canonical evaluator in a follow-up PR before relying on this workflow."
+            echo "::warning::phase 5 results directory is non-empty. Wire the canonical evaluator in a follow-up PR before relying on this workflow."
             ls -la phases/${PHASE}/results
           fi

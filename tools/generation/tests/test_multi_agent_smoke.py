@@ -26,7 +26,7 @@ def test_multi_agent_smoke():
         cmd = [
             sys.executable,
             str(RUNNER),
-            "--phase", "phase4-multiagent",
+            "--phase", "phase5-multiagent",
             "--model", "mock-llm",
             "--run-index", "0",
             "--target-set", "v2",

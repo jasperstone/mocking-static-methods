@@ -1,6 +1,6 @@
-name: Phase 4 — generate (writer / reviewer / fixer)
+name: Phase 5 — generate (writer / reviewer / fixer)
 
-# Multi-agent generator for phase 4. workflow_dispatch ONLY — no schedules,
+# Multi-agent generator for phase 5. workflow_dispatch ONLY — no schedules,
 # no push triggers, no PR triggers. Default behavior runs the mock-LLM
 # smoke test only, which makes NO Azure / Foundry calls.
 #
@@ -57,11 +57,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}"
+  group: "phase5-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}"
   cancel-in-progress: false
 
 env:
-  PHASE: phase4-multiagent
+  PHASE: phase5-multiagent
 
 jobs:
 

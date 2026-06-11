@@ -56,57 +56,68 @@ CI/CD agent. Owns `.github/workflows/` (coverage-orchestrator, test-discovery), 
 
 ## Recent Updates
 
-### 2026-06-11 — phase3-tripwire-250 budget DELETED (redundant after phase 3 sealed)
-- Jasper confirmed phase 3 is done; `phase3-tripwire-250` became an exact redundant
-  twin of `phase4-tripwire-250` (same subscription scope, same $250 Monthly amount,
-  tracking the same total monthly spend). Deleted ONLY phase3.
-- **Prior config (captured before delete, for the record):** amount **$250**,
-  timeGrain **Monthly**, timePeriod **2026-05-01 → 2027-12-31 UTC**, currentSpend
-  **$6.27**, notifications **Actual 50% / 75% / 90% + Forecasted 100%**. (Note: phase3
-  used 50/75/90 thresholds; phase4 uses 50/80/100 — they were NOT identical on
-  thresholds, only on scope/amount/spend-tracking, which is what made phase3
-  redundant once phase 3 was sealed.)
-- Deleted via `az consumption budget delete --budget-name phase3-tripwire-250`
-  (subscription scope is the `az consumption budget` default; EXIT=0, no explicit
-  scope or `az rest` fallback needed).
-- **Remaining 3-budget set (verified via `az consumption budget list`):**
-  `VS_Credit_Budget` ($150, BillingMonth), `budget-mockstatic-50` ($50, Monthly),
-  `phase4-tripwire-250` ($250, Monthly). All intact, none touched.
-- Did NOT alter phase4 thresholds (a possible tweak is pending Jasper, separate task).
-- **No token/compute spend:** budget delete is a FREE control-plane op; no workflow
-  dispatched, no Foundry model invoked.
+### 2026-06-11 — Phase-4 (agentic loop + refactoring tool) cost model added to estimate.py
+- The phase-4→phase-5 multi-agent rename freed the `--project-phase4` flag. Added a
+  phase-4 projection modeling the NEW phase 4 = the SAME single writer agent as
+  phase 3 PLUS a LOCAL `apply_refactor` tool (no LLM behind it) that introduces a
+  testability seam before the test is written and the csproj recompiles.
+- **Model assumptions (cheap by design vs phase 5):**
+  - **ONE LLM role (writer). NO reviewer/fixer LLM** — so no 2nd/3rd model role
+    multiplying token spend. This is the dominant reason phase 4 ≪ phase 5.
+  - **Token inflation, not an extra agent:** `P4R_TOKEN_INFLATION = 1.5` flat
+    multiplier on the phase-3 writer token base (writer takes more turns/cell:
+    inspect → pick seam → call apply_refactor → read → iterate test). Modest range
+    ~1.4–1.6, NOT a whole extra agent.
+  - **apply_refactor = billable agent tool invocation:** `P4R_REFACTOR_CALLS_PER_CELL
+    = 1.2` calls/cell (≈ one seam, occasional second), billed at the EXISTING
+    `TOOLS_SURCHARGE_PER_CALL` ($0.03375) like read_file/list_dir. Local/zero-token,
+    but the agent-runtime surface still bills → adds to invocation-scaled Foundry
+    Tools overhead.
+  - **Billing split convention reused from `project_phase5`:** token spend keeps the
+    phase-3 marketplace fraction; Foundry Tools overhead wholly credit.
+- **Default = run_1 (`P4R_DEFAULT_RUNS = 1`), the go/no-go dispatch.** GOTCHA worth
+  remembering: the phase-3 *combined* base alone is ~$342 (already > the $250 cap),
+  so a full 3-run phase-4 sweep can NEVER be under cap — it's strictly ≥ phase 3.
+  Defaulting the printed projection to run_1 is the only self-consistent way to land
+  "under cap" (and it's the dispatch you actually run first, mirroring frozen
+  phase-5 run_1). The verify command prints run_1.
+- **Projected combined total: phase-4 run_1 = $213.79 → 85.5% of the $250 cap, UNDER
+  by $36.21** (credit $156.13 / marketplace $57.67; ~$63.79 to card; ~1.87× the
+  same-runs phase-3 single-writer base $114.18). Full 3-run set (runs=3) ≈ $641
+  (257% of cap) but ≈ 54% of phase 5's $1,197 — roughly half, because of the single
+  LLM role.
+- **Did NOT rename/break** `--project-phase5` / `project_phase5` / `P5_*` /
+  `P3_RUNS_PER_CELL` / `FOUNDRY_*` / `TOKEN_RECON_FACTOR` / `CREDIT_USD`. `--runs` is
+  now shared between phase-4 and phase-5 ad-hoc projections; added `--refactor-calls`.
+  Normal runs auto-print the phase-4 go/no-go block beside the auto phase-5 block.
+- Verified: `--project-phase4 --cap 250` EXIT 0 ($213.79); `--project-phase5 --cap
+  250` EXIT 0 (Config C still $1,197.49); normal run EXIT 0 (phase-3 residual still
+  −$0.18); no lint errors. **No Azure spend — estimator-only.** Decision dropped to
+  `.squad/decisions/inbox/vogel-phase4-cost-model.md`.
 
-### 2026-06-10 — phase4-tripwire-250 budget created + PR #28 squad bookkeeping committed
-- **Squad bookkeeping commit:** staged ONLY the 4 intended `.squad` paths (lewis +
-  vogel history, decisions.md, deleted inbox `vogel-phase4-calibration-is-run1.md`),
-  committed as **`9d07268`** ("squad: merge calibration-as-run_1 decision + Scribe
-  bookkeeping") and pushed to `jasper/phase4-scaffold` (PR #28), range
-  `aea5d165..9d072682`. Gotcha: `.squad/decisions/inbox/` is gitignored, so the
-  deletion of the tracked inbox file was already staged from the working-tree delete
-  (`D` in index) — `git add`/`git rm --cached`/`git add -u` all error on the ignored
-  pathspec, but the deletion lands in the commit anyway. `.squad/log/` and
-  `.squad/orchestration-log/` are **gitignored** (`git check-ignore` returns them) —
-  Scribe's session/orchestration logs are NOT committed; that's the established repo
-  behavior, leave them.
-- **phase4-tripwire-250 created** (Azure budget = FREE control-plane op, no spend):
-  scope = **subscription** (`/subscriptions/9490eefa-f2af-4485-983f-63397bfb5386`),
-  same scope as phase3-tripwire-250 so it tracks total monthly spend = the combined
-  $250 soft cap (marketplace + credit both count). Amount **$250 Monthly**,
-  timePeriod 2026-06-01 → 2027-06-01 UTC. Notifications: **Actual 50% / 80% / 100%**
-  + **Forecasted 100%**. Created via `az rest --method put` on the
-  `Microsoft.Consumption/budgets` provider, api-version 2024-08-01. Verified with
-  `az consumption budget show/list` (currentSpend $0).
-- **Email handling:** reused the contactEmail already configured on
-  **phase3-tripwire-250** (fetched via `az rest get`, 1 distinct address) — did NOT
-  invent one or read `git config user.email`. Stashed to a temp file, used in the
-  PUT body, then deleted the temp file. Never printed in the summary (PII).
-- **Enforcement caveat:** Azure budgets **ALERT only** — they do NOT hard-stop spend.
-  A true at-cap kill = wire the 100% alert → action group → webhook/runbook that
-  cancels the dispatch (larger infra, NOT built here — flagged as a follow-up). The
-  real hard stop remains the subscription **spending-limit toggle** (currently OFF
-  for the soft-cap strategy).
-- **No token/compute spend:** no generation/eval workflow dispatched, no Foundry
-  model invoked. Budget creation + git only.
+### 2026-06-11 — phase3-tripwire-250 budget DELETED (redundant after phase 3 sealed) *(condensed)*
+Deleted `phase3-tripwire-250` — once phase 3 sealed it was an exact redundant twin of
+`phase4-tripwire-250` (same subscription scope, $250 Monthly, same spend-tracking). Via
+`az consumption budget delete` (subscription is the default scope; EXIT 0). Prior config
+snapshot before delete: $250 Monthly, 2026-05-01→2027-12-31 UTC, currentSpend $6.27, Actual
+50/75/90 + Forecasted 100% (thresholds differed from phase4's 50/80/100; redundancy was on
+scope/amount/spend-tracking). Surviving 3-budget set: `VS_Credit_Budget` ($150 BillingMonth),
+`budget-mockstatic-50` ($50 Monthly), `phase4-tripwire-250` ($250 Monthly). phase4 thresholds
+not altered (pending Jasper). Budget delete = FREE control-plane op, no spend. Full text →
+`history-archive.md`.
+
+### 2026-06-10 — phase4-tripwire-250 budget created + PR #28 squad bookkeeping *(condensed)*
+Created Azure budget `phase4-tripwire-250` = the combined $250 soft cap: subscription scope
+`9490eefa-f2af-4485-983f-63397bfb5386` (tracks total monthly spend, marketplace + credit),
+$250 Monthly, 2026-06-01→2027-06-01 UTC, Actual 50/80/100 + Forecasted 100%. Via `az rest put`
+on `Microsoft.Consumption/budgets` (api 2024-08-01); verified `currentSpend $0`. Reused phase3's
+configured contactEmail (no invented address, never read `git config user.email`, PII never
+printed). Enforcement caveat: Azure budgets ALERT only — no hard stop; a true at-cap kill =
+100% alert → action group → webhook (not built, flagged); real hard stop = subscription
+spending-limit toggle (OFF for soft-cap). Also committed `.squad` bookkeeping as `9d07268` on
+`jasper/phase4-scaffold` (PR #28). Gotcha: `.squad/decisions/inbox/`, `.squad/log/`, and
+`.squad/orchestration-log/` are gitignored — Scribe logs are NOT committed (established repo
+behavior). FREE control-plane op + git only, no spend. Full text → `history-archive.md`.
 
 ### 2026-06-10 — Phase-4 calibration reframed as run_1; cycles=1 frozen; on PR #28 *(condensed)*
 Jasper froze the phase-4 design and reframed the calibration pass as **run_1** of the real
@@ -149,8 +160,12 @@ Added 2 new jobs:
 
 Active matrix: **15 repos**. Triggered runs: OpenRA=25552129165, StockSharp=25552132370.
 
-### 2026-05-08 — StockSharp coverlet.console fix + MTP empty-modules blocker — commits d3c765d, 4d07fc1, a89d57e, f82c22d
-Run 25552132370: 178-byte cobertura stub while 4239/4263 tests passed — MSTest 4.x SDK triggers MTP routing → data-collector silent-no-op. Swapped to canonical coverlet.console wrap (built assembly `StockSharp.Tests.dll`, RootNamespace override). Then added `FullyQualifiedName!~` exclusions for 5 flaky classes (`AsyncExtensionsTests`, `ConnectorBasketTests`, `PathsTests`, `ReportTests`, `TransactionIdStorageTests`) → run 25562087626 went 0 failures / 4096 passed. **But cobertura 231 bytes, empty Module table** — coverlet ran yet instrumented zero modules despite ~80 dependency DLLs. Round 2 added `--include "[StockSharp*]*"`/`[Ecng*]*` (unproven); self-inflicted SIGPIPE from `ls | head` killed the step (reverted in `f82c22d`). Stopped at 2 attempts. Full diagnosis: decisions.md "2026-05-08: StockSharp flaky-test filter — partial fix".
+### 2026-05-08 — StockSharp coverlet.console fix + MTP empty-modules blocker *(condensed)*
+MSTest 4.x → MTP routing → data-collector silent-no-op (178-byte stub). Swapped to coverlet.console
+wrap + `FullyQualifiedName!~` exclusions for 5 flaky classes → 0 failures / 4096 passed, but
+cobertura had an empty Module table (zero modules instrumented despite ~80 dep DLLs). Round-2
+`--include` patterns unproven; self-inflicted SIGPIPE (`ls | head`) killed the step (reverted).
+Stopped at 2 attempts. Full diagnosis: decisions.md "2026-05-08: StockSharp flaky-test filter".
 
 ### Earlier entries
 - 2026-05-06 — Silent empty-cobertura fix (commit 7885485)

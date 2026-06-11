@@ -1,9 +1,9 @@
-# Phase 4 — Multi-agent (writer / reviewer / fixer): Replication
+# Phase 5 — Multi-agent (writer / reviewer / fixer): Replication
 
 > **Status: scaffold. The mock-adapter smoke test below works today.
 > Production replication blocks on the Azure freeze ending ~2026-06-08.**
 
-To reproduce phase 4 once it has run. Most of this is identical to
+To reproduce phase 5 once it has run. Most of this is identical to
 [phase 3 replication](../phase3-agentic-loop/REPLICATION.md); the new
 pieces are the three-agent runner and its prompts.
 
@@ -14,15 +14,15 @@ Same as phase 3 plus:
 - ~$210 of Azure credit for the full 3-run sweep (5,400 cells; see
   [PLAN.md § Cost projection](PLAN.md#cost-projection))
 - The phase 3 Azure account, models, and tripwire (`phase3-tripwire-200`)
-  must already exist — phase 4 uses the same Foundry account and adds
+  must already exist — phase 5 uses the same Foundry account and adds
   a new tripwire `phase4-tripwire-250`.
 
 ## 1. Reuse the phase 2/3 Foundry account
 
 Skip to step 2 if you've already done [phase 3 replication](../phase3-agentic-loop/REPLICATION.md).
-The same six panel models cover phase 4.
+The same six panel models cover phase 5.
 
-## 2. Set the phase 4 tripwire
+## 2. Set the phase 5 tripwire
 
 ```bash
 SUB=<your-subscription-id>
@@ -47,7 +47,7 @@ python3 -m pytest tools/generation/tests/test_multi_agent_smoke.py -v
 ```
 
 Expected outcome: one test passes, one cell of fake output lands in
-`/tmp/phase4-smoke/results/mock-llm/run_1/` with a well-formed
+`/tmp/phase5-smoke/results/mock-llm/run_1/` with a well-formed
 `attempts.jsonl` (one row) and `generated_tests/.../test.cs`.
 
 ## 4. Smoke test against real Foundry (one cell, one model)
@@ -57,7 +57,7 @@ do a single-cell paid smoke test to validate the production wiring:
 
 ```bash
 python3 tools/generation/multi_agent_runner.py \
-    --phase phase4-multiagent \
+    --phase phase5-multiagent \
     --model gpt-4.1-mini \
     --run-index 0 \
     --target-set v2 \
@@ -65,14 +65,14 @@ python3 tools/generation/multi_agent_runner.py \
     --max-review-cycles 1
 ```
 
-Should land one row in `phases/phase4-multiagent/results/gpt-4.1-mini/run_0/attempts.jsonl`
+Should land one row in `phases/phase5-multiagent/results/gpt-4.1-mini/run_0/attempts.jsonl`
 with `multi_agent_cycles = 1` and a non-empty `reviewer_verdict`.
 Expected token spend: < $0.10.
 
 ## 5. Dispatch the full sweep via GitHub Actions
 
 ```
-gh workflow run phase4-generate.yml \
+gh workflow run phase5-generate.yml \
   -f target_set=v2 \
   -f runs_per_cell=3 \
   -f models=all \
@@ -90,7 +90,7 @@ explicitly set it to `false` for the production sweep.
 Same as phase 3:
 
 ```
-gh workflow run phase4-evaluate.yml \
+gh workflow run phase5-evaluate.yml \
   -f target_set=v2 \
   -f models=all \
   -f repos=all
@@ -104,14 +104,14 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work -w /work \
     rocker/tidyverse:4.4 Rscript tools/viz/render_all.R
 ```
 
-The phase 2 → 3 → 4 progression chart and the cross-phase paired-bar
-will both auto-pick up phase 4 once `per_model_phase.csv` and
-`per_model_repo.csv` have phase-4 rows.
+The phase 2 → 3 → 5 progression chart and the cross-phase paired-bar
+will both auto-pick up phase 5 once `per_model_phase.csv` and
+`per_model_repo.csv` have phase-5 rows.
 
 ## Output layout
 
 ```
-phases/phase4-multiagent/
+phases/phase5-multiagent/
   results/{model}/run_{i}/
     attempts.jsonl              # one row per cell
     generated_tests/{repo}/{target_id}/test.cs

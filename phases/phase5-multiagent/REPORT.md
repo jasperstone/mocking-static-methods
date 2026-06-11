@@ -1,4 +1,4 @@
-# Phase 4 — Multi-agent (writer / reviewer / fixer): REPORT
+# Phase 5 — Multi-agent (writer / reviewer / fixer): REPORT
 
 > **Status: scaffold. No production runs yet.** Design lives in
 > [PLAN.md](PLAN.md); replication recipe lives in [REPLICATION.md](REPLICATION.md);
@@ -14,11 +14,11 @@ _Empty until the first production dispatch lands._
 
 ## Cross-phase comparison
 
-Will be filled once phase 4 has 3 full runs against the same v2 target set.
+Will be filled once phase 5 has 3 full runs against the same v2 target set.
 Predicted lift (from PLAN.md): **2.0–2.5× run-OK over phase 3** (i.e.
 ~770–960 green tests on 5,400 attempts) for ~4.6× the token cost.
 
-| Metric | Phase 2 | Phase 3 | Phase 4 (predicted) |
+| Metric | Phase 2 | Phase 3 | Phase 5 (predicted) |
 |---|---:|---:|---:|
 | Compile-OK% (blended) | 4.8% | 14.6% | 25–30% |
 | Run-OK% (blended) | 1.4% | 7.1% | 14–18% |
@@ -37,9 +37,9 @@ asks "does this test actually exercise the target method?"
 
 ## Failure-bucket prediction
 
-For each phase 3 failure bucket, the predicted phase 4 outcome:
+For each phase 3 failure bucket, the predicted phase 5 outcome:
 
-| Bucket | Phase 3 | Phase 4 prediction | Why |
+| Bucket | Phase 3 | Phase 5 prediction | Why |
 |---|---:|---:|---|
 | `no_fact_methods` | 160 | < 20 | Reviewer explicitly counts `[Fact]` attributes |
 | `other_exception` | 253 | ~150 | Reviewer can flag obvious DI / ctor issues |
@@ -54,17 +54,17 @@ collapse (~140 newly-green cells) plus partial gains on the runtime
 failure buckets (~100 more) for a total of ~240 additional run-OK on top
 of phase 3's 386 = ~626 run-OK (1.62×). The conservative 2.0× estimate
 in PLAN.md assumes additional wins from cells that phase 3 didn't even
-submit (4,855 / 5,400 = 89.9% submit rate; phase 4 should push this
+submit (4,855 / 5,400 = 89.9% submit rate; phase 5 should push this
 toward 95%+).
 
 ## What this report will contain post-dispatch
 
 1. **Per-model success table** (same shape as phase 3 HEADLINE).
-2. **Cross-phase paired-bar chart** — phase 2 vs 3 vs 4 run-OK per model.
+2. **Cross-phase paired-bar chart** — phase 2 vs 3 vs 5 run-OK per model.
 3. **Reviewer verdict distribution** — what fraction of cycles were
    `APPROVE` vs `REQUEST_CHANGES`, and what the average cycle count
    looked like per model.
-4. **Failure-bucket comparison** — phase 3 vs phase 4, for the
+4. **Failure-bucket comparison** — phase 3 vs phase 5, for the
    8 buckets in the table above.
 5. **Cost reconciliation** — actual vs $210 projection, per-agent
    token breakdown (writer / reviewer / fixer).

@@ -1,8 +1,8 @@
-# Phase 4 — Multi-agent (writer / reviewer / fixer): PLAN
+# Phase 5 — Multi-agent (writer / reviewer / fixer): PLAN
 
 > **Status: scaffolding only. NO Azure dispatch before ~2026-06-08.**
 >
-> This document captures the design of phase 4 before any tokens are spent.
+> This document captures the design of phase 5 before any tokens are spent.
 > The runner, prompts, and workflows exist on disk so that the next session
 > can do production runs once the 3-week Azure freeze (started 2026-05-18)
 > elapses. Every workflow in this scaffold is `workflow_dispatch`-only with
@@ -28,7 +28,7 @@ no incentive to question its own scaffolding; the compiler doesn't catch
 empty `[Fact]`-less classes, and the test runner happily reports "0 tests
 run, 0 failed."
 
-Phase 4 introduces a **reviewer** agent whose only job is to look at a
+Phase 5 introduces a **reviewer** agent whose only job is to look at a
 draft test and decide whether it actually exercises the target method
 under realistic conditions. The reviewer can reject (with a written
 reason) and a **fixer** agent then revises the draft. The cycle repeats
@@ -89,7 +89,7 @@ fixer, mini as reviewer) are a follow-up question for phase 5.
 
 Based on phase 3 failure-bucket analysis:
 
-- The 160 `no_fact_methods` cells should be near-zero in phase 4 — the
+- The 160 `no_fact_methods` cells should be near-zero in phase 5 — the
   reviewer's system prompt explicitly checks for `[Fact]` count and
   meaningful assertions.
 - The 253 `other_exception` cells (DI / ctor problems) are partly
@@ -111,13 +111,13 @@ Conservative estimate: **2.0–2.5× run-OK lift over phase 3** (i.e.
 > *Models* (token) cost and ignored the Foundry *Tools* / agent-runtime line,
 > which was the single biggest item on the bill ($182.26) and scales with
 > **agent invocations**, not tokens. The multi-agent loop multiplies
-> invocations per cell, so that term — not tokens — dominates phase 4.
+> invocations per cell, so that term — not tokens — dominates phase 5.
 > Reproduce all numbers below with:
-> `python3 tools/cost/estimate.py --project-phase4 --cap 250`.
+> `python3 tools/cost/estimate.py --project-phase5 --cap 250`.
 
 ### Per-cell agent invocation count (the multiplier)
 
-Phase 3 = a single writer agent per cell. Phase 4 adds a reviewer and a fixer
+Phase 3 = a single writer agent per cell. Phase 5 adds a reviewer and a fixer
 inside a review loop bounded by `max_review_cycles` (C):
 
 ```
@@ -216,10 +216,10 @@ from prior-phase data.
 2026-05-18). The freeze exists to:
 
 1. Let the phase 3 final numbers settle in `main` and in the README so
-   the cross-phase narrative is stable before adding phase 4.
+   the cross-phase narrative is stable before adding phase 5.
 2. Give the Azure cost-management reconciliation window (typically 7-14
    days) time to post the actual phase 3 bill so we can re-calibrate the
-   phase 4 projection.
+   phase 5 projection.
 3. Avoid concurrent generation runs on the same Foundry account — the
    per-account rate limits in eastus2 are tight enough that two sweeps
    in flight at once would slow each other down.
@@ -233,15 +233,15 @@ Foundry calls.
 ## Pre-flight checklist (run BEFORE 2026-06-08 dispatch)
 
 - [ ] Phase 3 Azure bill posted and reconciled in [phase 3 COSTS](../phase3-agentic-loop/COSTS.md).
-- [ ] Foundry credit balance >= projected phase 4 spend × 1.5.
+- [ ] Foundry credit balance >= projected phase 5 spend × 1.5.
 - [ ] Tripwire alert "phase4-tripwire-250" created on the Foundry account
       (50 / 75 / 90 / 100% thresholds, email + webhook).
 - [ ] Mock-adapter smoke test green on `main`.
 - [ ] At least one **paid** smoke run (1 cell, 1 model, mock adapter
       replaced with real foundry adapter) completes end-to-end and lands
-      a JSONL artifact in `phases/phase4-multiagent/results/`.
+      a JSONL artifact in `phases/phase5-multiagent/results/`.
 - [ ] Open a pre-flight PR with the dispatch plan (target count, model
       list, run count) and get explicit go/no-go review.
 
 Once the above is green, the production dispatch goes through
-`phase4-generate.yml` with `mock_llm: "false"` and the real model panel.
+`phase5-generate.yml` with `mock_llm: "false"` and the real model panel.

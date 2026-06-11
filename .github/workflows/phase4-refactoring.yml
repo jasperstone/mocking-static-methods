@@ -1,0 +1,399 @@
+name: Phase 4 — generate (agentic loop + refactoring tool)
+
+# Single-agent generator for phase 4: the SAME writer agent as phase 3 PLUS a
+# LOCAL `apply_refactor` tool (no LLM behind it) that introduces a testability
+# seam into production source before the test is written and the owning csproj
+# is recompiled in-loop.
+#
+# workflow_dispatch ONLY — no schedules, no push triggers, no PR triggers.
+# Default behavior runs the mock-LLM smoke test only, which makes NO Azure /
+# Foundry calls.
+#
+# ⚠️ AZURE FREEZE: real Foundry dispatch is gated by TWO explicit
+# confirmations and the freeze end date (2026-06-08), AND the combined-spend
+# soft cap is tracked by the EXISTING Azure budget `phase4-tripwire-250`
+# ($250 Monthly, subscription scope). The default value of `mode` is "mock"
+# so an accidental "Run workflow" click from the GitHub UI cannot spend tokens.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Execution mode. 'mock' runs the smoke test only (no Azure). 'foundry' calls the real models (requires explicit confirmations below)."
+        required: true
+        default: "mock"
+        type: choice
+        options:
+          - mock
+          - foundry
+      target_set:
+        description: "Targets version (must exist under targets/; foundry mode)."
+        required: false
+        default: "v2"
+      runs_per_cell:
+        description: "How many independent runs per (model, target) cell (foundry mode). Frozen design = 3, dispatched as run_1 → go/no-go → runs 2+3."
+        required: false
+        default: "3"
+      run_index_start:
+        description: "First run_index (default 1). Set to 2 for a follow-up sweep that reuses run_1 from a calibration dispatch."
+        required: false
+        default: "1"
+      models:
+        description: "Comma-separated model ids; or 'all' for the full 6-model panel (foundry mode)."
+        required: false
+        default: "all"
+      repos:
+        description: "Comma-separated repo names; or 'all' for every repo in the target set (foundry mode)."
+        required: false
+        default: "all"
+      limit_per_repo:
+        description: "Per-repo cap on cells (foundry-mode shakedown). Default 1 = single-cell shakedown. Empty = no cap."
+        required: false
+        default: "1"
+      max_compile_attempts:
+        description: "Max submit_test → check cycles per cell (1 = phase 2 behavior; 4 = full fix-up loop). Each cycle compiles AND runs the candidate."
+        required: false
+        default: "4"
+      run_timeout_s:
+        description: "Per-submission `dotnet test` timeout in seconds (default 60). Hung tests are reported back to the model as run_ok=false."
+        required: false
+        default: "60"
+      i_understand_this_will_spend_money:
+        description: "Type 'yes' to acknowledge that 'foundry' mode WILL spend Azure tokens (tracked by phase4-tripwire-250)."
+        required: false
+        default: "no"
+      confirm_after_freeze:
+        description: "Type 'yes' to confirm the date is on or after the 2026-06-08 freeze end."
+        required: false
+        default: "no"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}"
+  cancel-in-progress: false
+
+env:
+  PHASE: phase4-refactoring
+
+jobs:
+
+  smoke:
+    name: "Mock-LLM smoke test (no Azure calls)"
+    if: ${{ github.event.inputs.mode == 'mock' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install Python deps
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest requests pyyaml
+
+      - name: Run refactor smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pytest tools/generation/tests/test_refactor_smoke.py -v
+
+      - name: Sanity-print runner help (foundry mode is gated)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/generation/agentic_refactor_runner.py --help
+
+      - name: Mock-LLM shakedown via runner (1 cell, no Azure) — best-effort
+        shell: bash
+        env:
+          TARGET_SET: ${{ github.event.inputs.target_set }}
+          MAX_COMPILE_ATTEMPTS: ${{ github.event.inputs.max_compile_attempts }}
+          RUN_TIMEOUT_S: ${{ github.event.inputs.run_timeout_s }}
+        run: |
+          set -euo pipefail
+          fixtures="tools/generation/tests/fixtures/refactor"
+          if [[ ! -d "${fixtures}" ]]; then
+            echo "::notice::Mock fixtures dir ${fixtures} not present yet (Beck builds it in parallel) — skipping runner shakedown. The pytest above is the authoritative mock gate."
+            exit 0
+          fi
+          out_dir="$(mktemp -d)/mock-run"
+          python3 tools/generation/agentic_refactor_runner.py \
+            --phase "${PHASE}" \
+            --model "mock-model" \
+            --run-index 1 \
+            --target-set "${TARGET_SET:-v2}" \
+            --mock-llm \
+            --mock-fixtures-dir "${fixtures}" \
+            --max-attempts "${MAX_COMPILE_ATTEMPTS:-4}" \
+            --run-timeout-s "${RUN_TIMEOUT_S:-60}" \
+            --limit 1 \
+            --out-dir "${out_dir}"
+          echo "::notice::Mock runner shakedown wrote to ${out_dir}"
+
+  guard-foundry:
+    name: "Guard: confirm foundry-mode preconditions"
+    if: ${{ github.event.inputs.mode == 'foundry' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require explicit cost acknowledgement
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.i_understand_this_will_spend_money }}" != "yes" ]; then
+            echo "::error::foundry mode requires i_understand_this_will_spend_money=yes"
+            exit 1
+          fi
+
+      - name: Require freeze-end confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.confirm_after_freeze }}" != "yes" ]; then
+            echo "::error::foundry mode requires confirm_after_freeze=yes (freeze ends 2026-06-08)"
+            exit 1
+          fi
+
+      - name: Check the date is actually on/after 2026-06-08
+        shell: bash
+        run: |
+          set -euo pipefail
+          today=$(date -u +%Y-%m-%d)
+          if [ "$today" \< "2026-06-08" ]; then
+            echo "::error::Today ($today) is before the 2026-06-08 freeze end. Refusing to dispatch."
+            exit 1
+          fi
+          echo "Freeze check OK: $today is on/after 2026-06-08."
+
+      - name: ⚠️ Spend gate — combined soft cap tracked by phase4-tripwire-250
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::warning::Combined Azure spend for this phase is gated by the EXISTING budget 'phase4-tripwire-250' (\$250 Monthly, subscription scope, Actual 50/80/100 + Forecasted 100%)."
+          echo "::warning::Budgets ALERT only — they do NOT hard-stop spend. Frozen design: run_1 (calibration) ~\$214 / 85% of cap; full 3-run set ~\$641 / 257% — runs 2+3 require a fresh go/no-go after run_1's measured bill."
+          echo "::warning::Default dispatch is run_1 (runs_per_cell=3 → run_index_start=1, limit_per_repo=1 shakedown). Do NOT dispatch runs 2+3 without an explicit under-cap go decision."
+
+      - name: ⚠️ Print dispatch plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | runs/cell: ${{ github.event.inputs.runs_per_cell }} | run_index_start: ${{ github.event.inputs.run_index_start }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }}"
+
+  plan:
+    name: "Plan shards"
+    needs: guard-foundry
+    if: ${{ github.event.inputs.mode == 'foundry' }}
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      target_sha256: ${{ steps.plan.outputs.target_sha256 }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build (model × repo × run_index) matrix
+        id: plan
+        shell: bash
+        env:
+          TARGET_SET: ${{ inputs.target_set }}
+          RUNS_PER_CELL: ${{ inputs.runs_per_cell }}
+          RUN_INDEX_START: ${{ inputs.run_index_start }}
+          MODELS: ${{ inputs.models }}
+          REPOS: ${{ inputs.repos }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/plan_matrix.py > matrix.json
+          n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
+          echo "::notice::Planned $n shards (target_set=$TARGET_SET, runs_per_cell=$RUNS_PER_CELL, run_index_start=$RUN_INDEX_START)"
+          {
+            echo "matrix<<__EOF__"
+            cat matrix.json
+            echo
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+          sha=$(sha256sum "targets/${TARGET_SET}/targets.csv" | awk '{print $1}')
+          echo "target_sha256=$sha" >> "$GITHUB_OUTPUT"
+
+  generate:
+    name: "gen ${{ matrix.model }} ${{ matrix.repo }} run${{ matrix.run_index }}"
+    needs: plan
+    if: ${{ github.event.inputs.mode == 'foundry' }}
+    runs-on: ubuntu-24.04
+    # Run inside the SDK image so dotnet is already on the path. The refactor
+    # tool recompiles the owning csproj in-loop, so the SDK must be present.
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-noble
+      # Run as root inside the container so apt-get works without sudo.
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+      FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+      FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
+      FOUNDRY_PANEL_OPENAI_RESPONSES: ""
+      FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
+      # Make sure compile_only.py picks up the SDK on $PATH (not the home-dir copy).
+      DOTNET: "dotnet"
+      DOTNET_NOLOGO: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+    steps:
+      - name: Install OS deps (python3, git already present)
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends python3 python3-pip ca-certificates
+          python3 --version
+          dotnet --info | sed -n '1,10p'
+
+      - uses: actions/checkout@v5
+
+      - name: Verify Foundry secrets present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${FOUNDRY_ENDPOINT:-}" || -z "${FOUNDRY_API_KEY:-}" ]]; then
+            echo "::error::FOUNDRY_ENDPOINT or FOUNDRY_API_KEY missing from repo secrets"
+            exit 1
+          fi
+          echo "endpoint length: ${#FOUNDRY_ENDPOINT}, key length: ${#FOUNDRY_API_KEY}"
+
+      - name: Verify target set integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          have=$(sha256sum "targets/${{ inputs.target_set }}/targets.csv" | awk '{print $1}')
+          want="${{ needs.plan.outputs.target_sha256 }}"
+          if [[ "$want" != "$have" ]]; then
+            echo "::error::target_sha256 drift: want=$want have=$have"
+            exit 1
+          fi
+          echo "target_sha256 OK: $have"
+
+      - name: Install Python deps
+        shell: bash
+        run: |
+          python3 -m pip install --break-system-packages requests pyyaml
+
+      - name: Clone target repo at pinned SHA
+        shell: bash
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          # SHAs match phases/phase4-refactoring/phase.lock.yaml
+          declare -A SHAS=(
+            [OpenRA]=8f2138c71106aaffd8a288b56d1c9ef6013700ba
+            [abp]=ea4bbb8b517869a9fb735ea5bc05c819c209d0b5
+            [aspnetcore]=ecb199c29cbefb6fcb6aa789436de36e44427a78
+            [duplicati]=4afa374d7b994cfbfb8167750baabec3eea557e3
+            [eShop]=9b4f9434f46fdc5c1a6e9e936af2868340cdbc48
+            [efcore]=45e3af0273b71919189367bc152a335b69f443c6
+            [garnet]=38cac99c7ad80ae8465ea6e0f120bd6698730a75
+            [jellyfin]=e1e18e8da015e7311e62cdb62167d51e90331edd
+            [orleans]=8024faf860549cb960b4b573c1571b379e283daa
+            [roslyn]=02d301627ed5016a4c18acd1a35e5bbc20ff03f0
+            [semantic-kernel]=1fe41e17a90e002aa7f4f834f7ebd9475d80803c
+            [server]=ea233580d24734f78feffe7fa5cef185b1a2df28
+          )
+          declare -A URLS=(
+            [OpenRA]=https://github.com/OpenRA/OpenRA.git
+            [abp]=https://github.com/abpframework/abp.git
+            [aspnetcore]=https://github.com/dotnet/aspnetcore.git
+            [duplicati]=https://github.com/duplicati/duplicati.git
+            [eShop]=https://github.com/dotnet/eShop.git
+            [efcore]=https://github.com/dotnet/efcore.git
+            [garnet]=https://github.com/microsoft/garnet.git
+            [jellyfin]=https://github.com/jellyfin/jellyfin.git
+            [orleans]=https://github.com/dotnet/orleans.git
+            [roslyn]=https://github.com/dotnet/roslyn.git
+            [semantic-kernel]=https://github.com/microsoft/semantic-kernel.git
+            [server]=https://github.com/bitwarden/server.git
+          )
+          mkdir -p cloned_repos
+          cd cloned_repos
+          git clone --filter=blob:none "${URLS[$REPO]}" "$REPO"
+          cd "$REPO"
+          git fetch --depth 1 origin "${SHAS[$REPO]}"
+          git checkout FETCH_HEAD
+          git submodule update --init --recursive --depth 1 || true
+
+      - name: Purge tracked phase results so this shard emits only its own work
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "phases/${PHASE}/results"
+          mkdir -p "phases/${PHASE}/results"
+
+      - name: Run agentic refactor generator (writer + apply_refactor tool)
+        shell: bash
+        env:
+          TARGET_SET: ${{ inputs.target_set }}
+          MODEL: ${{ matrix.model }}
+          REPO: ${{ matrix.repo }}
+          RUN_INDEX: ${{ matrix.run_index }}
+          LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
+          MAX_COMPILE_ATTEMPTS: ${{ inputs.max_compile_attempts }}
+          RUN_TIMEOUT_S: ${{ inputs.run_timeout_s }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ -n "${LIMIT_PER_REPO}" ]]; then
+            extra+=(--limit "${LIMIT_PER_REPO}")
+          fi
+          python3 tools/generation/agentic_refactor_runner.py \
+            --phase "${PHASE}" \
+            --model "${MODEL}" \
+            --run-index "${RUN_INDEX}" \
+            --target-set "${TARGET_SET}" \
+            --repo-filter "${REPO}" \
+            --max-turns 14 \
+            --max-reads 8 \
+            --max-attempts "${MAX_COMPILE_ATTEMPTS}" \
+            --max-refactors 3 \
+            --max-output-tokens 4096 \
+            --timeout-s 240 \
+            --compile-timeout-s 240 \
+            --run-timeout-s "${RUN_TIMEOUT_S}" \
+            --refactor-build-timeout-s 240 \
+            --i-understand-this-will-spend-money \
+            "${extra[@]}"
+
+      - name: Show shard summary
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          model_safe="${{ matrix.model }}"
+          model_safe="${model_safe//\//__}"
+          dir="phases/${PHASE}/results/${model_safe}/run_${{ matrix.run_index }}"
+          if [[ -f "${dir}/attempts.jsonl" ]]; then
+            n=$(wc -l < "${dir}/attempts.jsonl")
+            n_compile_ok=$(ATT="${dir}/attempts.jsonl" python3 -c 'import json,os; ok=sum(1 for line in open(os.environ["ATT"]) if json.loads(line).get("final_compile_ok")); print(ok)')
+            echo "::notice::Shard wrote ${n} attempts, ${n_compile_ok} compile_ok, to ${dir}"
+          else
+            echo "::warning::No attempts.jsonl produced"
+          fi
+
+      - name: Upload shard artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
+          path: phases/${{ env.PHASE }}/results/
+          if-no-files-found: warn
+          retention-days: 14

@@ -345,3 +345,213 @@ all untouched. Verified: `--project-phase4 --cap 250` (EXIT 0, $213.79),
 phase-3 residual still −$0.18).
 
 **No Azure spend. Estimator-only change.**
+
+### 2026-06-11: Phase-4 (agentic loop + refactoring tool) experiment directory scaffolded + design-of-record
+
+**By:** Lewis (Lead), requested by Jasper (autopilot)
+
+**What:** Created the NEW `phases/phase4-refactoring/` experiment directory on branch
+`jasper/phase4-refactoring`, mirroring the phase-5 layout, and authored the authoritative
+design-of-record. Watney built the `apply_refactor` tool + runner to this same spec in parallel.
+
+**The authoritative design:**
+
+- **Goal:** measure the effect of giving the proven phase-3 single writer agent a *refactoring
+  capability*. The agent may introduce a testability seam into PRODUCTION code so a Mode #1 static
+  call site becomes mockable (Moq/NSubstitute), then write a test exploiting the seam. Same frozen
+  v2 300-cell target set, same 6-model panel, same compile/run harness as phases 2–3. **Headline =
+  run-OK% A/B vs phase-3's 7.1% on the identical cells.** The contribution is capability/tooling
+  augmentation, NOT prompt engineering — the writer prompt stays generic; the only new degree of
+  freedom is `apply_refactor`.
+
+- **Mode #1 sites** = (1) extension methods on interface receivers (EXT); (2) non-virtual instance
+  methods on non-sealed concrete classes (NonVirtual). Neither is directly mockable — the refactor
+  introduces the seam.
+
+- **`apply_refactor` — constrained transform menu** (local tool, no LLM; the bounded menu IS the
+  anti-gaming mechanism, NOT free-form prod editing):
+  1. `make_virtual` — NonVirtual kind: mark the target method `virtual` (extract-and-override seam).
+  2. `wrapper_interface` (extract-and-adapter) — generate an adapter interface + thin wrapper around
+     the receiver; consumer depends on the interface (ctor-injected); tests substitute a mock.
+  3. `parameterize_dependency` — inject the dependency via a NEW defaulted overload that preserves
+     the existing public API (no breaking change).
+
+- **Anti-gaming rules:** refactor must NOT delete/disable/no-op the target site and must not change
+  observable behavior; `parameterize_dependency` keeps a default-preserving overload; all edits
+  confined to the owning `.csproj` subtree. **Behavior-preservation guard:** after a refactor, the
+  owning production project MUST still build, and if it has an associated existing test project those
+  tests MUST still pass — else the refactor is auto-reverted and recorded `refactor_rejected`.
+  **Legitimate pass** = the test exercises the target via the seam and asserts on real behavior (no
+  trivial assert, no bypass of the site).
+
+- **Per-cell lifecycle:** snapshot-on-write (lazy) of any prod file before its first edit → agent
+  loop (read_file / list_dir / apply_refactor / submit_test; apply_refactor edits prod source and the
+  next compile+run rebuilds the single owning csproj from source for free) → UNCONDITIONAL restore of
+  all touched files to pristine state after the cell (cells never contaminate each other) → log
+  applied refactors + guard outcomes per cell.
+
+- **Metrics:** run-OK% vs phase 3; a **refactor-attributable** breakdown (cells that pass ONLY when a
+  legitimate refactor was applied — run-fail in phase 3, run-OK in phase 4 through a seam); the
+  `refactor_rejected` rate; and which transform types succeed by Mode #1 kind.
+
+- **Cost:** one writer LLM + one local tool — no reviewer/fixer LLM, so far cheaper than phase 5.
+  run_1 (runs=1) ≈ **$214 combined / ~85% of the $250 cap — clean go** (`tools/cost/estimate.py
+  --project-phase4`). Full 3-run ≈ $641 (over cap, ~half of phase-5's $1,197). run_1 is the honest
+  default dispatch + go/no-go.
+
+**Files created:** `phases/phase4-refactoring/{PLAN.md, REPLICATION.md, REPORT.md, phase.lock.yaml,
+prompt/writer-system.md, prompt/user-template.md, results/.gitkeep}`.
+
+**Consistency choices:**
+- `phase.lock.yaml` copies phase-5's EXACT `targets_sha256` (`4db523f966ff…2823`) + `targets_count`
+  300, the same `infrastructure`, the same `repos` SHA pins, and the same 6-model panel. Adds a
+  `refactoring:` section (transform menu + guard + anti-gaming + legitimate-pass + lifecycle) and
+  `agent_topology: single_writer_refactor`; `runs_per_model: 1` (run_1). seal_date / git_tag /
+  digests left blank as phase 5 does.
+- REPLICATION reuses the EXISTING Azure budget noun `phase4-tripwire-250` (did NOT invent a new
+  budget) and references the `phase4-refactoring.yml` workflow Vogel is stubbing.
+- Single-agent → NO reviewer/fixer prompts (unlike phase 5). Only `writer-system.md` (writer who also
+  wields apply_refactor) + `user-template.md` (phase-3 interpolation vars plus TEST_FRAMEWORK /
+  TARGET_TFM).
+- REPORT.md is explicitly marked predictions-only ("will be filled once phase 4 has N runs"), with a
+  Phase 3 vs Phase 4 predicted table + per-bucket conversion prediction (unmockable Mode #1 converts;
+  no_fact_methods is NOT a phase-4 target — that's phase 5's reviewer).
+
+**Tool paths Watney owns (referenced from PLAN):** `tools/generation/apply_refactor.py`,
+`tools/generation/strategies/agentic_loop_refactor.py`, `tools/generation/agentic_refactor_runner.py`.
+
+**No Azure spend. No workflow dispatched. No Foundry model invoked.** Scaffold + docs only.
+
+### 2026-06-11: Phase-4 apply_refactor tool + strategy + runner (the seam-introducing build)
+
+**By:** Watney (Build/Infra), requested by Jasper (autopilot)
+
+**What:** Built the phase-4 "agentic loop + testability refactoring" stack on branch
+`jasper/phase4-refactoring`. Phase 4 = the phase-3 single-agent compile+run feedback loop
+PLUS an `apply_refactor` tool that edits PRODUCTION source to introduce a testability seam,
+so a Mode #1 static call site becomes mockable. `compile_and_run_check` already rebuilds the
+owning csproj from source, so seam edits are picked up on the next `submit_test`.
+
+**New files:**
+- `tools/generation/apply_refactor.py` — `RefactorEngine` + `RefactorResult`.
+- `tools/generation/strategies/agentic_loop_refactor.py` — phase-4 strategy; `RefactorLoopResult(FeedbackLoopResult)` adds `refactor_attempts`; `parse_refactor_args()`.
+- `tools/generation/agentic_refactor_runner.py` — phase-4 runner (mirrors `agentic_runner_feedback.py`; adds `--mock-llm/--mock-fixtures-dir/--out-dir` + `--i-understand-this-will-spend-money` from the phase-5 runner). Default `--phase phase4-refactoring`, `--target-set v2`.
+
+**apply_refactor tool-call syntax (PROMPTS + SMOKE-TEST FIXTURE MUST MATCH):**
+```
+<tool>apply_refactor(transform=make_virtual)</tool>          (primary)
+<tool>apply_refactor(make_virtual)</tool>                    (bare)
+<tool>apply_refactor(transform=make_virtual, method=GetAsync)</tool>   (extra kwargs)
+<tool>apply_refactor({"transform": "wrapper_interface", "interface_name": "IFoo"})</tool>   (json for extra args)
+```
+Parsed by `parse_refactor_args(raw) -> (transform, kwargs)`. read_file/list_dir/submit_test keep
+the EXACT phase-3 `TOOL_RE` protocol unchanged; apply_refactor uses its own `APPLY_REFACTOR_RE`
+and is preferred when it appears first. Per-cell budget: `--max-refactors` (default 3).
+
+**Transform menu (the constraint IS the anti-gaming mechanism):**
+1. `make_virtual` — **IMPLEMENTED**. Line-anchored text edit: finds a non-virtual instance
+   declaration of the target method and inserts `virtual` after the access modifier. Only works
+   when the method is declared in-repo (framework types → graceful rejection).
+2. `wrapper_interface` — STUB (`NotImplementedError` + contract: emit `I{Receiver}Wrapper` +
+   concrete wrapper, constructor-inject defaulted to concrete).
+3. `parameterize_dependency` — STUB (`NotImplementedError` + contract: defaulted overload taking
+   the dependency; original delegates; public API preserved).
+Roslyn (Mode1Analyzer infra, Microsoft.CodeAnalysis.CSharp 4.14.0) is the robust future path for
+the harder transforms — not built this pass.
+
+**RefactorResult schema (smoke test + prompts align to this):**
+`{transform: str, applied: bool, reverted: bool, reason: str, files_changed: list[str],
+build_ok: bool|None, errors: list[dict]}`. `.to_dict()` truncates `errors` to 5. Logged per cell
+to `refactors/{repo}/{target_id}.jsonl` and embedded in `attempts.jsonl` as `refactor_attempts`.
+
+**Safety rails (all implemented now):**
+- **Prod-write guard** `_safe_prod_path(repo_root, owning_csproj_dir, raw)` — writes allowed ONLY
+  inside the owning .csproj subtree (owner via `compile_only.find_owning_csproj`); rejects escapes.
+- **Snapshot/restore** — originals snapshotted before first edit; `restore_all()` returns every
+  touched file to byte-pristine (deletes engine-created files). Runner calls it in a `finally`
+  after EVERY cell → cells never contaminate each other; git tree clean between cells.
+- **Behaviour-preservation** — after a successful edit, `dotnet build` the owning csproj (reuses
+  `compile_only` toolchain). Build fail → AUTO-REVERT + `refactor_rejected` with errors. Engine
+  ctor `verify_build` flag (default True; runner sets False only under `--mock-llm`). Running the
+  owning project's existing test suite is a documented TODO (build-preservation is the minimum).
+
+**Verify (no Foundry / no money):** all three modules import cleanly under `.venv`; all four
+arg-syntaxes parse; temp-snippet smoke confirmed make_virtual `public string GetAsync` →
+`public virtual string GetAsync`, the guard rejects `../../etc/passwd` / allows in-subtree,
+`restore_all()` reverts to pristine, unknown transforms rejected, stubs raise NotImplementedError
+(caught by the strategy). Full mock-LLM end-to-end run handed to Beck — needs
+`tools/generation/tests/fixtures/refactor/default.json` (writer-role fixture exercising the
+tool-call syntax above).
+
+**No Azure spend. No Foundry model invoked. No dotnet build run in verification.**
+
+### 2026-06-11: Phase-4 mock-LLM smoke test + fixture (hermetic, green)
+
+**By:** Beck (Test/Coverage), requested by Jasper (autopilot)
+
+**What:** Added the phase-4 end-to-end smoke test Watney handed off:
+- `tools/generation/tests/fixtures/refactor/default.json` — writer-role mock fixture exercising `read_file → apply_refactor(transform=make_virtual) → submit_test(csharp)` using Watney's exact tool-call syntax.
+- `tools/generation/tests/test_refactor_smoke.py` — subprocess-drives `agentic_refactor_runner.py` in `--mock-llm` mode; asserts all four artifacts (`attempts.jsonl`, `generated_tests/{repo}/{tid}/test.cs`, `turns/{repo}/{tid}.jsonl`, `refactors/{repo}/{tid}.jsonl`) and that the refactor log records an APPLIED `make_virtual`. **1 passed in ~0.3s, fully hermetic — no dotnet, no Foundry, no Azure spend.**
+
+**Notable runner finding (NOT a bug fix — documented behavior to be aware of) [FLAGGED]:**
+The phase-4 runner's `--mock-llm` mode **synthesizes a single hardcoded cell**
+(`target_id=mock:0001, repo=mock-repo, file=mock.cs, method=DoSomething, kind=NonVirtual`)
+and ignores `targets/v2/targets.csv`. The `--target-ids` filter then runs against that
+synthesized row. Consequence: passing a *real* targets.csv id (like the `OpenRA:0003`
+in the runner's own docstring usage example) filters the cell set to EMPTY → the runner
+exits 0 having written only an empty `attempts.jsonl`, silently producing no test/turns/
+refactor artifacts. **The smoke test pins `--target-ids mock:0001`** to match the
+synthesized cell. Did not change the runner — the hardcoded mock cell is the intended
+plumbing-only contract; flagging so future callers of mock mode don't chase a phantom
+"no output" failure. (If we later want mock mode to honor a real target, that's a
+deliberate runner change, not a smoke-test concern.)
+
+**Hermeticity mechanism:** mock mode constructs `RefactorEngine(verify_build=False)` and a
+stub check (run_ok=True, no dotnet). To make `make_virtual` actually APPLY (vs. record
+`applied=False` "no owning .csproj"), the test points `--cloned-repos` at a tmp dir with a
+real `mock-repo/MockLib.csproj` + `mock.cs` (`public string DoSomething()`), so
+`find_owning_csproj` resolves and `_inject_virtual` runs for real. No build is triggered.
+
+**No Azure spend. No Foundry. No dotnet invoked.**
+
+### 2026-06-11: Phase-4 generate workflow created (.github/workflows/phase4-refactoring.yml)
+
+**By:** Vogel (CI/CD), requested by Jasper (autopilot)
+
+**What:** Authored `.github/workflows/phase4-refactoring.yml`, the phase-4 generate
+workflow. Modeled structurally on `phase5-generate.yml` (the most complete template:
+mock|foundry mode switch, mock smoke job, foundry guard + spend gate + freeze
+confirmation) but adapted for phase 4 = **single-agent writer + a LOCAL `apply_refactor`
+tool** (NOT multi-agent). `name:` = "Phase 4 — generate (agentic loop + refactoring
+tool)"; `env: PHASE: phase4-refactoring`.
+
+**Design / key choices:**
+- **Hard-gated foundry, default mock.** `mode` input defaults to `mock`; workflow_dispatch
+  only (no schedule/push/PR). A stray "Run workflow" click runs the no-Azure smoke path.
+- **Smoke job (mock):** Python 3.12 + .NET 10 SDK setup, runs
+  `pytest tools/generation/tests/test_refactor_smoke.py` (Beck's test, built in parallel),
+  prints runner `--help`, plus a **best-effort** mock-runner shakedown
+  (`--mock-llm --mock-fixtures-dir tools/generation/tests/fixtures/refactor --limit 1`)
+  guarded to skip if the fixtures dir doesn't exist yet (parallel authoring).
+- **Foundry guard:** requires `i_understand_this_will_spend_money=yes` +
+  `confirm_after_freeze=yes` + date ≥ 2026-06-08 (same freeze noun as phase5), and a
+  spend-gate step that **reuses the EXISTING Azure budget `phase4-tripwire-250`**
+  ($250 Monthly, subscription scope) — deliberately did NOT mint a new budget name.
+- **Matrix reuse:** `plan` job uses the shared `.github/scripts/plan_matrix.py`, so the
+  6-model panel resolves identically to phase3/phase5; target-set sha256 integrity gate
+  carried over. `generate` job runs in the dotnet SDK container (the refactor tool
+  recompiles the owning csproj in-loop) and invokes
+  `tools/generation/agentic_refactor_runner.py` — NOT `multi_agent_runner.py`, NOT the
+  phase-3 `agentic_runner_feedback.py`.
+
+**Runner flag cross-check (verified against the runner's argparse):** `max_compile_attempts`
+→ `--max-attempts`; phase-4-specific `--max-refactors 3` and `--refactor-build-timeout-s 240`;
+`--repo-filter`; real-Foundry gate is `--i-understand-this-will-spend-money` (exact hyphenated
+flag name); mock flags `--mock-llm` / `--mock-fixtures-dir` / `--out-dir`.
+
+**Faithful-stub posture:** syntactically valid and runnable today; foundry path gated hard
+and defaults to run_1 shakedown (limit_per_repo=1) since the phase isn't sealed.
+
+**VERIFIED:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/phase4-refactoring.yml')); print('YAML OK')"` → **YAML OK**.
+
+**No Azure spend. No workflow dispatched. File authoring + YAML validation only.**

@@ -220,3 +220,37 @@ decision merge + cross-agent history) as commit `9d07268` on `jasper/phase4-scaf
 pushed to origin.
 
 **No Azure spend. No generation/eval workflow dispatched. No Foundry model invoked.**
+
+### 2026-06-11: Budget cleanup — phase3-tripwire-250 deleted; phase4-tripwire-250 held at $250 (no $150 card-begins threshold)
+
+**By:** Vogel (CI/CD) + Coordinator, requested by Jasper
+
+**This is an UPDATE/refinement of the 2026-06-10 `phase4-tripwire-250` creation entry above
+(that entry stands as-is), plus the deletion of its redundant phase-3 twin.**
+
+**1 — phase3-tripwire-250 deleted (redundant after phase 3 sealed).** Deleted the Azure budget
+`phase3-tripwire-250` from subscription `VisualStudioSubscription`
+(`9490eefa-f2af-4485-983f-63397bfb5386`). Budget deletion is a FREE control-plane operation —
+no token/compute spend. With phase 3 done/sealed, `phase3-tripwire-250` became a redundant twin
+of `phase4-tripwire-250` — same subscription scope, same $250 Monthly amount, tracking the same
+total monthly spend. The combined soft-cap tripwire is now solely `phase4-tripwire-250`.
+- **Prior config (captured before delete):** amount $250, timeGrain Monthly, timePeriod
+  2026-05-01 → 2027-12-31 UTC, currentSpend $6.27 at delete time, notifications Actual
+  50% / 75% / 90% + Forecasted 100%. (Thresholds differed from phase4's 50/80/100; the
+  redundancy was on scope + amount + spend-tracking, not on alert thresholds.)
+- **How:** `az consumption budget delete --budget-name phase3-tripwire-250` (subscription scope
+  is the `az consumption budget` default; exit 0, no `az rest` fallback needed).
+
+**2 — phase4-tripwire-250 held at $250; NO "$150 card-begins" threshold added.** The combined
+soft cap stays $250 = $150 monthly credit + $100 card overage. We deliberately did **not** add a
+"$150 card-begins" alert threshold, because marketplace models (codestral-2501,
+llama-3.3-70b-instruct, grok-4-1-fast) **always bill the card and never draw the credit** — so
+$150 is not a meaningful credit-exhausted / card-begins boundary. phase4-tripwire-250 thresholds
+remain unchanged (Actual 50% / 80% / 100% + Forecasted 100%).
+
+**Net budget state now — three budgets (verified via `az consumption budget list`):**
+- `VS_Credit_Budget` — $150, BillingMonth — KEPT
+- `budget-mockstatic-50` — $50, Monthly (RG scope) — KEPT, untouched
+- `phase4-tripwire-250` — $250, Monthly — KEPT (surviving combined soft-cap tripwire)
+
+**No Azure spend incurred. No workflow dispatched. No Foundry model invoked.**

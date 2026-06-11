@@ -56,6 +56,26 @@ CI/CD agent. Owns `.github/workflows/` (coverage-orchestrator, test-discovery), 
 
 ## Recent Updates
 
+### 2026-06-11 — phase3-tripwire-250 budget DELETED (redundant after phase 3 sealed)
+- Jasper confirmed phase 3 is done; `phase3-tripwire-250` became an exact redundant
+  twin of `phase4-tripwire-250` (same subscription scope, same $250 Monthly amount,
+  tracking the same total monthly spend). Deleted ONLY phase3.
+- **Prior config (captured before delete, for the record):** amount **$250**,
+  timeGrain **Monthly**, timePeriod **2026-05-01 → 2027-12-31 UTC**, currentSpend
+  **$6.27**, notifications **Actual 50% / 75% / 90% + Forecasted 100%**. (Note: phase3
+  used 50/75/90 thresholds; phase4 uses 50/80/100 — they were NOT identical on
+  thresholds, only on scope/amount/spend-tracking, which is what made phase3
+  redundant once phase 3 was sealed.)
+- Deleted via `az consumption budget delete --budget-name phase3-tripwire-250`
+  (subscription scope is the `az consumption budget` default; EXIT=0, no explicit
+  scope or `az rest` fallback needed).
+- **Remaining 3-budget set (verified via `az consumption budget list`):**
+  `VS_Credit_Budget` ($150, BillingMonth), `budget-mockstatic-50` ($50, Monthly),
+  `phase4-tripwire-250` ($250, Monthly). All intact, none touched.
+- Did NOT alter phase4 thresholds (a possible tweak is pending Jasper, separate task).
+- **No token/compute spend:** budget delete is a FREE control-plane op; no workflow
+  dispatched, no Foundry model invoked.
+
 ### 2026-06-10 — phase4-tripwire-250 budget created + PR #28 squad bookkeeping committed
 - **Squad bookkeeping commit:** staged ONLY the 4 intended `.squad` paths (lewis +
   vogel history, decisions.md, deleted inbox `vogel-phase4-calibration-is-run1.md`),

@@ -42,3 +42,6 @@ Resolution of the above: Jasper froze the phase-4 design at `max_review_cycles =
 
 ### 2026-06-10 — Budget live: `phase4-tripwire-250` ($250 combined soft cap, ALERT-ONLY)
 Vogel created the Azure budget `phase4-tripwire-250` (subscription scope, $250 Monthly, Actual 50/80/100% + Forecasted 100%) ahead of the ~Jun 11 credit reset — it tracks combined marketplace+credit spend = the cap metric. **Caveat for dispatch gating:** Azure budgets ALERT only, they do NOT hard-stop; the real kill switch is still the subscription spending-limit toggle (currently OFF for the soft-cap strategy). A true at-cap auto-cancel (alert → action group → webhook) is an unbuilt follow-up. See decisions.md "phase4-tripwire-250 Azure budget created".
+
+### 2026-06-11 — Budget cleanup: now 3 budgets (informational)
+Vogel deleted the redundant `phase3-tripwire-250` (exact twin of phase4 after phase 3 sealed). `phase4-tripwire-250` held at $250 (combined soft cap = $150 credit + $100 card); no "$150 card-begins" threshold added (marketplace models always card-bill, never draw the credit). Net state: `VS_Credit_Budget` ($150), `budget-mockstatic-50` ($50 RG), `phase4-tripwire-250` ($250). See decisions.md "2026-06-11: Budget cleanup".

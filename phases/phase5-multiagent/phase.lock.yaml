@@ -1,0 +1,147 @@
+# Snapshot of every input that affects this phase's reproducibility.
+# Phase 5 — Multi-agent (writer / reviewer / fixer) with in-loop compile + run feedback
+#
+# STATUS: scaffold only. No production runs yet.
+# AZURE FREEZE: no real Foundry dispatch before ~2026-06-08.
+
+phase:
+  id: phase5-multiagent
+  title: "Multi-agent (writer / reviewer / fixer) with compile + run feedback"
+  strategy: |
+    Three-agent loop replacing phase 3's single-agent fix loop. A
+    "writer" agent produces the first draft using the same text-based
+    tool protocol as phases 2 and 3 (read_file / list_dir / submit_test).
+    After the build+test check on the draft, a "reviewer" agent inspects
+    the draft + the build/test outcome and emits a structured verdict
+    (APPROVE | REQUEST_CHANGES + free-text comment). On REQUEST_CHANGES,
+    a "fixer" agent revises the test based on the reviewer's comment.
+    The (review, fix, check) cycle repeats up to max_review_cycles. Same
+    6-model panel and same v2 target set (300 cells, frozen SHAs) as
+    phase 3 — phase 5 is an A/B against phase 3 on the multi-agent
+    structure alone.
+  start_date: "2026-05-18"
+  seal_date: ""
+  git_tag: ""
+
+inputs:
+  targets_version: "v2"
+  targets_sha256: "4db523f966ff24a469895a105db6dd011fc22bd52f401c4b5fbe83d905bb2823"
+  targets_count: 300         # SAME cells as phase 3 — no resampling
+
+infrastructure:
+  sdk_image: "mcr.microsoft.com/dotnet/sdk:10.0-noble"
+  sdk_image_digest: ""       # captured at workflow runtime; see phase5-generate.yml logs
+  dotnet_sdk_version: "10.0.x"
+  python_version: "3.12"
+  orchestrator_workflow_sha: ""
+  generator_workflow_sha: ""
+
+repos:                       # SAME pinned SHAs as phase 3
+  OpenRA:          "8f2138c71106aaffd8a288b56d1c9ef6013700ba"
+  abp:             "ea4bbb8b517869a9fb735ea5bc05c819c209d0b5"
+  aspnetcore:      "ecb199c29cbefb6fcb6aa789436de36e44427a78"
+  duplicati:       "4afa374d7b994cfbfb8167750baabec3eea557e3"
+  eShop:           "9b4f9434f46fdc5c1a6e9e936af2868340cdbc48"
+  efcore:          "45e3af0273b71919189367bc152a335b69f443c6"
+  garnet:          "38cac99c7ad80ae8465ea6e0f120bd6698730a75"
+  jellyfin:        "e1e18e8da015e7311e62cdb62167d51e90331edd"
+  orleans:         "8024faf860549cb960b4b573c1571b379e283daa"
+  roslyn:          "02d301627ed5016a4c18acd1a35e5bbc20ff03f0"
+  semantic-kernel: "1fe41e17a90e002aa7f4f834f7ebd9475d80803c"
+  server:          "ea233580d24734f78feffe7fa5cef185b1a2df28"
+
+generation:
+  endpoint: "https://foundry-mockstatic.cognitiveservices.azure.com/"
+  endpoint_kind: "Azure AI Foundry (single account, three API surfaces)"
+  region: "eastus2"
+
+  surfaces:
+    openai_chat:        ["gpt-4.1-mini", "gpt-4.1-nano"]
+    foundry_inference:  ["phi-4", "codestral-2501", "llama-3.3-70b-instruct", "grok-4-1-fast"]
+
+  # For the first dispatch, all three roles (writer / reviewer / fixer) use
+  # the SAME model per cell. Mixed-role panels are deferred to phase 5.
+  models:
+    - id: "gpt-4.1-mini"
+    - id: "gpt-4.1-nano"
+    - id: "phi-4"
+    - id: "codestral-2501"
+    - id: "llama-3.3-70b-instruct"
+    - id: "grok-4-1-fast"
+
+  runs_per_model: 3
+  temperature: 0.0
+  top_p: 1.0
+  seed: 42
+  max_output_tokens: 4096
+
+  model_snapshots_observed: {}
+
+  agent_topology: writer_reviewer_fixer
+
+  prompt_template_dir: "prompt/"
+  prompt_writer_system_sha256: ""    # filled at first successful run
+  prompt_reviewer_system_sha256: ""  # filled at first successful run
+  prompt_fixer_system_sha256: ""     # filled at first successful run
+  prompt_user_template_sha256: ""    # filled at first successful run
+
+  # Per-agent turn budgets — tighter than phase 3 because each agent has
+  # a narrower job. See PLAN.md § Budgets for rationale.
+  writer_max_turns: 6
+  writer_max_reads: 4
+  reviewer_max_turns: 2          # reviewer just emits a verdict
+  reviewer_max_reads: 2
+  fixer_max_turns: 4
+  fixer_max_reads: 2
+
+  agent_max_attempts: 4            # max submit_test cycles across whole task
+  agent_run_timeout_s: 60          # per-submission `dotnet test` cap
+
+  # Multi-agent loop budget
+  max_review_cycles: 3             # (review, fix, check) triples after first draft
+
+  agent_tools_allowed:
+    - read_file
+    - list_dir
+    - submit_test
+  agent_feedback_kind: "compile_and_run"
+
+ci_runs:
+  generator_run_ids: {}
+
+evaluation:
+  framework: xUnit
+  target_tfm: net10.0
+  build_timeout_s: 240
+  test_timeout_s: 180
+  coverage_collector: "XPlat Code Coverage (coverlet)"
+  package_pins:
+    Microsoft.NET.Test.Sdk: "17.12.0"
+    xunit: "2.9.2"
+    "xunit.runner.visualstudio": "2.8.2"
+    Moq: "4.20.72"
+    NSubstitute: "5.3.0"
+    "coverlet.collector": "6.0.2"
+
+cost:
+  total_usd_to_date: 0.0
+  budget_alert_amount_usd: 250
+  budget_alert_resource_group: "rg-mocking-static-experiment"
+  account_name: "foundry-mockstatic"
+  notes: |
+    Budget alert "phase4-tripwire-250" — emails on 50/75/90% actual +
+    100% forecast. $250 is a $40 headroom over the $210 PLAN.md
+    projection. Same Foundry account as phases 2 and 3 — phase 3 spend
+    ($82.19) is already booked against this account; the phase 5 budget
+    is on top.
+
+results:
+  total_attempts: 0
+  total_submitted: 0
+  total_compile_ok: 0
+  total_run_ok: 0
+  total_tests_passed: 0
+  total_tests_failed: 0
+  reviewer_verdict_distribution: {}
+  avg_review_cycles_per_cell: 0
+  per_model: {}

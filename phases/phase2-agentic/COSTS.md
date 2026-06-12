@@ -55,7 +55,7 @@ After phase 2 we are removing `gpt-5-codex` from `FULL_PANEL` in `.github/script
 
 1. **Cost asymmetry.** 82% of phase 2 spend went to one model with the worst submission rate of any reasoning-capable model in the panel.
 2. **Diminishing return.** The phase-2 codex run is preserved in `results/gpt-5-codex/` so we already have its agentic-loop baseline. Phases 3-5 change *generation strategy*, not the model panel — codex's per-strategy delta can be inferred from the cheaper panel members.
-3. **Budget headroom.** The remaining three phases (agentic loop with compile feedback, multi-agent, multi-team) chain longer per cell. Codex would multiply that chain by 5-10× and consume the entire remaining budget on one model.
+3. **Budget headroom.** The remaining three phases (agentic loop with compile feedback, refactoring tool, multi-agent) chain longer per cell. Codex would multiply that chain by 5-10× and consume the entire remaining budget on one model.
 4. **No resampling.** The 300-cell v2 target set is preserved exactly — the same cells run in every subsequent phase. Removing codex changes the model panel only, not the sample. Cross-phase deltas remain valid because every later phase tests the same (target, file, method) tuples the v2 sweep used.
 
 If a future phase specifically tests reasoning-tier behavior, codex can be re-added for a single targeted run.
@@ -116,8 +116,8 @@ Phases 3-5 chain more turns per attempt, so per-attempt cost scales with average
 |---|---|---:|---:|
 | Phase 2 (this phase) | Agentic loop, single agent | 1.0× | **$16.58 measured (ex-codex)** |
 | Phase 3 | Agentic loop + compile feedback | 2-3× | ~$33-50 |
-| Phase 4 | Multi-agent (writer + critic) | 3-4× | ~$50-67 |
-| Phase 5 | Multi-team coordination | 4-6× | ~$67-100 |
-| **Remaining phases total** | | | **~$150-217** |
+| Phase 4 | Agentic loop + refactoring tool | 2-3× | ~$33-50 |
+| Phase 5 | Multi-agent (writer + reviewer + fixer) | 4-6× | ~$67-100 |
+| **Remaining phases total** | | | **~$133-200** |
 
 Phase 2 retrospectively cost $89.98 with codex; the same sweep without codex would have cost $16.58. The remaining-phase projection is built on that lower base.

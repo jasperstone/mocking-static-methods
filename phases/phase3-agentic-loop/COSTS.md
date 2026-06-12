@@ -104,27 +104,45 @@ lag). Expected breakdown (using phase 2 ratios):
 
 ---
 
-## Cost projections — looking ahead to phase 4 / 5
+## Cost projections — looking ahead to phase 5
 
-Phase 3 final = $82.19 across 5,400 attempts. Looking further out (same
-300-cell v2 sample, no resampling):
+Phase 3 final = $82.19 across 5,400 attempts. **That $82.19 is the
+Foundry *Models* (token) line only.** The actual May Azure bill for the
+phase-3 window was **~$342.71** (Foundry Tools $182.26 + Foundry Models
+$160.45) — ~4.2× the token figure, because the agent-runtime / tool
+surface (Foundry Tools) is billed per agent invocation and was previously
+unmodelled. `tools/cost/estimate.py` is now calibrated against that bill;
+its phase-3 combined lands at $342.53 (residual −$0.18). This is the base
+the phase-5 (multi-agent) projection scales from — see
+[phase 5 PLAN §Cost projection](../phase5-multiagent/PLAN.md#cost-projection).
 
-| Phase | Strategy | Chain mult. vs phase 3 | Est. cost (~5,400 attempts) |
-|---|---|---:|---:|
-| Phase 3 | Agentic loop + compile + run feedback | 1.0× | **$82.19 (actual)** |
-| Phase 4 | Multi-agent (writer / reviewer / fixer) | 2-3× | ~$165-245 |
-| Phase 5 | Multi-team coordination | 3-5× | ~$245-410 |
+Because Foundry Tools scales with **agent invocations**, the multi-agent
+loop (writer + reviewer×cycles + fixer×cycles) makes phase 5 far more
+expensive than the old token-only math implied. The per-cell realized call
+count is `1 + 1.1·C` (C = `max_review_cycles`): 2.1 at C=1, 3.2 at C=2,
+4.3 at C=3. `runs_per_cell` (R) scales the writer base linearly.
 
-Phase 4 is the next decision point on whether to keep all six models or trim
-the panel further. `gpt-4.1-nano` produced 19 green tests for $4.16 — fewer
-absolute wins than every other model except phi-4. If phase 4 confirms the
-ordering, gpt-4.1-nano is a candidate for removal in phase 5. `llama` is the
-opposite question — 52 green tests but 40% of spend; phase 4 will reveal
-whether the extra cost buys differentiated coverage or duplicates the
-cheaper models.
+| Config | runs | cycles | Combined (bill-calibrated) | % of $250 cap | To card |
+|---|---:|---:|---:|---:|---:|
+| **A — calibration** (recommended next dispatch) | 1 | 2 | **~$304** | 122% | ~$154 |
+| **B — full sweep, reduced cycles** | 3 | 2 | **~$913** | 365% | ~$763 |
+| **C — original full scope** | 3 | 3 | **~$1,197** | 479% | ~$1,047 |
 
-**Phase 4 projection ($165-245) lands close to the $250 tripwire** — the
-go/no-go decision is real, not theoretical.
+Decision (2026-06-10, Jasper): **keep the full 6-model panel** — the
+cross-model comparison is the point — and cut cost via **runs (3→1) and
+review cycles (3→2)** instead of dropping models. That takes the full-scope
+projection from ~$1,197 down to ~$304 for the calibration dispatch (Config A),
+whose implied **card** spend is only ~$154 (≈ the monthly $150 credit). Even
+so, the **combined** total (the cap metric) overshoots the $250 cap at every
+config; Config A is the closest and the recommended first dispatch.
+Reproduce with `python3 tools/cost/estimate.py --project-phase5 --cap 250`.
+
+Phase 5 also remains the decision point on whether the panel composition
+holds. `gpt-4.1-nano` produced 19 green tests for $4.16 — fewer absolute
+wins than every other model except phi-4. `llama` is the opposite question —
+52 green tests but 40% of token spend; phase 5 will reveal whether the extra
+cost buys differentiated coverage or duplicates the cheaper models. (Neither
+is being dropped for phase 5 — the comparison stays intact.)
 
 ---
 

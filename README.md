@@ -11,8 +11,8 @@ The experiment progresses in phases. Each phase fixes the input set and varies o
 | 1 — baseline | No generation. Measure existing test suites. | ✅ sealed · [REPORT](phases/phase1-baseline/REPORT.md) |
 | 2 — single agent, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, max 6 turns. The agent can explore the repo before submitting, but never sees its own compile or test output. | ✅ v2 sweep complete (300 cells × 3 runs × 7 models = 6,300 attempts) · [HEADLINE](phases/phase2-agentic/HEADLINE.md) · [REPORT](phases/phase2-agentic/REPORT.md) · [COSTS](phases/phase2-agentic/COSTS.md) · [REPLICATION](phases/phase2-agentic/REPLICATION.md) |
 | 3 — agentic loop | Same single agent as phase 2, but compile errors **and `dotnet test` results** are fed back as additional turns so the agent can fix its own output (up to 4 submissions per cell). | ✅ v2 sweep complete (300 cells × 3 runs × 6 models = 5,400 attempts) · [HEADLINE](phases/phase3-agentic-loop/HEADLINE.md) · [REPORT](phases/phase3-agentic-loop/REPORT.md) · [COSTS](phases/phase3-agentic-loop/COSTS.md) · [REPLICATION](phases/phase3-agentic-loop/REPLICATION.md) |
-| 4 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | not started |
-| 5 — multi-team | Multiple multi-agent teams compete or partition the target set. | not started |
+| 4 — agentic loop + testability refactoring | The phase-3 single agent, plus an `apply_refactor` tool that can introduce a testability seam (extract-and-override, wrapper interface, dependency parameterization) into the production code before testing it. Isolates the effect of a refactoring *capability* on a fixed input set. | design in progress |
+| 5 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | scaffold ([`phase5-multiagent/PLAN.md`](phases/phase5-multiagent/PLAN.md)) |
 
 > Each phase directory contains a **REPORT.md** (narrative + per-model results table), a **COSTS.md** (per-model spend), a **REPLICATION.md** (one-page reproduction recipe), a **phase.lock.yaml** (frozen inputs), and a **results/** tree (raw JSONL + generated tests).
 

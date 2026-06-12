@@ -64,7 +64,7 @@ Breakdown of the runtime failures across all submission iterations:
 
 The **160 "no `[Fact]`" cases** continue to be striking — a prompt-side fix
 candidate: the prompt does not explicitly require at least one `[Fact]`
-attribute. Phase 4 will likely close this.
+attribute. Phase 5 will likely close this.
 
 ## Cross-phase comparison
 
@@ -172,7 +172,7 @@ Same data, different build context:
   copied the test into the real test project.
 
 The evaluator numbers (787 compile / 386 run-OK) are the **headline**; the
-runner numbers are an internal feedback signal. Phase 4 may close this gap
+runner numbers are an internal feedback signal. A later phase may close this gap
 by giving the runner access to the production csproj at the cost of build
 speed.
 
@@ -199,7 +199,7 @@ speed.
   [26048496818](https://github.com/jasperstone/mocking-static-methods/actions/runs/26048496818)) and their results merged into the headline numbers
   above.
 
-## Next: variance analysis and phase 4
+## Next: variance analysis and phase 4 (refactoring tool)
 
 With 3 runs of every (model, cell) pair, variance analysis is now possible.
 Open questions for follow-up:
@@ -209,11 +209,15 @@ Open questions for follow-up:
    middle is where phase 4 should target.
 2. **Inter-model overlap.** Which cells are *only* solvable by a single
    model? Which are solvable by all 6? The intersection sizes inform
-   whether multi-agent (phase 4) is worth the cost over a single best-
+   whether multi-agent (phase 5) is worth the cost over a single best-
    performing model.
 3. **Fix shards landed.** The two container-init failures (`llama ×
    duplicati × run_3`, 9 cells; `gpt-4.1-nano × efcore × run_3`, 1 cell)
    were re-dispatched and merged. Net delta to the sweep: +10 attempts,
    +5 compile, +2 run-OK, +$0.20 cost.
 
-Phase 4 (multi-agent: writer + reviewer + fixer) is now unblocked.
+Phase 4 (agentic loop + testability refactoring tool) is the immediate next
+step: an `apply_refactor` tool introduces a testability seam into production
+code before the test is written, isolating the effect of a refactoring
+capability on the fixed input set. Phase 5 (multi-agent: writer + reviewer +
+fixer) follows.

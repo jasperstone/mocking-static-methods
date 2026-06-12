@@ -22,6 +22,7 @@ MANIFEST = OUT / "MANIFEST.txt"
 
 # Directories to skip entirely (anywhere in the tree).
 EXCLUDE_DIRS = {
+    "dissertation_bundle",      # our own output dir — never ingest the prior bundle
     "cloned_repos",
     "baseline_artifacts",
     "discovery_artifacts",

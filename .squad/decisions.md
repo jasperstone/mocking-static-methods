@@ -618,6 +618,69 @@ frozen v2 300-cell set (same 6-model panel, same harness) is attributable to the
 tool. Anti-gaming and behavior-preservation are enforced by the **harness** and
 surfaced to the agent **only through tool feedback** (`refactor_rejected`),
 exactly the way compile/run errors are surfaced in phase 3 — never pre-coached.
+
+### 2026-06-11: Phase-4 boundary refined — tool documentation ≠ task coaching (richer apply_refactor spec)
+
+**By:** Lewis (Lead), requested by Jasper
+
+**Refines** the 2026-06-11 decision "Phase-4 prompts held IDENTICAL to phase 3
+(single-variable control)". That decision stands; this one sharpens where the line sits.
+
+**The distinction Jasper drew:** the earlier pass stripped the `apply_refactor` entry to
+ONE terse menu line to avoid a prompt-engineering confound. That over-corrected by
+conflating two different things. **Documenting what a tool does and how to call it is
+standard tool-calling practice, NOT experiment coaching.** What must stay out is *task
+framing* — telling the agent it faces a Mode #1 site, that it "will need" a seam, or a
+transform-selection strategy / cost ranking.
+
+**What changed (only the `apply_refactor` tool description in
+`phases/phase4-refactoring/prompt/writer-system.md`):**
+- Menu entry enriched from a terse one-liner to a richer (still parallel) line pointing to
+  a dedicated block.
+- Added a dedicated `apply_refactor` block after "Tool-call rules:" / before "Submitting:",
+  mirroring how phase 3 gives `submit_test` and compile+run feedback their own blocks. The
+  block documents, factually and neutrally:
+  - the three transforms — `make_virtual` (adds `virtual` to a non-virtual instance method
+    so a test can subclass-and-override); `wrapper_interface` (adapter interface + thin
+    wrapper + ctor injection so a test can mock the interface); `parameterize_dependency`
+    (NEW defaulted overload preserving the public API so a test can pass a fake);
+  - all three accepted calling forms (`apply_refactor(transform=make_virtual)`,
+    `apply_refactor(make_virtual)`, `apply_refactor(transform=make_virtual, method=Foo)`) —
+    verified against `parse_refactor_args` (accepts JSON / key=value / bare);
+  - the mechanics/contract — edits confined to the owning project; rebuild after the edit;
+    auto-revert + `refactor_rejected` if it no longer builds; applied change live for the
+    next submit_test; change is transient (reverted after the task);
+  - honest implementation status — only `make_virtual` is wired end-to-end;
+    `wrapper_interface` / `parameterize_dependency` may report not-yet-available (verified:
+    they raise `NotImplementedError`, surfaced as a neutral "not implemented in this pass /
+    NOT applied" tool result). Stated as a tool limitation, not a hint to use make_virtual.
+
+**Boundary held (NOT added back):** no Mode #1 label, no EXT/NonVirtual taxonomy, no
+"you'll need a seam", no transform cost/ease ranking, no anti-gaming essay, no self-check
+checklist, no motivational transient-seam lecture. The auto-revert/transient mechanic is
+stated factually as tool behavior (needed to interpret `refactor_rejected`), not as a
+legitimacy lecture.
+
+**Held constant vs phase 3 = the TASK FRAMING, not the tool inventory.**
+`user-template.md` left byte-for-byte phase-3's (untouched). The **sole manipulated
+variable remains the availability of `apply_refactor`**; the agent must still DISCOVER that
+the tool helps and which transform fits.
+
+**Docs updated:** PLAN.md "Prompts held identical to phase 3 (the control)" section and
+REPLICATION.md single-variable blockquote reworded to state the boundary precisely —
+"the apply_refactor TOOL is documented like any other tool (capability + calling contract),
+consistent with how phase 3 documents submit_test and the compile/run loop; what is held
+constant is the task framing; tool documentation is not task coaching."
+
+**Methodological rule worth keeping:** "hold the prompt constant" means **hold the task
+framing constant** — documenting a new capability's *interface* is part of giving the agent
+the tool, not a confound. The confound is *strategy/situation coaching*, not *interface
+documentation*.
+
+**Safety:** code parses the tool by regex (`APPLY_REFACTOR_RE`) + `parse_refactor_args`,
+never the prose, so enriching the description cannot change parsing. Smoke test green:
+`python -m pytest tools/generation/tests/test_refactor_smoke.py -q` → 1 passed in 0.09s.
+Committed by coordinator as d2bfb2d3 (code/docs).
 The agent must DISCOVER on its own that the tool helps.
 
 **Methodological rule (team-relevant):** when a phase adds a capability, hold

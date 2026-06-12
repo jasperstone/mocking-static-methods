@@ -56,6 +56,26 @@ CI/CD agent. Owns `.github/workflows/` (coverage-orchestrator, test-discovery), 
 
 ## Recent Updates
 
+### 2026-06-11 — PR #28 squash-merged → rebased phase4-refactoring → opened PR #30
+PR #28 (scaffold branch `jasper/phase4-scaffold`, commit `4dbc35e9`) was **SQUASH-merged** into
+`origin/main` as squash commit `8d9b0ada`, NOT a regular merge — so `4dbc35e9` is NOT reachable
+from main (verified via `git merge-base --is-ancestor 4dbc35e9 origin/main` → false). `main` had
+also moved past it (#29 dissertation bundler at `fe840ee0`). Because `jasper/phase4-refactoring`
+(`0fbdae3b`) was branched FROM the scaffold, it carried BOTH the now-duplicated renumbering commit
+`4dbc35e9` AND the real phase-4 work — so a **rebase WAS needed**. Ran
+`git rebase --onto main 4dbc35e9 jasper/phase4-refactoring`: replayed only the single phase-4
+scaffold commit onto updated main (new sha `f7b42ecd`), dropping the duplicate renumbering. **Clean
+rebase, zero conflicts** (the two commits touched disjoint files — renumbering = phase5 moves +
+phase2-singleshot deletes; phase-4 = new phase4-refactoring/ + apply_refactor tooling).
+Diff-stat verified `main..branch` shows ONLY phase-4 files (no phase5 churn). Force-pushed with
+`--force-with-lease` (clean, lease held). Opened **PR #30** against main:
+https://github.com/jasperstone/mocking-static-methods/pull/30 (title
+"feat(phase4): agentic loop + testability refactoring tool experiment"; body via `--body-file`
+temp file to dodge shell escaping). Did NOT merge, did NOT delete branches. Lesson: when a base PR
+is squash-merged, child branches MUST be rebased `--onto main <old-base-tip>` to shed the
+now-duplicated history — a plain `git merge-base origin/main..branch` would otherwise show the
+duplicate commit. **No Azure spend — git only.**
+
 ### 2026-06-11 — Created .github/workflows/phase4-refactoring.yml (phase-4 generate workflow) *(condensed)*
 New phase-4 generate workflow, modeled on `phase5-generate.yml` but adapted for phase 4 =
 **SINGLE-AGENT writer + LOCAL apply_refactor tool** (NOT multi-agent). `mode` input (mock|foundry,
@@ -137,26 +157,10 @@ dollars not queryable via az on this MSDN sub). Phase-3 model = $342.53 vs actua
 Full text → `history-archive.md`; canonical → decisions.md ("Cost estimator models the actual
 Azure bill").
 
-### 2026-05-16T00:00:00Z — Team update (viz layout)
-viz layout changed — see `tools/viz/README.md` and `.squad/decisions.md` (entry: 2026-05-16: tools/viz restructure). Per-plot files under `tools/viz/plots/`, shared helpers in `tools/viz/lib/`, new derived `tools/viz/data/per_model_phase.csv` from `aggregate_phase_results.py`. Four new plot families shipped.
-
-### 2026-05-08 — MAUI removed; OpenRA + StockSharp added (Phase 2 baseline) — commit d3689e0
-Removed deferred `coverage-maui` job entirely. 4 rounds of remediation hit increasingly internal MS-CI assumptions; per Brady, data didn't justify drag.
-
-Added 2 new jobs:
-- **OpenRA** (`8f2138c7`, bleed HEAD) — `net8.0`, NUnit 4 + NUnit3TestAdapter, no coverlet. Data-collector path (`--collect "Code Coverage;Format=cobertura"` + `dotnet-coverage merge`), same as abp/efcore/roslyn/runtime. Side-installs .NET 8 SDK because noble ships only .NET 10 and OpenRA has no `global.json`.
-- **StockSharp** (`a26ce597`, master HEAD) — `net10.0` (via `common_target_*.props` → `NetVer=10`), MSTest 4.x, no coverlet. Per-csproj restore+build of `Tests/Tests.csproj` only. Risk flagged: references `Microsoft.Data.SqlClient` + `Ecng.Data.SqlServer` (SQL-dependent tests filterable by Category=Integration).
-
-**Skipped PowerToys + Files** — both Windows-only at SDK/TFM level. Files mandates `net10.0-windows10.0.26100.0`; PowerToys UnitTests all in `src/modules/<windows-only>/` chains.
-
-Active matrix: **15 repos**. Triggered runs: OpenRA=25552129165, StockSharp=25552132370.
-
-### 2026-05-08 — StockSharp coverlet.console fix + MTP empty-modules blocker *(condensed)*
-MSTest 4.x → MTP routing → data-collector silent-no-op (178-byte stub). Swapped to coverlet.console
-wrap + `FullyQualifiedName!~` exclusions for 5 flaky classes → 0 failures / 4096 passed, but
-cobertura had an empty Module table (zero modules instrumented despite ~80 dep DLLs). Round-2
-`--include` patterns unproven; self-inflicted SIGPIPE (`ls | head`) killed the step (reverted).
-Stopped at 2 attempts. Full diagnosis: decisions.md "2026-05-08: StockSharp flaky-test filter".
+### 2026-05 entries (viz layout, MAUI removed, OpenRA/StockSharp added, StockSharp MTP blocker) — archived 2026-06-11
+Older Phase-2-era updates (2026-05-08 MAUI removed + OpenRA/StockSharp added at 15-repo matrix,
+2026-05-08 StockSharp coverlet/MTP empty-modules blocker, 2026-05-16 viz layout change) moved in
+full to `history-archive.md`. Canonical decisions remain in `.squad/decisions.md`.
 
 ### Earlier entries
 - 2026-05-06 — Silent empty-cobertura fix (commit 7885485)

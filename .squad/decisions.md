@@ -555,3 +555,29 @@ and defaults to run_1 shakedown (limit_per_repo=1) since the phase isn't sealed.
 **VERIFIED:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/phase4-refactoring.yml')); print('YAML OK')"` → **YAML OK**.
 
 **No Azure spend. No workflow dispatched. File authoring + YAML validation only.**
+
+### 2026-06-11: Phase-4 refactoring PR (#30) open against main
+**By:** Vogel (CI/CD), requested by Jasper
+
+**What:** The phase-4 (agentic loop + testability refactoring tool) work is now an open PR
+against `main`: **PR #30** — https://github.com/jasperstone/mocking-static-methods/pull/30
+(branch `jasper/phase4-refactoring`, tip `f7b42ecd`).
+
+**Git provenance / why a rebase happened:** PR #28 (phase-5 renumbering + report updates +
+phase-4 cost model, from `jasper/phase4-scaffold` / `4dbc35e9`) was **SQUASH-merged** into
+`main` as squash commit `8d9b0ada` (the original `4dbc35e9` is therefore NOT reachable from
+main). `jasper/phase4-refactoring` had been branched from the scaffold, so it carried the
+now-duplicated `4dbc35e9` plus the new phase-4 work. Rebased with
+`git rebase --onto main 4dbc35e9 jasper/phase4-refactoring` to drop the duplicate and replay
+only the phase-4 scaffold commit (new sha `f7b42ecd`); clean, zero conflicts. Force-pushed
+with `--force-with-lease`. The PR diff cleanly shows ONLY phase-4 files.
+
+**Scope of PR #30:** `phases/phase4-refactoring/` scaffold (PLAN/REPLICATION/REPORT/phase.lock
++ single-agent prompts), `tools/generation/apply_refactor.py` (RefactorEngine; `make_virtual`
+end-to-end, `wrapper_interface`/`parameterize_dependency` stubbed),
+`agentic_loop_refactor.py` strategy, `agentic_refactor_runner.py`, hermetic smoke test (green),
+and `.github/workflows/phase4-refactoring.yml` (mock|foundry; foundry guard reuses the existing
+`phase4-tripwire-250` budget).
+
+**Status:** Scaffold only — no Azure spend, no foundry run. Phase-4 cost model projects
+$213.79 (85.5% of the $250 cap) for run_1. **PR is OPEN, not merged; no branches deleted.**

@@ -317,3 +317,24 @@ May Foundry bill was ~$342 (5×). Rebuilt it to reconcile against the May anchor
   250` EXIT 0 (Config C still $1,197.49); normal run EXIT 0 (phase-3 residual still
   −$0.18); no lint errors. **No Azure spend — estimator-only.** Decision dropped to
   `.squad/decisions/inbox/vogel-phase4-cost-model.md`.
+
+---
+
+## Archived from history.md on 2026-06-11 (Recent Updates older than current phase-4 cycle)
+
+### 2026-05-16T00:00:00Z — Team update (viz layout)
+viz layout changed — see `tools/viz/README.md` and `.squad/decisions.md` (entry: 2026-05-16: tools/viz restructure). Per-plot files under `tools/viz/plots/`, shared helpers in `tools/viz/lib/`, new derived `tools/viz/data/per_model_phase.csv` from `aggregate_phase_results.py`. Four new plot families shipped.
+
+### 2026-05-08 — MAUI removed; OpenRA + StockSharp added (Phase 2 baseline) — commit d3689e0
+Removed deferred `coverage-maui` job entirely. 4 rounds of remediation hit increasingly internal MS-CI assumptions; per Brady, data didn't justify drag.
+
+Added 2 new jobs:
+- **OpenRA** (`8f2138c7`, bleed HEAD) — `net8.0`, NUnit 4 + NUnit3TestAdapter, no coverlet. Data-collector path (`--collect "Code Coverage;Format=cobertura"` + `dotnet-coverage merge`), same as abp/efcore/roslyn/runtime. Side-installs .NET 8 SDK because noble ships only .NET 10 and OpenRA has no `global.json`.
+- **StockSharp** (`a26ce597`, master HEAD) — `net10.0` (via `common_target_*.props` → `NetVer=10`), MSTest 4.x, no coverlet. Per-csproj restore+build of `Tests/Tests.csproj` only. Risk flagged: references `Microsoft.Data.SqlClient` + `Ecng.Data.SqlServer` (SQL-dependent tests filterable by Category=Integration).
+
+**Skipped PowerToys + Files** — both Windows-only at SDK/TFM level. Files mandates `net10.0-windows10.0.26100.0`; PowerToys UnitTests all in `src/modules/<windows-only>/` chains.
+
+Active matrix: **15 repos**. Triggered runs: OpenRA=25552129165, StockSharp=25552132370.
+
+### 2026-05-08 — StockSharp coverlet.console fix + MTP empty-modules blocker *(condensed)*
+MSTest 4.x → MTP routing → data-collector silent-no-op (178-byte stub). Swapped to coverlet.console wrap + `FullyQualifiedName!~` exclusions for 5 flaky classes → 0 failures / 4096 passed, but cobertura had an empty Module table (zero modules instrumented despite ~80 dep DLLs). Round-2 `--include` patterns unproven; self-inflicted SIGPIPE (`ls | head`) killed the step (reverted). Stopped at 2 attempts. Full diagnosis: decisions.md "2026-05-08: StockSharp flaky-test filter".

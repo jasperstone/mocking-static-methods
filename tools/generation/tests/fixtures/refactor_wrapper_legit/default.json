@@ -1,0 +1,10 @@
+[
+  {
+    "role": "writer",
+    "text": "Target: the `ILogger.LogInformation` extension call inside `Worker.Run`. A static/extension call can't be subclassed, so I'll introduce a wrapper-interface seam and inject it through the constructor.\n\n<tool>apply_refactor(transform=wrapper_interface)</tool>\n"
+  },
+  {
+    "role": "writer",
+    "text": "The seam is in place: `Worker` now takes an `ILoggerWrapper` via its constructor (defaulted to the real forwarder). My test constructs a Moq `Mock<ILoggerWrapper>`, INJECTS `.Object` through the constructor, drives `Run`, and verifies the logging call went through the injected seam.\n\n<tool>submit_test(csharp)</tool>\n```csharp\nusing Moq;\nusing Xunit;\nusing Microsoft.Extensions.Logging;\n\nnamespace Acme.Tests;\n\npublic class WorkerSeamTests\n{\n    [Fact]\n    public void Run_GoesThroughInjectedSeam()\n    {\n        var logger = Mock.Of<ILogger>();\n        var wrapper = new Mock<ILoggerWrapper>();\n        var worker = new Worker(logger, wrapper.Object);\n        worker.Run(\"job-1\");\n        wrapper.Verify(w => w.LogInformation(\"starting {Job}\", \"job-1\"), Times.Once);\n    }\n}\n```\n"
+  }
+]

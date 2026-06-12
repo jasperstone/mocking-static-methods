@@ -96,6 +96,20 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - name: Build RoslynRefactorTool
+        shell: bash
+        # The local apply_refactor tool shells out to the prebuilt
+        # RoslynRefactorTool.dll (bin/Release/net10.0). Build it here so the
+        # hermetic C# checks in test_roslyn_tool.py exercise the real tool
+        # (they self-skip when the dll is absent). RoslynRefactorTool is also a
+        # member of mocking-static-methods.sln; this mirrors the per-project
+        # analyzer builds used elsewhere. No Azure / Foundry involved.
+        run: |
+          set -euo pipefail
+          dotnet restore RoslynRefactorTool/RoslynRefactorTool.csproj
+          dotnet build RoslynRefactorTool/RoslynRefactorTool.csproj \
+            --no-restore -c Release
+
       - name: Install Python deps
         shell: bash
         run: |
@@ -103,11 +117,15 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install pytest requests pyyaml
 
-      - name: Run refactor smoke test
+      - name: Run refactor tool tests
         shell: bash
+        # Both are mock/hermetic gates — NO Azure / Foundry calls.
+        # test_roslyn_tool.py runs the prebuilt Roslyn tool dll built above.
         run: |
           set -euo pipefail
-          python3 -m pytest tools/generation/tests/test_refactor_smoke.py -v
+          python3 -m pytest \
+            tools/generation/tests/test_refactor_smoke.py \
+            tools/generation/tests/test_roslyn_tool.py -v
 
       - name: Sanity-print runner help (foundry mode is gated)
         shell: bash

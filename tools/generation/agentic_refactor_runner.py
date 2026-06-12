@@ -43,6 +43,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -57,6 +58,166 @@ from tools.generation.apply_refactor import RefactorEngine  # noqa: E402
 from tools.evaluation import compile_only as _compile_only  # noqa: E402
 
 DEFAULT_PHASE = "phase4-refactoring"
+
+
+# ---------------------------------------------------------------------------
+# §4.3 anti-gaming verifier ("via_seam").
+#
+# A phase-4 pass is only attributable to the refactor if the submitted test
+# actually exercises the target behaviour THROUGH the new seam. `via_seam` is
+# not knowable at apply time (the test does not exist yet), so it is computed
+# here AFTER submit_test returns run-OK, by cross-referencing the tool's `seam`
+# descriptor against the FINAL submitted test source. All four checks below
+# must hold for via_seam=True (TRANSFORM_CONTRACT §4.3). Regex over the test
+# source is acceptable for v1 per the contract; because the production site is
+# rewritten to invoke ONLY the injected interface (§4.1.1), "mock injected +
+# method driven" is sufficient evidence that the mock is what runs at the site.
+# ---------------------------------------------------------------------------
+
+_TRIVIAL_ASSERT_RES = (
+    re.compile(r"Assert\.True\s*\(\s*true\s*\)", re.IGNORECASE),
+    re.compile(r"Assert\.False\s*\(\s*false\s*\)", re.IGNORECASE),
+    re.compile(r"Assert\.Equal\s*\(\s*1\s*,\s*1\s*\)", re.IGNORECASE),
+)
+
+
+def _balanced_call_args(source: str, open_re: re.Pattern) -> list[str]:
+    """For every match of `open_re` (whose match must END at the call's '('),
+    return the argument substring inside the balanced parentheses."""
+    out: list[str] = []
+    n = len(source)
+    for m in open_re.finditer(source):
+        i = m.end() - 1  # position of '('
+        if i < 0 or i >= n or source[i] != "(":
+            continue
+        depth = 0
+        j = i
+        while j < n:
+            c = source[j]
+            if c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    out.append(source[i + 1 : j])
+                    break
+            j += 1
+    return out
+
+
+def _mock_tokens(source: str, iface: str) -> set[str]:
+    """Collect expressions/identifiers that denote a constructed mock/fake of
+    `iface` (the seam interface, simple name). Membership of any of these inside
+    an injection-point argument list proves the mock is what gets injected."""
+    esc = re.escape(iface)
+    tokens: set[str] = set()
+
+    # NSubstitute: var sub = Substitute.For<iface>();  -> inject `sub`
+    for m in re.finditer(rf"(?:var|{esc}\??)\s+(\w+)\s*=\s*Substitute\.For\s*<\s*{esc}\s*>", source):
+        tokens.add(m.group(1))
+    # FakeItEasy: var fake = A.Fake<iface>();  -> inject `fake`
+    for m in re.finditer(rf"(?:var|{esc}\??)\s+(\w+)\s*=\s*A\.Fake\s*<\s*{esc}\s*>", source):
+        tokens.add(m.group(1))
+    # Moq: var mock = new Mock<iface>();  -> inject `mock.Object`
+    for m in re.finditer(rf"(?:var|Mock\s*<\s*{esc}\s*>)\s+(\w+)\s*=\s*new\s+Mock\s*<\s*{esc}\s*>", source):
+        tokens.add(m.group(1) + ".Object")
+    # Hand-rolled fake: class Fake : ... iface ... { }  -> inject `new Fake(` / a var of it
+    fake_classes = re.findall(rf"class\s+(\w+)\s*:\s*[^{{]*\b{esc}\b", source)
+    for fc in fake_classes:
+        fe = re.escape(fc)
+        tokens.add(f"new {fc}")
+        for m in re.finditer(rf"(?:var|{esc}\??|{fe})\s+(\w+)\s*=\s*new\s+{fe}\b", source):
+            tokens.add(m.group(1))
+    # Inline constructions usable directly as an argument.
+    if re.search(rf"Substitute\.For\s*<\s*{esc}\s*>", source):
+        tokens.add(f"Substitute.For<{iface}>")
+    if re.search(rf"Mock\.Of\s*<\s*{esc}\s*>", source):
+        tokens.add(f"Mock.Of<{iface}>")
+    if re.search(rf"A\.Fake\s*<\s*{esc}\s*>", source):
+        tokens.add(f"A.Fake<{iface}>")
+    return tokens
+
+
+def verify_via_seam(seam: dict, test_source: str) -> tuple[bool, dict]:
+    """Run the four §4.3 checks of `seam` against `test_source`.
+
+    Returns (via_seam, checks) where `checks` records each boolean so the
+    attribution is auditable from saved artifacts alone.
+    """
+    src = test_source or ""
+    iface = str(seam.get("interface", "")).split(".")[-1]
+    containing = str(seam.get("containing_type", "")).split(".")[-1]
+    injection = str(seam.get("injection", ""))
+    injref = str(seam.get("injection_ref", ""))
+    esc_if = re.escape(iface)
+    esc_ct = re.escape(containing)
+
+    # Check 1: seam interface referenced in a mock/fake construction context.
+    check_seam_type = bool(iface) and bool(
+        re.search(rf"Mock\s*<\s*{esc_if}\s*>", src)
+        or re.search(rf"Substitute\.For\s*<\s*{esc_if}\s*>", src)
+        or re.search(rf"Mock\.Of\s*<\s*{esc_if}\s*>", src)
+        or re.search(rf"A\.Fake\s*<\s*{esc_if}\s*>", src)
+        or re.search(rf"class\s+\w+\s*:\s*[^{{]*\b{esc_if}\b", src)
+    )
+
+    tokens = _mock_tokens(src, iface)
+
+    def _args_have_mock(arglists: list[str]) -> bool:
+        for args in arglists:
+            if any(tok in args for tok in tokens):
+                return True
+        return False
+
+    # Check 2: the mock is injected at the injection point.
+    check_injected = False
+    check_method_driven = False
+    if injection == "ctor" and containing:
+        ctor_open = re.compile(rf"\bnew\s+{esc_ct}\s*\(")
+        ctor_args = _balanced_call_args(src, ctor_open)
+        # named-arg injection (param_name:) also counts.
+        param_name = injref.strip()
+        named = bool(param_name) and any(
+            re.search(rf"\b{re.escape(param_name)}\s*:", a) for a in ctor_args
+        )
+        check_injected = named or _args_have_mock(ctor_args)
+        # Check 3: a method is invoked on the constructed instance.
+        mvar = re.search(rf"(?:var|{esc_ct})\s+(\w+)\s*=\s*new\s+{esc_ct}\s*\(", src)
+        if mvar:
+            inst = re.escape(mvar.group(1))
+            check_method_driven = bool(re.search(rf"\b{inst}\s*\.\s*\w+\s*\(", src))
+        else:
+            check_method_driven = bool(
+                re.search(rf"new\s+{esc_ct}\s*\([^;]*\)\s*\.\s*\w+\s*\(", src)
+            )
+    elif injection == "overload":
+        enclosing = injref.split("(", 1)[0].strip()
+        if enclosing:
+            # Match `enclosing(` whether called as `obj.M(...)` or `M(...)`, but
+            # not a longer identifier ending in `enclosing` (e.g. a test method
+            # named `M_DoesX`).
+            call_open = re.compile(rf"(?<!\w){re.escape(enclosing)}\s*\(")
+            overload_args = _balanced_call_args(src, call_open)
+            check_injected = _args_have_mock(overload_args)
+            # The overload call IS the method invocation that drives the seam.
+            check_method_driven = check_injected
+
+    # Check 4: a non-trivial assertion is present.
+    has_verify = bool(re.search(r"\.\s*Verify\s*\(", src) or re.search(r"\.\s*Received\s*[(<]", src))
+    asserts = re.findall(r"Assert\.\w+\s*\([^;]*\)", src)
+    non_trivial_assert = any(
+        not any(t.search(a) for t in _TRIVIAL_ASSERT_RES) for a in asserts
+    )
+    fluent = bool(re.search(r"\.\s*Should\s*\(\s*\)", src))
+    check_assertion = has_verify or non_trivial_assert or fluent
+
+    checks = {
+        "seam_type_referenced": check_seam_type,
+        "injected_at_injection_point": check_injected,
+        "target_method_driven": check_method_driven,
+        "non_trivial_assertion": check_assertion,
+    }
+    return all(checks.values()), checks
 
 
 def slug(model_id: str) -> str:
@@ -178,6 +339,11 @@ def main() -> int:
                     help="Use the fixture-driven mock LLM adapter. NO Azure calls.")
     ap.add_argument("--mock-fixtures-dir", default=None,
                     help="Required with --mock-llm: dir containing default.json fixtures.")
+    ap.add_argument("--mock-cell-json", default=None,
+                    help="Optional with --mock-llm: JSON file overriding the synthesized "
+                         "mock target row (target_id/repo/file/line/method/receiver_type/"
+                         "kind/containing_type), e.g. to point at a real ILogger/HttpClient "
+                         "fixture repo so apply_refactor exercises the Roslyn tool.")
     # Real-Foundry safety gate
     ap.add_argument("--i-understand-this-will-spend-money", action="store_true",
                     help="Required to use the real Foundry adapter.")
@@ -237,16 +403,34 @@ def main() -> int:
 
     # Load rows (mock mode synthesizes a single placeholder cell).
     if args.mock_llm:
-        rows = [{
-            "target_id": "mock:0001",
-            "repo": "mock-repo",
-            "file": "mock.cs",
-            "line": "1",
-            "method": "DoSomething",
-            "receiver_type": "MockService",
-            "kind": "NonVirtual",
-            "containing_type": "MockService",
-        }]
+        if args.mock_cell_json:
+            cell_path = Path(args.mock_cell_json)
+            if not cell_path.is_file():
+                print(f"error: --mock-cell-json not found: {cell_path}", file=sys.stderr)
+                return 2
+            cell = json.loads(cell_path.read_text())
+            # Required keys default sensibly so a partial cell still runs.
+            rows = [{
+                "target_id": cell.get("target_id", "mock:0001"),
+                "repo": cell.get("repo", "mock-repo"),
+                "file": cell.get("file", "mock.cs"),
+                "line": str(cell.get("line", "1")),
+                "method": cell.get("method", ""),
+                "receiver_type": cell.get("receiver_type", ""),
+                "kind": cell.get("kind", ""),
+                "containing_type": cell.get("containing_type", ""),
+            }]
+        else:
+            rows = [{
+                "target_id": "mock:0001",
+                "repo": "mock-repo",
+                "file": "mock.cs",
+                "line": "1",
+                "method": "DoSomething",
+                "receiver_type": "MockService",
+                "kind": "NonVirtual",
+                "containing_type": "MockService",
+            }]
         user_msg_override = (
             "Smoke-test cell. Writer fixture exercises apply_refactor + submit_test."
         )
@@ -338,6 +522,29 @@ def main() -> int:
                 else:
                     n_refactor_rejected += 1
 
+            # §4.3 anti-gaming: verify the submitted test exercises the seam.
+            # Only meaningful when a seam-bearing refactor applied AND the cell
+            # submitted a run-OK test. `via_seam` stays None otherwise (e.g.
+            # make_virtual, which carries no seam, or a non-passing cell).
+            effective_seam = None
+            for ra in loop.refactor_attempts:
+                if ra.get("applied") and ra.get("seam"):
+                    effective_seam = ra["seam"]   # last applied seam wins
+            via_seam = None
+            via_seam_checks = None
+            if effective_seam and loop.submitted and loop.final_run_ok and loop.final_code:
+                via_seam, via_seam_checks = verify_via_seam(effective_seam, loop.final_code)
+            # Persist the verdict + seam alongside the refactor log so the
+            # attribution is auditable from saved artifacts alone (§4.4).
+            if effective_seam is not None:
+                with rpath.open("a") as rfh:
+                    rfh.write(json.dumps({
+                        "verification": True,
+                        "via_seam": via_seam,
+                        "checks": via_seam_checks,
+                        "seam": effective_seam,
+                    }) + "\n")
+
             tool_calls = {"read_file": 0, "list_dir": 0, "apply_refactor": 0,
                           "submit_test": 0, "no_tool": 0}
             for turn in loop.turns:
@@ -405,6 +612,9 @@ def main() -> int:
                 submission_iterations=submission_iters,
                 refactor_attempts_n=len(loop.refactor_attempts),
                 refactor_attempts=loop.refactor_attempts,
+                via_seam=via_seam,
+                via_seam_checks=via_seam_checks,
+                seam=effective_seam,
                 files_restored=restored,
                 total_prompt_tokens=loop.total_prompt_tokens,
                 total_completion_tokens=loop.total_completion_tokens,

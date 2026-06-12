@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>RoslynRefactorTool</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+    <!-- Reference assemblies pulled into the build output so the tool compiles
+         target source against the same pinned BCL extension surface that
+         Mode1Analyzer uses. Fast path: no per-project `dotnet restore`. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" GeneratePathProperty="true" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" GeneratePathProperty="true" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="9.0.0" GeneratePathProperty="true" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="9.0.0" GeneratePathProperty="true" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.0" GeneratePathProperty="true" PrivateAssets="all" />
+  </ItemGroup>
+
+  <Target Name="CopyRefAssemblies" AfterTargets="Build">
+    <ItemGroup>
+      <RefAsm Include="$(PkgMicrosoft_Extensions_Logging_Abstractions)/lib/net9.0/*.dll" />
+      <RefAsm Include="$(PkgMicrosoft_Extensions_Logging)/lib/net9.0/*.dll" />
+      <RefAsm Include="$(PkgMicrosoft_Extensions_Configuration_Abstractions)/lib/net9.0/*.dll" />
+      <RefAsm Include="$(PkgMicrosoft_Extensions_Configuration_Binder)/lib/net9.0/*.dll" />
+      <RefAsm Include="$(PkgMicrosoft_Extensions_DependencyInjection_Abstractions)/lib/net9.0/*.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RefAsm)" DestinationFolder="$(OutDir)refs/" />
+  </Target>
+
+</Project>

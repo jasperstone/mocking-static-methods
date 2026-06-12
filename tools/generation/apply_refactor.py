@@ -39,6 +39,7 @@ up a C# project here.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
@@ -58,6 +59,24 @@ from tools.evaluation.compile_only import (
 # Transform names the agent may request. The menu IS the contract.
 TRANSFORMS = ("make_virtual", "wrapper_interface", "parameterize_dependency")
 
+# The pure C# Roslyn rewriter that performs `wrapper_interface` and
+# `parameterize_dependency` (TRANSFORM_CONTRACT §0). Built via
+# `dotnet build RoslynRefactorTool/RoslynRefactorTool.csproj -c Release`.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ROSLYN_TOOL_DIR = _REPO_ROOT / "RoslynRefactorTool"
+
+
+def _resolve_roslyn_tool_dll() -> Path | None:
+    """Locate the built RoslynRefactorTool.dll, preferring Release over Debug."""
+    for cfg in ("Release", "Debug"):
+        cand = _ROSLYN_TOOL_DIR / "bin" / cfg / "net10.0" / "RoslynRefactorTool.dll"
+        if cand.exists():
+            return cand
+    return None
+
+
+ROSLYN_REFACTOR_TOOL_DLL = _resolve_roslyn_tool_dll()
+
 _ACCESS_MODIFIERS = ("public", "protected", "internal", "private")
 # Modifiers that mean a method is NOT a plain overridable instance method.
 _NON_OVERRIDABLE = ("static", "virtual", "abstract", "override", "const", "sealed")
@@ -74,6 +93,8 @@ class RefactorResult:
     files_changed — repo-relative paths the transform wrote (post-state)
     build_ok      — result of the behaviour-preservation build (None if skipped)
     errors        — first build errors when build_ok is False
+    seam          — seam descriptor from the Roslyn tool (TRANSFORM_CONTRACT §4);
+                    {} for make_virtual and for not-applicable returns
     """
     transform: str
     applied: bool = False
@@ -82,6 +103,7 @@ class RefactorResult:
     files_changed: list[str] = field(default_factory=list)
     build_ok: bool | None = None
     errors: list[dict] = field(default_factory=list)
+    seam: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -92,6 +114,7 @@ class RefactorResult:
             "files_changed": self.files_changed,
             "build_ok": self.build_ok,
             "errors": self.errors[:5],
+            "seam": self.seam,
         }
 
 
@@ -367,47 +390,133 @@ class RefactorEngine:
                    f"consider wrapper_interface instead.)",
         )
 
-    # -- transform 2: wrapper_interface (STUB + contract) -----------------
+    # -- Roslyn subprocess bridge (wrapper_interface / parameterize_dependency)
+
+    def _invoke_roslyn_tool(self, transform: str, args: dict) -> RefactorResult:
+        """Drive the pure C# `RoslynRefactorTool` for an AST-level seam transform
+        (TRANSFORM_CONTRACT §0). The tool reads the owning project source and
+        returns proposed post-state source text + a seam descriptor as JSON; this
+        method owns every filesystem write (snapshotted) and the prod-write guard.
+
+        On `applicable=false` → applied=False, reason=tool reason, seam={} (no
+        write, no build). On internal tool error (ok=false / nonzero / bad json)
+        → applied=False with a diagnostic reason. Otherwise every returned path is
+        re-checked through `_safe_prod_path`; if any escapes the owning subtree the
+        WHOLE result is rejected and nothing is written. The `apply()` wrapper then
+        runs `_build_owning_project()` + auto-revert (unchanged lifecycle).
+        """
+        dll = ROSLYN_REFACTOR_TOOL_DLL or _resolve_roslyn_tool_dll()
+        if dll is None or not Path(dll).exists():
+            return RefactorResult(
+                transform,
+                reason="roslyn_tool_missing: RoslynRefactorTool.dll not built; run "
+                       "`dotnet build RoslynRefactorTool/RoslynRefactorTool.csproj -c Release`.",
+            )
+
+        method = (args.get("method") or self.method or "").strip()
+        raw_file = (args.get("file") or self.target_file or "").strip()
+        cand = Path(raw_file)
+        target_abs = cand.resolve() if cand.is_absolute() else (self.repo_root / raw_file).resolve()
+
+        argv = [
+            DOTNET, str(dll),
+            "--transform", transform,
+            "--owning-dir", str(self.owning_csproj_dir),
+            "--file", str(target_abs),
+            "--line", str(self.target_line),
+            "--method", method,
+            "--receiver-type", self.receiver_type,
+            "--containing-type", self.containing_type,
+            "--kind", self.kind,
+            "--interface-name", (args.get("interface_name") or "").strip(),
+            "--wrapper-name", (args.get("wrapper_name") or "").strip(),
+            "--param-name", (args.get("param_name") or "").strip(),
+            "--json-out", "-",
+        ]
+
+        env = os.environ.copy()
+        env["DOTNET_NOLOGO"] = "1"
+        env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
+        env["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
+        env["NUGET_PACKAGES"] = NUGET_CACHE
+        try:
+            proc = subprocess.run(
+                argv, cwd=str(self.owning_csproj_dir), capture_output=True, text=True,
+                timeout=self.build_timeout_s, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return RefactorResult(transform, reason=f"roslyn_tool_timeout after {self.build_timeout_s}s")
+        except OSError as e:
+            return RefactorResult(transform, reason=f"roslyn_tool_exec_failed: {e}")
+
+        try:
+            payload = json.loads(proc.stdout)
+        except ValueError:
+            tail = (proc.stdout or proc.stderr or "")[-300:]
+            return RefactorResult(
+                transform,
+                reason=f"roslyn_tool_bad_json (rc={proc.returncode}): {tail}",
+            )
+
+        if not payload.get("ok", False):
+            return RefactorResult(
+                transform,
+                reason=payload.get("reason") or f"roslyn_tool_error (rc={proc.returncode})",
+            )
+
+        if not payload.get("applicable", False):
+            # Clean §5 rejection: no write, no build.
+            return RefactorResult(
+                transform, applied=False,
+                reason=payload.get("reason") or "not_applicable", seam={},
+            )
+
+        files = payload.get("files") or {}
+        if not files:
+            return RefactorResult(transform, reason="roslyn_tool_no_files: applicable but empty files{}")
+
+        # Re-check EVERY returned path through the prod-write guard. Any escape
+        # rejects the entire result, writing nothing.
+        resolved: list[tuple[Path, str]] = []
+        for raw, text in files.items():
+            p = _safe_prod_path(self.repo_root, self.owning_csproj_dir, raw)
+            if p is None:
+                return RefactorResult(
+                    transform, applied=False,
+                    reason=f"prod-write guard rejected '{raw}' (outside owning subtree "
+                           f"{self._rel(self.owning_csproj_dir)}); entire refactor rejected.",
+                )
+            resolved.append((p, text))
+
+        for p, text in resolved:
+            self._write(p, text)
+
+        return RefactorResult(
+            transform, applied=True,
+            reason=payload.get("reason") or f"{transform} applied",
+            files_changed=[self._rel(p) for p, _ in resolved],
+            seam=payload.get("seam") or {},
+        )
+
+    # -- transform 2: wrapper_interface (Roslyn) --------------------------
 
     def _wrapper_interface(self, **args) -> RefactorResult:
-        """CONTRACT (TODO — not yet implemented end-to-end):
-
-        Generate, inside the owning project subtree:
-          1. An adapter interface `I{ReceiverType}Wrapper` declaring the target
-             method (and any siblings the call site needs), and
-          2. A thin concrete wrapper `{ReceiverType}Wrapper : I…Wrapper` that
-             forwards each call to a real receiver instance.
-        Then rewrite the containing type to depend on the interface via
-        constructor injection (defaulting to the concrete wrapper to preserve
-        existing call sites). A test then injects a mock of the interface.
-
-        Args (planned): interface_name, wrapper_name, methods[].
-        Robust path: Roslyn (Microsoft.CodeAnalysis.CSharp 4.14.0) to add the
-        constructor parameter + field and rewrite the call site precisely.
+        """Generate an adapter interface + thin forwarder for the seam member and
+        inject the interface into the containing type via the constructor
+        (defaulted to the real forwarder so behaviour is preserved), rewriting all
+        same-receiver call sites. Implemented by `RoslynRefactorTool` over the
+        semantic model — see TRANSFORM_CONTRACT §2. Args: interface_name,
+        wrapper_name, param_name, method, file (all default-inferred tool-side).
         """
-        raise NotImplementedError(
-            "wrapper_interface is not implemented in this pass. "
-            "Contract: emit I{Receiver}Wrapper + {Receiver}Wrapper adapter and "
-            "inject it via the constructor (defaulted to the concrete wrapper). "
-            "Use make_virtual where the method is declared in-repo."
-        )
+        return self._invoke_roslyn_tool("wrapper_interface", args)
 
-    # -- transform 3: parameterize_dependency (STUB + contract) -----------
+    # -- transform 3: parameterize_dependency (Roslyn) --------------------
 
     def _parameterize_dependency(self, **args) -> RefactorResult:
-        """CONTRACT (TODO — not yet implemented end-to-end):
-
-        Introduce a NEW overload of the containing method that accepts the
-        dependency (the receiver) as a parameter, and make the existing public
-        method delegate to it with a default-constructed dependency. The public
-        API is preserved (the old signature still exists); a test calls the new
-        overload with a mock/fake.
-
-        Args (planned): param_name, param_type, default_expr.
-        Robust path: Roslyn to synthesise the overload + delegation body.
+        """Two-method overload-delegation: the original signature is preserved and
+        delegates to a new overload that carries the mockable seam type as a
+        trailing parameter (TRANSFORM_CONTRACT §3). Implemented by
+        `RoslynRefactorTool`. Args: param_type defaults to the generated interface;
+        param_name / interface_name / wrapper_name default-inferred tool-side.
         """
-        raise NotImplementedError(
-            "parameterize_dependency is not implemented in this pass. "
-            "Contract: add a defaulted overload taking the dependency and have "
-            "the original method delegate to it, preserving the public API."
-        )
+        return self._invoke_roslyn_tool("parameterize_dependency", args)

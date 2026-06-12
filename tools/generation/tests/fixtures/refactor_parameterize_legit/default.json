@@ -1,0 +1,10 @@
+[
+  {
+    "role": "writer",
+    "text": "Target: the `HttpClient.GetAsync` call inside `ApiClient.FetchAsync`. `HttpClient` is concrete, so I'll parameterize the dependency: add an overload of `FetchAsync` that accepts an `IHttpClientWrapper` seam, delegating from the original signature.\n\n<tool>apply_refactor(transform=parameterize_dependency)</tool>\n"
+  },
+  {
+    "role": "writer",
+    "text": "The overload is in place. My test constructs a Moq `Mock<IHttpClientWrapper>`, calls the injected overload `FetchAsync(url, wrapper.Object)`, and verifies the HTTP call went through the seam.\n\n<tool>submit_test(csharp)</tool>\n```csharp\nusing Moq;\nusing Xunit;\nusing System.Net.Http;\nusing System.Threading.Tasks;\n\nnamespace Acme.Tests;\n\npublic class ApiClientSeamTests\n{\n    [Fact]\n    public async Task FetchAsync_UsesInjectedWrapper()\n    {\n        var client = new ApiClient(new HttpClient());\n        var wrapper = new Mock<IHttpClientWrapper>();\n        wrapper.Setup(w => w.GetAsync(It.IsAny<string>()))\n               .ReturnsAsync(new HttpResponseMessage());\n        var body = await client.FetchAsync(\"http://x\", wrapper.Object);\n        wrapper.Verify(w => w.GetAsync(\"http://x\"), Times.Once);\n    }\n}\n```\n"
+  }
+]

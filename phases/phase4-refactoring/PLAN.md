@@ -133,17 +133,26 @@ The only difference between the phase-3 arm and the phase-4 arm is the presence 
 
 ### Prompts held identical to phase 3 (the control)
 
-**Prompts are held identical to phase 3 (the control).** The phase-4 system prompt
-is phase 3's verbatim, with **exactly one addition** — a single factual line in the
-tool menu declaring `apply_refactor` — and the user template is **byte-for-byte**
-phase 3's (no Mode #1 / seam language, same template variables). **The SOLE
-manipulated variable is the availability of the `apply_refactor` tool.** Anti-gaming
-and behavior-preservation are enforced by the harness and surfaced to the agent
-**only through tool feedback** (e.g. `refactor_rejected`), **never pre-coached in the
-prompt** — exactly the way compile/run errors are surfaced only via tool feedback in
-phase 3. The agent must DISCOVER on its own that the tool helps. This isolates
-tool-availability as the single independent variable, so any delta in run-OK% vs
-phase 3 is attributable to the tool, not to prompt engineering.
+**The task framing is held identical to phase 3 (the control).** The phase-4 system
+prompt is phase 3's verbatim, plus documentation of the one new tool: a one-line menu
+entry for `apply_refactor` and a dedicated `apply_refactor` block (its transforms,
+calling syntax, and build-guard/auto-revert/transient contract). That block mirrors how
+phase 3 already gives `submit_test` and the compile/run loop their own blocks — **the
+`apply_refactor` tool is documented like any other tool (capability + calling contract),
+which is standard tool-calling practice, not task coaching.** The user template is
+**byte-for-byte** phase 3's (no Mode #1 / seam language, same template variables).
+
+**The SOLE manipulated variable is the availability of the `apply_refactor` tool.** What
+is held constant vs phase 3 is the **task framing**: the agent is never told it faces a
+Mode #1 site, never told it needs (or "will likely need") a seam, and is never given a
+transform-selection strategy or a cost ranking of the transforms. Anti-gaming and
+behavior-preservation are enforced by the harness and surfaced to the agent **only
+through tool feedback** (e.g. `refactor_rejected`), **never pre-coached in the prompt** —
+exactly the way compile/run errors are surfaced only via tool feedback in phase 3. The
+agent must DISCOVER on its own that the tool helps and which transform fits. **Tool
+documentation is not task coaching**; this isolates tool-availability as the single
+independent variable, so any delta in run-OK% vs phase 3 is attributable to the tool, not
+to prompt engineering.
 
 ### Metrics
 

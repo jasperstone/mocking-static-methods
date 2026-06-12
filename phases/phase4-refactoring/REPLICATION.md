@@ -9,15 +9,20 @@ the `apply_refactor` tool, the refactoring runner, and the snapshot/restore
 lifecycle. Phase 4 is **single-agent** (one writer with a refactoring tool) — there
 is no reviewer or fixer.
 
-> **Single-variable design (the control).** The phase-4 prompts are held
-> **identical to phase 3**: the system prompt is phase 3's verbatim plus a single
-> factual tool-menu line declaring `apply_refactor`, and the user template is
-> byte-for-byte phase 3's (no Mode #1 / seam language). **The sole manipulated
-> variable is the availability of the `apply_refactor` tool.** Anti-gaming and
-> behavior-preservation are enforced by the harness and surfaced to the agent only
-> through tool feedback (`refactor_rejected`), **never pre-coached in the prompt** —
-> so any delta in run-OK% vs phase 3 is attributable to the tool, not to prompt
-> engineering.
+> **Single-variable design (the control).** The phase-4 **task framing** is held
+> **identical to phase 3**: the system prompt is phase 3's verbatim, and the user
+> template is byte-for-byte phase 3's (no Mode #1 / seam language). The one new tool,
+> `apply_refactor`, is documented like any other tool — a one-line menu entry plus a
+> dedicated block covering its transforms, calling syntax, and
+> build-guard/auto-revert/transient contract — consistent with how phase 3 documents
+> `submit_test` and the compile/run loop. **Tool documentation is not task coaching.**
+> **The sole manipulated variable is the availability of the `apply_refactor` tool.**
+> What is held constant is the task framing: the agent is never told it faces a Mode #1
+> site, never told it needs a seam, and is never given a transform-selection strategy.
+> Anti-gaming and behavior-preservation are enforced by the harness and surfaced to the
+> agent only through tool feedback (`refactor_rejected`), **never pre-coached in the
+> prompt** — so any delta in run-OK% vs phase 3 is attributable to the tool, not to
+> prompt engineering.
 
 ## Prerequisites
 

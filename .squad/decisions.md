@@ -581,3 +581,61 @@ and `.github/workflows/phase4-refactoring.yml` (mock|foundry; foundry guard reus
 
 **Status:** Scaffold only — no Azure spend, no foundry run. Phase-4 cost model projects
 $213.79 (85.5% of the $250 cap) for run_1. **PR is OPEN, not merged; no branches deleted.**
+
+### 2026-06-11: Phase-4 prompts held identical to phase 3 — `apply_refactor` is the sole manipulated variable
+
+**By:** Lewis (Lead), requested by Jasper (reviewing PR #30)
+
+**What:** Rewrote the phase-4 prompts so they are phase 3's prompts held constant
+(the control), with the availability of the `apply_refactor` tool as the ONLY
+manipulated independent variable.
+
+- `phases/phase4-refactoring/prompt/writer-system.md` is now phase 3's
+  `system.md` **verbatim**, with **exactly one addition**: a single factual line in
+  the tool menu declaring `apply_refactor` (same terse style as the
+  `read_file` / `list_dir` lines, no coaching).
+- `phases/phase4-refactoring/prompt/user-template.md` is now **byte-for-byte**
+  phase 3's `user-template.md`. The "This is a Mode #1 site … apply_refactor"
+  sentence and the `{{TEST_FRAMEWORK}}` / `{{TARGET_TFM}}` variables (which phase 3
+  does not have) were removed.
+
+**Removed confounds (all previously in the phase-4 prompts, all deleted):** the
+Mode #1 / seam explanation, the EXT-vs-NonVirtual taxonomy, the coached transform
+menu (incl. "`make_virtual` is the cheapest when it applies"), the anti-gaming
+essay, the transient-seam paragraph, the 5-point self-check checklist, the
+12-turn budget (phase 3 has no turns budget), and the user-template seam-coaching
+sentence. One factual correction: phase 3's intro phrase "read-only tool access"
+was changed to "tool access" because `apply_refactor` writes production source —
+leaving "read-only" would bias the agent AGAINST using the treatment tool.
+
+**Why (the design rationale):** the phase-4 contribution under test is a
+*capability/tooling augmentation*, NOT prompt engineering. If the prompt also
+explains Mode #1, coaches transform selection, and pre-warns about gaming, then
+any run-OK% delta vs phase 3 is un-attributable — it could be the tool or the
+prose. Holding the prompts identical isolates **tool-availability** as the single
+independent variable, so any delta in run-OK% vs phase 3's 7.1% on the identical
+frozen v2 300-cell set (same 6-model panel, same harness) is attributable to the
+tool. Anti-gaming and behavior-preservation are enforced by the **harness** and
+surfaced to the agent **only through tool feedback** (`refactor_rejected`),
+exactly the way compile/run errors are surfaced in phase 3 — never pre-coached.
+The agent must DISCOVER on its own that the tool helps.
+
+**Methodological rule (team-relevant):** when a phase adds a capability, hold
+prompts/panel/harness/params constant vs the prior phase and push all
+enforcement/coaching into the harness + tool feedback. Before dispatch, diff the
+new phase's prompt against the control — it must differ by only the one declared
+variable.
+
+**Verified:** the runner (`tools/generation/agentic_refactor_runner.py`) and the
+strategy (`tools/generation/strategies/agentic_loop_refactor.py`) parse
+`<tool>apply_refactor(...)</tool>` by **regex** (`APPLY_REFACTOR_RE`), not by
+prompt prose — confirmed by grep — so removing the prose is safe. Smoke test
+green: `python -m pytest tools/generation/tests/test_refactor_smoke.py -q`
+→ **1 passed in 0.10s**.
+
+**Docs updated:** `PLAN.md` and `REPLICATION.md` now state the single-variable
+design explicitly. `REPORT.md` already said "the writer prompt stays generic"
+(consistent — left untouched).
+
+**Not committed** (coordinator commits this round). **Phase-3 files untouched.**
+No Azure spend; no workflow dispatched.

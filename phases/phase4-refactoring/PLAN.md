@@ -131,6 +131,20 @@ The only difference between the phase-3 arm and the phase-4 arm is the presence 
 `apply_refactor`. Any lift in run-OK% is therefore attributable to the refactoring
 *capability*, not to a prompt change or a model swap.
 
+### Prompts held identical to phase 3 (the control)
+
+**Prompts are held identical to phase 3 (the control).** The phase-4 system prompt
+is phase 3's verbatim, with **exactly one addition** — a single factual line in the
+tool menu declaring `apply_refactor` — and the user template is **byte-for-byte**
+phase 3's (no Mode #1 / seam language, same template variables). **The SOLE
+manipulated variable is the availability of the `apply_refactor` tool.** Anti-gaming
+and behavior-preservation are enforced by the harness and surfaced to the agent
+**only through tool feedback** (e.g. `refactor_rejected`), **never pre-coached in the
+prompt** — exactly the way compile/run errors are surfaced only via tool feedback in
+phase 3. The agent must DISCOVER on its own that the tool helps. This isolates
+tool-availability as the single independent variable, so any delta in run-OK% vs
+phase 3 is attributable to the tool, not to prompt engineering.
+
 ### Metrics
 
 1. **Run-OK%** on the same cells, phase 4 vs phase 3's 7.1%. This is the headline.

@@ -9,6 +9,16 @@ the `apply_refactor` tool, the refactoring runner, and the snapshot/restore
 lifecycle. Phase 4 is **single-agent** (one writer with a refactoring tool) — there
 is no reviewer or fixer.
 
+> **Single-variable design (the control).** The phase-4 prompts are held
+> **identical to phase 3**: the system prompt is phase 3's verbatim plus a single
+> factual tool-menu line declaring `apply_refactor`, and the user template is
+> byte-for-byte phase 3's (no Mode #1 / seam language). **The sole manipulated
+> variable is the availability of the `apply_refactor` tool.** Anti-gaming and
+> behavior-preservation are enforced by the harness and surfaced to the agent only
+> through tool feedback (`refactor_rejected`), **never pre-coached in the prompt** —
+> so any delta in run-OK% vs phase 3 is attributable to the tool, not to prompt
+> engineering.
+
 ## Prerequisites
 
 Same as phase 3 plus:

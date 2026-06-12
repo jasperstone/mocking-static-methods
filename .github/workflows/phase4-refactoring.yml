@@ -9,8 +9,10 @@ name: Phase 4 — generate (agentic loop + refactoring tool)
 # Default behavior runs the mock-LLM smoke test only, which makes NO Azure /
 # Foundry calls.
 #
-# ⚠️ AZURE FREEZE: real Foundry dispatch is gated by TWO explicit
-# confirmations and the freeze end date (2026-06-08), AND the combined-spend
+# ⚠️ AZURE FREEZE: real Foundry dispatch is gated by a SINGLE explicit
+# confirmation token (`confirm_spend` = `yes-after-2026-06-08-freeze`, which
+# acknowledges Azure spend AND confirms the freeze end date) plus the
+# independent runtime date check (2026-06-08), AND the combined-spend
 # soft cap is tracked by the EXISTING Azure budget `phase4-tripwire-250`
 # ($250 Monthly, subscription scope). The default value of `mode` is "mock"
 # so an accidental "Run workflow" click from the GitHub UI cannot spend tokens.
@@ -19,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "Execution mode. 'mock' runs the smoke test only (no Azure). 'foundry' calls the real models (requires explicit confirmations below)."
+        description: "Execution mode. 'mock' runs the smoke test only (no Azure). 'foundry' calls the real models (requires the explicit confirm_spend token below)."
         required: true
         default: "mock"
         type: choice
@@ -58,14 +60,11 @@ on:
         description: "Per-submission `dotnet test` timeout in seconds (default 60). Hung tests are reported back to the model as run_ok=false."
         required: false
         default: "60"
-      i_understand_this_will_spend_money:
-        description: "Type 'yes' to acknowledge that 'foundry' mode WILL spend Azure tokens (tracked by phase4-tripwire-250)."
+      confirm_spend:
+        description: "Foundry-mode safety gate. Type EXACTLY 'yes-after-2026-06-08-freeze' to (a) acknowledge that 'foundry' mode WILL spend Azure tokens (tracked by phase4-tripwire-250) AND (b) confirm the date is on/after the 2026-06-08 freeze end. Any other value blocks the run."
         required: false
         default: "no"
-      confirm_after_freeze:
-        description: "Type 'yes' to confirm the date is on or after the 2026-06-08 freeze end."
-        required: false
-        default: "no"
+        type: string
 
 permissions:
   contents: read
@@ -165,21 +164,12 @@ jobs:
     if: ${{ github.event.inputs.mode == 'foundry' }}
     runs-on: ubuntu-24.04
     steps:
-      - name: Require explicit cost acknowledgement
+      - name: Require explicit spend + freeze confirmation token
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ github.event.inputs.i_understand_this_will_spend_money }}" != "yes" ]; then
-            echo "::error::foundry mode requires i_understand_this_will_spend_money=yes"
-            exit 1
-          fi
-
-      - name: Require freeze-end confirmation
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event.inputs.confirm_after_freeze }}" != "yes" ]; then
-            echo "::error::foundry mode requires confirm_after_freeze=yes (freeze ends 2026-06-08)"
+          if [ "${{ github.event.inputs.confirm_spend }}" != "yes-after-2026-06-08-freeze" ]; then
+            echo "::error::foundry mode requires confirm_spend='yes-after-2026-06-08-freeze' (acknowledges Azure spend tracked by phase4-tripwire-250 AND confirms the 2026-06-08 freeze end). Got a different value; refusing to dispatch."
             exit 1
           fi
 

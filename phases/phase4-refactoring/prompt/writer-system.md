@@ -30,7 +30,7 @@ apply_refactor (this is new):
     - After the edit, the owning project is rebuilt. If it no longer compiles, the edit is automatically reverted and you get a `refactor_rejected` result — pick a different transform or test the code as-is.
     - A change that applies cleanly stays live for your next submit_test, so the test compiles and runs against the edited source.
     - The change is transient: it is reverted once the task ends. It demonstrates that the edit makes the code testable; it is not a permanent modification to the repository.
-- Implementation status: currently only `make_virtual` is wired up end-to-end. `wrapper_interface` and `parameterize_dependency` may report back as not-yet-available; if one does, choose another transform or submit a test without it.
+- Implementation status: all three transforms (`make_virtual`, `wrapper_interface`, `parameterize_dependency`) are wired end-to-end via the local Roslyn refactoring tool. Applicability varies per target, so any of them may still return `refactor_rejected` when it doesn't apply to a given call site or the edit doesn't compile; if that happens, choose a different transform or submit a test without one.
 
 Submitting:
 - When you submit, the FIRST line of your message is `<tool>submit_test(csharp)</tool>` and IMMEDIATELY after it you include one fenced code block:

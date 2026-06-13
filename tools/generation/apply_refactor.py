@@ -14,9 +14,14 @@ production code freely — it can only pick from a fixed transform menu:
   1. make_virtual          — add `virtual` to a non-virtual instance method so
                              a test can subclass-and-override. IMPLEMENTED.
   2. wrapper_interface     — generate an adapter interface + thin wrapper for
-                             constructor injection. STUB (contract + TODO).
-  3. parameterize_dependency — inject the dependency via a NEW defaulted
-                             overload preserving the public API. STUB.
+                             constructor injection. IMPLEMENTED: delegates to
+                             RoslynRefactorTool (_invoke_roslyn_tool) to rewrite
+                             the source and return the seam descriptor.
+  3. parameterize_dependency — inject the dependency via a NEW overload that
+                             preserves the public API and delegates to it.
+                             IMPLEMENTED: delegates to RoslynRefactorTool
+                             (_invoke_roslyn_tool) to rewrite the source and
+                             return the seam descriptor.
 
 Safety rails (all implemented):
   * `_safe_prod_path` — writes are allowed ONLY inside the owning .csproj

@@ -47,7 +47,7 @@ internal static class Program
             EmitError("missing required argument(s): --transform, --owning-dir, --file, --method");
             return 1;
         }
-        if (transform is not ("wrapper_interface" or "parameterize_dependency"))
+        if (transform is not ("wrapper_interface" or "parameterize_dependency" or "make_virtual"))
         {
             EmitError($"unsupported transform '{transform}'");
             return 1;
@@ -65,6 +65,29 @@ internal static class Program
 
         var compilation = SeamCore.BuildCompilation(Path.GetFullPath(owningDir), refs);
         Console.Error.WriteLine($"compiled {compilation.SyntaxTrees.Count()} trees from {owningDir}");
+
+        // make_virtual targets a method DECLARATION (subclass-and-override seam),
+        // not a call-site rewrite, so it does not use the wrapper-oriented
+        // SeamCore.Locate path. Its `seam` is intentionally {} (TRANSFORM_CONTRACT).
+        if (transform == "make_virtual")
+        {
+            var mvResult = MakeVirtualRewriter.Apply(
+                compilation, Path.GetFullPath(file), line, method);
+            if (!mvResult.Applicable)
+            {
+                EmitNotApplicable(mvResult.Reason);
+                return 0;
+            }
+            Emit(new Dictionary<string, object?>
+            {
+                ["ok"] = true,
+                ["applicable"] = true,
+                ["reason"] = mvResult.Reason,
+                ["files"] = mvResult.Files,
+                ["seam"] = mvResult.Seam,
+            });
+            return 0;
+        }
 
         var ctx = SeamCore.Locate(
             compilation,

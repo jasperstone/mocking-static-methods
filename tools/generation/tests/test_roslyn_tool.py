@@ -344,5 +344,75 @@ def test_reject_case_emits_exact_reason_token(
     assert payload["files"] == {}, "rejected case must write no files"
 
 
+# ======================================================================
+# make_virtual (TRANSFORM_CONTRACT §1) — Roslyn-based, subclass-and-override.
+# ======================================================================
+#
+# make_virtual targets a method DECLARATION (not a call-site rewrite). The seam
+# is subclass-and-override, so the emitted `seam` is intentionally {} (no
+# wrapper/param descriptor) and via_seam attribution stays None.
+
+def test_make_virtual_applies_and_preserves_trivia():
+    """Positive: a non-virtual instance method gains `virtual`, with its leading
+    doc-comment + `<param>` tags and 4-space indentation preserved, and the
+    rewritten file still compiles. seam stays {}."""
+    payload = run_tool("make_virtual_ok", "make_virtual", 13, "Add",
+                       "Calculator", "Worker", "NonVirtual")
+    assert payload["ok"] is True, payload
+    assert payload["applicable"] is True, payload.get("reason")
+    # make_virtual carries NO seam descriptor (subclass-and-override seam).
+    assert payload["seam"] == {}, payload["seam"]
+
+    files = payload["files"]
+    site = next((t for p, t in files.items() if Path(p).name == "Site.cs"), None)
+    assert site is not None, list(files)
+    # `virtual` added on the declaration …
+    assert "public virtual int Add(int a, int b) => a + b;" in site, site
+    # … leading doc-comment trivia preserved …
+    assert "/// <summary>Adds two numbers together.</summary>" in site, site
+    assert '<param name="a">First addend.</param>' in site, site
+    # … and the 4-space indentation intact (only the modifier list changed).
+    assert "\n    public virtual int Add" in site, repr(site[:400])
+
+    if SKIP_COMPILE:
+        pytest.skip("BECK_SKIP_DOTNET_COMPILE=1")
+    ok, out = compile_rewritten(files)
+    assert ok, f"rewritten make_virtual output did not compile:\n{out}"
+
+
+# (case, line, method, expected reason token)
+MAKE_VIRTUAL_REJECT_CASES = [
+    ("make_virtual_already_virtual", 10, "Ping", "already_virtual"),
+    ("make_virtual_static", 10, "Log", "static_method"),
+    ("make_virtual_sealed_class", 10, "Ping", "sealed_class"),
+    ("make_virtual_abstract", 10, "Ping", "already_abstract"),
+    ("make_virtual_struct", 10, "Ping", "struct_type"),
+    ("make_virtual_record", 10, "Ping", "record_type"),
+    # framework-declared (no in-repo declaration) → suggest wrapper_interface.
+    ("make_virtual_framework", 7, "Append", "not_in_owning_project"),
+    # `private virtual` is illegal C# (CS0621) → reject cleanly.
+    ("make_virtual_private", 7, "Secret", "private_member"),
+]
+
+
+@pytest.mark.parametrize(
+    "case,line,method,reason",
+    MAKE_VIRTUAL_REJECT_CASES,
+    ids=[r[-1] for r in MAKE_VIRTUAL_REJECT_CASES],
+)
+def test_make_virtual_reject_emits_reason_token(case, line, method, reason):
+    payload = run_tool(case, "make_virtual", line, method,
+                       "Recv", "Worker", "NonVirtual")
+    assert payload["ok"] is True, payload
+    assert payload["applicable"] is False, (
+        f"expected rejection for {case}, got applicable=true: {payload.get('reason')}"
+    )
+    # Reason may carry a human suffix after the token (e.g. framework hint).
+    assert payload["reason"].split(":", 1)[0] == reason, (
+        f"expected reason token {reason!r}, got {payload['reason']!r}"
+    )
+    assert payload["files"] == {}, "rejected case must write no files"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

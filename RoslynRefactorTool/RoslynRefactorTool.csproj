@@ -8,6 +8,16 @@
     <RootNamespace>RoslynRefactorTool</RootNamespace>
   </PropertyGroup>
 
+  <!-- Hermetic test fixtures under tests/cases/ are RUNTIME inputs: the tool
+       reads each Site.cs from disk (via the owning-dir argument) and compiles
+       it in-memory. They are NOT part of the tool's own source (one fixture,
+       overload_candidate_arity, is deliberately uncompilable to exercise the
+       candidate-fallback path), so they must be excluded from the default
+       compile glob or they break the tool build and collide on type names. -->
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
     <!-- Reference assemblies pulled into the build output so the tool compiles

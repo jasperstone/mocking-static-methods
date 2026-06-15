@@ -12,7 +12,10 @@ THE CONSTRAINT IS THE ANTI-GAMING MECHANISM. The agent cannot rewrite the
 production code freely — it can only pick from a fixed transform menu:
 
   1. make_virtual          — add `virtual` to a non-virtual instance method so
-                             a test can subclass-and-override. IMPLEMENTED.
+                             a test can subclass-and-override. IMPLEMENTED:
+                             delegates to RoslynRefactorTool
+                             (_invoke_roslyn_tool) to locate the declaring
+                             method semantically and add the modifier (no seam).
   2. wrapper_interface     — generate an adapter interface + thin wrapper for
                              constructor injection. IMPLEMENTED: delegates to
                              RoslynRefactorTool (_invoke_roslyn_tool) to rewrite
@@ -36,17 +39,16 @@ Safety rails (all implemented):
     transform is AUTO-REVERTED and a `refactor_rejected` RefactorResult is
     returned with the build errors.
 
-The edits here are pure-Python, text/line-anchored (target line + method name).
-A Roslyn-based transform (reusing the Mode1Analyzer/ infra with
-Microsoft.CodeAnalysis.CSharp 4.14.0) is the robust future path for the harder
-transforms — see the TODO stubs — but we deliberately do not block on standing
-up a C# project here.
+All three transforms are AST-driven: the C# `RoslynRefactorTool` (reusing the
+Mode1Analyzer infra with Microsoft.CodeAnalysis.CSharp 4.14.0) reads the owning
+project source over the semantic model and returns proposed post-state text;
+this Python layer owns every filesystem write, the snapshot/restore lifecycle,
+and the behaviour-preservation build.
 """
 from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -81,10 +83,6 @@ def _resolve_roslyn_tool_dll() -> Path | None:
 
 
 ROSLYN_REFACTOR_TOOL_DLL = _resolve_roslyn_tool_dll()
-
-_ACCESS_MODIFIERS = ("public", "protected", "internal", "private")
-# Modifiers that mean a method is NOT a plain overridable instance method.
-_NON_OVERRIDABLE = ("static", "virtual", "abstract", "override", "const", "sealed")
 
 
 @dataclass
@@ -141,42 +139,6 @@ def _safe_prod_path(repo_root: Path, owning_csproj_dir: Path, raw: str) -> Path 
     except ValueError:
         return None
     return p
-
-
-def _inject_virtual(text: str, method: str) -> tuple[str | None, int | None]:
-    """Add the `virtual` modifier to the declaration of `method` in `text`.
-
-    Returns (new_text, 1-based_line) on success, (None, None) if no suitable
-    non-virtual instance method declaration was found. Line-anchored and
-    conservative: only touches a line that starts with an access modifier,
-    names the method immediately before a `(`, and is not already
-    static/virtual/abstract/override/sealed/const.
-    """
-    lines = text.splitlines(keepends=True)
-    pat = re.compile(rf"\b{re.escape(method)}\s*\(")
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if not pat.search(stripped):
-            continue
-        tokens = stripped.split()
-        if not tokens or tokens[0] not in _ACCESS_MODIFIERS:
-            continue
-        if any(kw in tokens for kw in _NON_OVERRIDABLE):
-            continue
-        # Must look like a declaration: at least <access> <returntype> <method>(
-        # i.e. there is a return-type token between the modifier and the method.
-        decl_head = stripped.split("(", 1)[0].split()
-        if len(decl_head) < 3:
-            continue
-        if decl_head[-1].split("<")[0] != method and not decl_head[-1].startswith(method):
-            # method name must be the last token before '('
-            continue
-        access = tokens[0]
-        insert_at = line.find(access) + len(access)
-        new_line = line[:insert_at] + " virtual" + line[insert_at:]
-        lines[i] = new_line
-        return "".join(lines), i + 1
-    return None, None
 
 
 class RefactorEngine:
@@ -334,66 +296,22 @@ class RefactorEngine:
                 res.reason = "refactor_rejected: owning project no longer builds after the edit"
         return res
 
-    # -- transform 1: make_virtual (IMPLEMENTED) --------------------------
+    # -- transform 1: make_virtual (Roslyn) -------------------------------
 
     def _make_virtual(self, **args) -> RefactorResult:
         """Add `virtual` to the target instance method's declaration so a test
         can subclass-and-override it. Applies to NonVirtual-kind sites whose
-        method is declared in the owning production project.
+        method is declared in the owning production project. Implemented by
+        `RoslynRefactorTool` over the semantic model (TRANSFORM_CONTRACT §1):
+        the tool locates the declaring `MethodDeclarationSyntax` semantically,
+        verifies applicability (instance, not static/virtual/abstract/override/
+        sealed, declared on a non-sealed class IN the owning project), and adds
+        the `virtual` modifier preserving trivia. make_virtual carries no seam
+        descriptor (the seam is subclass-and-override) → seam stays {}.
 
-        Optional args:
-          file   — repo-relative path of the declaring file (default: target_file)
-          method — method name to make virtual (default: the target method)
+        Args: method / file default to the target row (inferred tool-side).
         """
-        method = (args.get("method") or self.method or "").strip()
-        if not method:
-            return RefactorResult("make_virtual", reason="no method name available to make virtual.")
-
-        # Candidate files: the explicit/declaring file first, then the target
-        # file, then a bounded scan of the owning subtree for the declaration.
-        candidates: list[Path] = []
-        raw_file = args.get("file") or self.target_file
-        primary = _safe_prod_path(self.repo_root, self.owning_csproj_dir, raw_file)
-        if primary is not None and primary.is_file():
-            candidates.append(primary)
-        elif args.get("file"):
-            return RefactorResult(
-                "make_virtual",
-                reason=f"write target '{args.get('file')}' is outside the owning project "
-                       f"subtree ({self._rel(self.owning_csproj_dir)}); rejected by prod-write guard.",
-            )
-
-        if not candidates:
-            # Scan the owning subtree (bounded) for the declaration.
-            for cs in sorted(self.owning_csproj_dir.rglob("*.cs")):
-                if "/obj/" in str(cs) or "/bin/" in str(cs):
-                    continue
-                candidates.append(cs)
-                if len(candidates) >= 500:
-                    break
-
-        for path in candidates:
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            new_text, line_no = _inject_virtual(text, method)
-            if new_text is not None:
-                self._write(path, new_text)
-                return RefactorResult(
-                    "make_virtual",
-                    applied=True,
-                    reason=f"added `virtual` to {method}() at {self._rel(path)}:{line_no}.",
-                    files_changed=[self._rel(path)],
-                )
-
-        return RefactorResult(
-            "make_virtual",
-            applied=False,
-            reason=f"could not find a non-virtual instance declaration of '{method}' in the "
-                   f"owning project. (If it lives in a framework type it cannot be made virtual; "
-                   f"consider wrapper_interface instead.)",
-        )
+        return self._invoke_roslyn_tool("make_virtual", args)
 
     # -- Roslyn subprocess bridge (wrapper_interface / parameterize_dependency)
 

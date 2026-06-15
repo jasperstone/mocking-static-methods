@@ -244,3 +244,97 @@ May Foundry bill was ~$342 (5×). Rebuilt it to reconcile against the May anchor
 - Did NOT alter phase4 thresholds (a possible tweak is pending Jasper, separate task).
 - **No token/compute spend:** budget delete is a FREE control-plane op; no workflow
   dispatched, no Foundry model invoked.
+
+### 2026-06-11 — Created .github/workflows/phase4-refactoring.yml (phase-4 generate workflow) [archived from history.md 2026-06-11]
+- New phase-4 generate workflow, modeled on `phase5-generate.yml` (the most complete:
+  mock|foundry mode switch, mock smoke job, foundry guard + spend gate + freeze
+  confirmation) but adapted for phase 4 = **SINGLE-AGENT writer + LOCAL apply_refactor
+  tool** (NOT multi-agent). `name:` = "Phase 4 — generate (agentic loop + refactoring
+  tool)"; `env: PHASE: phase4-refactoring`.
+- **Mode switch:** `mode` input (mock|foundry, default **mock** so a stray UI click
+  can't spend). workflow_dispatch ONLY — no schedule/push/PR triggers.
+- **`smoke` job (mode==mock):** sets up Python 3.12 + .NET 10 SDK, installs pytest, runs
+  `pytest tools/generation/tests/test_refactor_smoke.py` (the test Beck builds in
+  parallel), prints runner `--help`, then a **best-effort** mock-runner shakedown that
+  invokes the runner with `--mock-llm --mock-fixtures-dir tools/generation/tests/fixtures/refactor`
+  — guarded to skip cleanly if the fixtures dir isn't present yet (parallel dev).
+- **`guard-foundry` job (mode==foundry):** mirrors phase5 — requires
+  `i_understand_this_will_spend_money=yes` + `confirm_after_freeze=yes` + date ≥
+  2026-06-08, and a spend-gate step that REUSES the EXISTING Azure budget
+  **`phase4-tripwire-250`** ($250 Monthly, subscription scope) — did NOT invent a new
+  budget noun. Prints the run_1 (~$214/85%) vs full 3-run (~$641/257%) framing.
+- **`plan` + `generate` jobs (mode==foundry):** `plan` reuses `.github/scripts/plan_matrix.py`
+  (same 6-model panel resolution as phase3/phase5) + target sha256 integrity gate;
+  `generate` runs inside `mcr.microsoft.com/dotnet/sdk:10.0-noble` (refactor tool
+  recompiles the owning csproj in-loop), clones the pinned-SHA repo, and invokes
+  **`tools/generation/agentic_refactor_runner.py`** (NOT multi_agent_runner, NOT the
+  phase-3 runner).
+- **Runner flag cross-check (read its argparse):** input `max_compile_attempts` →
+  `--max-attempts`; added `--max-refactors 3` (phase-4-specific), `--refactor-build-timeout-s 240`,
+  `--repo-filter`, and the real-Foundry safety gate `--i-understand-this-will-spend-money`
+  (the exact flag name in the runner — hyphenated, NOT `--spend-gate`). Mock flags:
+  `--mock-llm`, `--mock-fixtures-dir`, `--out-dir`.
+- **VERIFIED YAML valid:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/phase4-refactoring.yml')); print('YAML OK')"` → `YAML OK`.
+- Gotcha avoided: used `dotnet --info | sed -n '1,10p'` (NOT `| head`) inside the SDK
+  container to dodge the known `bash -e -o pipefail` + `head` SIGPIPE step death.
+- Decision dropped to `.squad/decisions/inbox/vogel-phase4-workflow.md`.
+
+### 2026-06-11 — Phase-4 (agentic loop + refactoring tool) cost model added to estimate.py [archived from history.md 2026-06-11]
+- The phase-4→phase-5 multi-agent rename freed the `--project-phase4` flag. Added a
+  phase-4 projection modeling the NEW phase 4 = the SAME single writer agent as
+  phase 3 PLUS a LOCAL `apply_refactor` tool (no LLM behind it) that introduces a
+  testability seam before the test is written and the csproj recompiles.
+- **Model assumptions (cheap by design vs phase 5):**
+  - **ONE LLM role (writer). NO reviewer/fixer LLM** — so no 2nd/3rd model role
+    multiplying token spend. This is the dominant reason phase 4 ≪ phase 5.
+  - **Token inflation, not an extra agent:** `P4R_TOKEN_INFLATION = 1.5` flat
+    multiplier on the phase-3 writer token base (writer takes more turns/cell:
+    inspect → pick seam → call apply_refactor → read → iterate test). Modest range
+    ~1.4–1.6, NOT a whole extra agent.
+  - **apply_refactor = billable agent tool invocation:** `P4R_REFACTOR_CALLS_PER_CELL
+    = 1.2` calls/cell (≈ one seam, occasional second), billed at the EXISTING
+    `TOOLS_SURCHARGE_PER_CALL` ($0.03375) like read_file/list_dir. Local/zero-token,
+    but the agent-runtime surface still bills → adds to invocation-scaled Foundry
+    Tools overhead.
+  - **Billing split convention reused from `project_phase5`:** token spend keeps the
+    phase-3 marketplace fraction; Foundry Tools overhead wholly credit.
+- **Default = run_1 (`P4R_DEFAULT_RUNS = 1`), the go/no-go dispatch.** GOTCHA worth
+  remembering: the phase-3 *combined* base alone is ~$342 (already > the $250 cap),
+  so a full 3-run phase-4 sweep can NEVER be under cap — it's strictly ≥ phase 3.
+  Defaulting the printed projection to run_1 is the only self-consistent way to land
+  "under cap" (and it's the dispatch you actually run first, mirroring frozen
+  phase-5 run_1). The verify command prints run_1.
+- **Projected combined total: phase-4 run_1 = $213.79 → 85.5% of the $250 cap, UNDER
+  by $36.21** (credit $156.13 / marketplace $57.67; ~$63.79 to card; ~1.87× the
+  same-runs phase-3 single-writer base $114.18). Full 3-run set (runs=3) ≈ $641
+  (257% of cap) but ≈ 54% of phase 5's $1,197 — roughly half, because of the single
+  LLM role.
+- **Did NOT rename/break** `--project-phase5` / `project_phase5` / `P5_*` /
+  `P3_RUNS_PER_CELL` / `FOUNDRY_*` / `TOKEN_RECON_FACTOR` / `CREDIT_USD`. `--runs` is
+  now shared between phase-4 and phase-5 ad-hoc projections; added `--refactor-calls`.
+  Normal runs auto-print the phase-4 go/no-go block beside the auto phase-5 block.
+- Verified: `--project-phase4 --cap 250` EXIT 0 ($213.79); `--project-phase5 --cap
+  250` EXIT 0 (Config C still $1,197.49); normal run EXIT 0 (phase-3 residual still
+  −$0.18); no lint errors. **No Azure spend — estimator-only.** Decision dropped to
+  `.squad/decisions/inbox/vogel-phase4-cost-model.md`.
+
+---
+
+## Archived from history.md on 2026-06-11 (Recent Updates older than current phase-4 cycle)
+
+### 2026-05-16T00:00:00Z — Team update (viz layout)
+viz layout changed — see `tools/viz/README.md` and `.squad/decisions.md` (entry: 2026-05-16: tools/viz restructure). Per-plot files under `tools/viz/plots/`, shared helpers in `tools/viz/lib/`, new derived `tools/viz/data/per_model_phase.csv` from `aggregate_phase_results.py`. Four new plot families shipped.
+
+### 2026-05-08 — MAUI removed; OpenRA + StockSharp added (Phase 2 baseline) — commit d3689e0
+Removed deferred `coverage-maui` job entirely. 4 rounds of remediation hit increasingly internal MS-CI assumptions; per Brady, data didn't justify drag.
+
+Added 2 new jobs:
+- **OpenRA** (`8f2138c7`, bleed HEAD) — `net8.0`, NUnit 4 + NUnit3TestAdapter, no coverlet. Data-collector path (`--collect "Code Coverage;Format=cobertura"` + `dotnet-coverage merge`), same as abp/efcore/roslyn/runtime. Side-installs .NET 8 SDK because noble ships only .NET 10 and OpenRA has no `global.json`.
+- **StockSharp** (`a26ce597`, master HEAD) — `net10.0` (via `common_target_*.props` → `NetVer=10`), MSTest 4.x, no coverlet. Per-csproj restore+build of `Tests/Tests.csproj` only. Risk flagged: references `Microsoft.Data.SqlClient` + `Ecng.Data.SqlServer` (SQL-dependent tests filterable by Category=Integration).
+
+**Skipped PowerToys + Files** — both Windows-only at SDK/TFM level. Files mandates `net10.0-windows10.0.26100.0`; PowerToys UnitTests all in `src/modules/<windows-only>/` chains.
+
+Active matrix: **15 repos**. Triggered runs: OpenRA=25552129165, StockSharp=25552132370.
+
+### 2026-05-08 — StockSharp coverlet.console fix + MTP empty-modules blocker *(condensed)*
+MSTest 4.x → MTP routing → data-collector silent-no-op (178-byte stub). Swapped to coverlet.console wrap + `FullyQualifiedName!~` exclusions for 5 flaky classes → 0 failures / 4096 passed, but cobertura had an empty Module table (zero modules instrumented despite ~80 dep DLLs). Round-2 `--include` patterns unproven; self-inflicted SIGPIPE (`ls | head`) killed the step (reverted). Stopped at 2 attempts. Full diagnosis: decisions.md "2026-05-08: StockSharp flaky-test filter".

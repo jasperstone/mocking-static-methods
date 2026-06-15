@@ -56,44 +56,55 @@ CI/CD agent. Owns `.github/workflows/` (coverage-orchestrator, test-discovery), 
 
 ## Recent Updates
 
-### 2026-06-11 — Phase-4 (agentic loop + refactoring tool) cost model added to estimate.py
-- The phase-4→phase-5 multi-agent rename freed the `--project-phase4` flag. Added a
-  phase-4 projection modeling the NEW phase 4 = the SAME single writer agent as
-  phase 3 PLUS a LOCAL `apply_refactor` tool (no LLM behind it) that introduces a
-  testability seam before the test is written and the csproj recompiles.
-- **Model assumptions (cheap by design vs phase 5):**
-  - **ONE LLM role (writer). NO reviewer/fixer LLM** — so no 2nd/3rd model role
-    multiplying token spend. This is the dominant reason phase 4 ≪ phase 5.
-  - **Token inflation, not an extra agent:** `P4R_TOKEN_INFLATION = 1.5` flat
-    multiplier on the phase-3 writer token base (writer takes more turns/cell:
-    inspect → pick seam → call apply_refactor → read → iterate test). Modest range
-    ~1.4–1.6, NOT a whole extra agent.
-  - **apply_refactor = billable agent tool invocation:** `P4R_REFACTOR_CALLS_PER_CELL
-    = 1.2` calls/cell (≈ one seam, occasional second), billed at the EXISTING
-    `TOOLS_SURCHARGE_PER_CALL` ($0.03375) like read_file/list_dir. Local/zero-token,
-    but the agent-runtime surface still bills → adds to invocation-scaled Foundry
-    Tools overhead.
-  - **Billing split convention reused from `project_phase5`:** token spend keeps the
-    phase-3 marketplace fraction; Foundry Tools overhead wholly credit.
-- **Default = run_1 (`P4R_DEFAULT_RUNS = 1`), the go/no-go dispatch.** GOTCHA worth
-  remembering: the phase-3 *combined* base alone is ~$342 (already > the $250 cap),
-  so a full 3-run phase-4 sweep can NEVER be under cap — it's strictly ≥ phase 3.
-  Defaulting the printed projection to run_1 is the only self-consistent way to land
-  "under cap" (and it's the dispatch you actually run first, mirroring frozen
-  phase-5 run_1). The verify command prints run_1.
-- **Projected combined total: phase-4 run_1 = $213.79 → 85.5% of the $250 cap, UNDER
-  by $36.21** (credit $156.13 / marketplace $57.67; ~$63.79 to card; ~1.87× the
-  same-runs phase-3 single-writer base $114.18). Full 3-run set (runs=3) ≈ $641
-  (257% of cap) but ≈ 54% of phase 5's $1,197 — roughly half, because of the single
-  LLM role.
-- **Did NOT rename/break** `--project-phase5` / `project_phase5` / `P5_*` /
-  `P3_RUNS_PER_CELL` / `FOUNDRY_*` / `TOKEN_RECON_FACTOR` / `CREDIT_USD`. `--runs` is
-  now shared between phase-4 and phase-5 ad-hoc projections; added `--refactor-calls`.
-  Normal runs auto-print the phase-4 go/no-go block beside the auto phase-5 block.
-- Verified: `--project-phase4 --cap 250` EXIT 0 ($213.79); `--project-phase5 --cap
-  250` EXIT 0 (Config C still $1,197.49); normal run EXIT 0 (phase-3 residual still
-  −$0.18); no lint errors. **No Azure spend — estimator-only.** Decision dropped to
-  `.squad/decisions/inbox/vogel-phase4-cost-model.md`.
+### 2026-06-11 — PR #28 squash-merged → rebased phase4-refactoring → opened PR #30
+PR #28 (scaffold branch `jasper/phase4-scaffold`, commit `4dbc35e9`) was **SQUASH-merged** into
+`origin/main` as squash commit `8d9b0ada`, NOT a regular merge — so `4dbc35e9` is NOT reachable
+from main (verified via `git merge-base --is-ancestor 4dbc35e9 origin/main` → false). `main` had
+also moved past it (#29 dissertation bundler at `fe840ee0`). Because `jasper/phase4-refactoring`
+(`0fbdae3b`) was branched FROM the scaffold, it carried BOTH the now-duplicated renumbering commit
+`4dbc35e9` AND the real phase-4 work — so a **rebase WAS needed**. Ran
+`git rebase --onto main 4dbc35e9 jasper/phase4-refactoring`: replayed only the single phase-4
+scaffold commit onto updated main (new sha `f7b42ecd`), dropping the duplicate renumbering. **Clean
+rebase, zero conflicts** (the two commits touched disjoint files — renumbering = phase5 moves +
+phase2-singleshot deletes; phase-4 = new phase4-refactoring/ + apply_refactor tooling).
+Diff-stat verified `main..branch` shows ONLY phase-4 files (no phase5 churn). Force-pushed with
+`--force-with-lease` (clean, lease held). Opened **PR #30** against main:
+https://github.com/jasperstone/mocking-static-methods/pull/30 (title
+"feat(phase4): agentic loop + testability refactoring tool experiment"; body via `--body-file`
+temp file to dodge shell escaping). Did NOT merge, did NOT delete branches. Lesson: when a base PR
+is squash-merged, child branches MUST be rebased `--onto main <old-base-tip>` to shed the
+now-duplicated history — a plain `git merge-base origin/main..branch` would otherwise show the
+duplicate commit. **No Azure spend — git only.**
+
+### 2026-06-11 — Created .github/workflows/phase4-refactoring.yml (phase-4 generate workflow) *(condensed)*
+New phase-4 generate workflow, modeled on `phase5-generate.yml` but adapted for phase 4 =
+**SINGLE-AGENT writer + LOCAL apply_refactor tool** (NOT multi-agent). `mode` input (mock|foundry,
+default **mock**); workflow_dispatch ONLY. `smoke` job (mock) runs Beck's
+`test_refactor_smoke.py` + best-effort mock-runner shakedown (guarded skip if fixtures absent).
+`guard-foundry` mirrors phase5 (i_understand_this_will_spend_money=yes + confirm_after_freeze=yes
++ date ≥ 2026-06-08) and REUSES the EXISTING Azure budget `phase4-tripwire-250` (no new budget).
+`plan` reuses `.github/scripts/plan_matrix.py` (same 6-model panel + sha256 gate); `generate`
+runs in `dotnet/sdk:10.0-noble` and invokes `agentic_refactor_runner.py` (NOT multi_agent_runner,
+NOT phase-3 runner). Runner flags: `max_compile_attempts`→`--max-attempts`, `--max-refactors 3`,
+`--refactor-build-timeout-s 240`, `--repo-filter`, real-Foundry gate `--i-understand-this-will-spend-money`.
+Gotcha avoided: `dotnet --info | sed -n '1,10p'` not `| head` (SIGPIPE step death). YAML validated OK.
+**No Azure spend.** Full text → `history-archive.md`; canonical → decisions.md ("Phase-4 generate
+workflow created").
+
+### 2026-06-11 — Phase-4 (agentic loop + refactoring tool) cost model added to estimate.py *(condensed)*
+The phase-4→phase-5 rename freed `--project-phase4`. NEW phase 4 = the SAME single writer agent as
+phase 3 PLUS a LOCAL `apply_refactor` tool (no LLM behind it). Model: ONE LLM role (writer), NO
+reviewer/fixer LLM (dominant reason phase 4 ≪ phase 5); `P4R_TOKEN_INFLATION = 1.5` flat multiplier
+on the phase-3 writer token base (more turns/cell, NOT an extra agent); `P4R_REFACTOR_CALLS_PER_CELL
+= 1.2` billed at existing `TOOLS_SURCHARGE_PER_CALL` ($0.03375) — local/zero-token but agent-runtime
+bills. Billing split reused from `project_phase5`. Default = run_1 (`P4R_DEFAULT_RUNS = 1`); GOTCHA:
+phase-3 combined base alone ~$342 (> $250 cap) so a full 3-run phase-4 can NEVER be under cap —
+run_1 default is the only self-consistent "under cap" framing. **run_1 = $213.79 → 85.5% of cap,
+UNDER by $36.21** (credit $156.13 / marketplace $57.67; ~$63.79 card; ~1.87× phase-3 base $114.18);
+full 3-run ≈ $641 (257%, ~54% of phase-5's $1,197). Did NOT rename/break phase5/P5_*/FOUNDRY_*/etc;
+`--runs` now shared, added `--refactor-calls`. Verified EXIT 0 across phase4/phase5/normal.
+**No Azure spend — estimator-only.** Full text → `history-archive.md`; canonical → decisions.md
+("Phase-4 (agentic loop + refactoring tool) cost model added to estimate.py").
 
 ### 2026-06-11 — phase3-tripwire-250 budget DELETED (redundant after phase 3 sealed) *(condensed)*
 Deleted `phase3-tripwire-250` — once phase 3 sealed it was an exact redundant twin of
@@ -146,26 +157,10 @@ dollars not queryable via az on this MSDN sub). Phase-3 model = $342.53 vs actua
 Full text → `history-archive.md`; canonical → decisions.md ("Cost estimator models the actual
 Azure bill").
 
-### 2026-05-16T00:00:00Z — Team update (viz layout)
-viz layout changed — see `tools/viz/README.md` and `.squad/decisions.md` (entry: 2026-05-16: tools/viz restructure). Per-plot files under `tools/viz/plots/`, shared helpers in `tools/viz/lib/`, new derived `tools/viz/data/per_model_phase.csv` from `aggregate_phase_results.py`. Four new plot families shipped.
-
-### 2026-05-08 — MAUI removed; OpenRA + StockSharp added (Phase 2 baseline) — commit d3689e0
-Removed deferred `coverage-maui` job entirely. 4 rounds of remediation hit increasingly internal MS-CI assumptions; per Brady, data didn't justify drag.
-
-Added 2 new jobs:
-- **OpenRA** (`8f2138c7`, bleed HEAD) — `net8.0`, NUnit 4 + NUnit3TestAdapter, no coverlet. Data-collector path (`--collect "Code Coverage;Format=cobertura"` + `dotnet-coverage merge`), same as abp/efcore/roslyn/runtime. Side-installs .NET 8 SDK because noble ships only .NET 10 and OpenRA has no `global.json`.
-- **StockSharp** (`a26ce597`, master HEAD) — `net10.0` (via `common_target_*.props` → `NetVer=10`), MSTest 4.x, no coverlet. Per-csproj restore+build of `Tests/Tests.csproj` only. Risk flagged: references `Microsoft.Data.SqlClient` + `Ecng.Data.SqlServer` (SQL-dependent tests filterable by Category=Integration).
-
-**Skipped PowerToys + Files** — both Windows-only at SDK/TFM level. Files mandates `net10.0-windows10.0.26100.0`; PowerToys UnitTests all in `src/modules/<windows-only>/` chains.
-
-Active matrix: **15 repos**. Triggered runs: OpenRA=25552129165, StockSharp=25552132370.
-
-### 2026-05-08 — StockSharp coverlet.console fix + MTP empty-modules blocker *(condensed)*
-MSTest 4.x → MTP routing → data-collector silent-no-op (178-byte stub). Swapped to coverlet.console
-wrap + `FullyQualifiedName!~` exclusions for 5 flaky classes → 0 failures / 4096 passed, but
-cobertura had an empty Module table (zero modules instrumented despite ~80 dep DLLs). Round-2
-`--include` patterns unproven; self-inflicted SIGPIPE (`ls | head`) killed the step (reverted).
-Stopped at 2 attempts. Full diagnosis: decisions.md "2026-05-08: StockSharp flaky-test filter".
+### 2026-05 entries (viz layout, MAUI removed, OpenRA/StockSharp added, StockSharp MTP blocker) — archived 2026-06-11
+Older Phase-2-era updates (2026-05-08 MAUI removed + OpenRA/StockSharp added at 15-repo matrix,
+2026-05-08 StockSharp coverlet/MTP empty-modules blocker, 2026-05-16 viz layout change) moved in
+full to `history-archive.md`. Canonical decisions remain in `.squad/decisions.md`.
 
 ### Earlier entries
 - 2026-05-06 — Silent empty-cobertura fix (commit 7885485)

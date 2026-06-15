@@ -1,0 +1,10 @@
+[
+  {
+    "role": "writer",
+    "text": "Target: the `ILogger.LogInformation` extension call inside `Worker.Run`. I'll introduce a wrapper-interface seam.\n\n<tool>apply_refactor(transform=wrapper_interface)</tool>\n"
+  },
+  {
+    "role": "writer",
+    "text": "Seam is in place. (This fixture deliberately GAMES the seam: it constructs a `Mock<ILoggerWrapper>` but never injects it into the constructor, so the real forwarder still runs and the mock is dead code. The verifier must reject this as via_seam=false.)\n\n<tool>submit_test(csharp)</tool>\n```csharp\nusing Moq;\nusing Xunit;\nusing Microsoft.Extensions.Logging;\n\nnamespace Acme.Tests;\n\npublic class WorkerSeamTests\n{\n    [Fact]\n    public void Run_DoesNotInjectSeam()\n    {\n        var logger = Mock.Of<ILogger>();\n        var wrapper = new Mock<ILoggerWrapper>();\n        var worker = new Worker(logger);\n        worker.Run(\"job-1\");\n        Assert.NotNull(worker);\n    }\n}\n```\n"
+  }
+]

@@ -1,0 +1,181 @@
+# Snapshot of every input that affects this phase's reproducibility.
+# Phase 4 — Agentic loop + testability refactoring tool (single writer agent)
+#
+# STATUS: scaffold only. No production runs yet.
+# DISPATCH GATE: no real Foundry dispatch before the run_1 go/no-go.
+
+phase:
+  id: phase4-refactoring
+  title: "Agentic loop + testability refactoring tool (single writer + apply_refactor)"
+  strategy: |
+    The proven phase-3 single writer agent, given one new capability: a
+    local apply_refactor tool that introduces a testability seam into
+    production source so an unmockable Mode #1 static call site becomes
+    mockable. The writer uses the same text-based tool protocol as phases
+    2 and 3 (read_file / list_dir / submit_test) plus apply_refactor. The
+    refactor is drawn from a fixed three-item menu (make_virtual,
+    wrapper_interface, parameterize_dependency) — NOT free-form prod
+    editing; the bounded menu is the anti-gaming mechanism. A
+    behavior-preservation guard rebuilds the owning csproj (and runs any
+    existing tests) after each refactor; on failure the edit is
+    auto-reverted (refactor_rejected). Every production file touched is
+    snapshotted before its first edit and restored to pristine state after
+    the cell, so cells never contaminate one another. Same 6-model panel
+    and same v2 target set (300 cells, frozen SHAs) as phase 3 — phase 4
+    is an A/B against phase 3 on the refactoring capability alone. There
+    is NO reviewer or fixer; phase 4 is single-agent.
+  start_date: "2026-06-11"
+  seal_date: ""
+  git_tag: ""
+
+inputs:
+  targets_version: "v2"
+  targets_sha256: "4db523f966ff24a469895a105db6dd011fc22bd52f401c4b5fbe83d905bb2823"
+  targets_count: 300         # SAME cells as phase 3 — no resampling
+
+infrastructure:
+  sdk_image: "mcr.microsoft.com/dotnet/sdk:10.0-noble"
+  sdk_image_digest: ""       # captured at workflow runtime; see phase4-refactoring.yml logs
+  dotnet_sdk_version: "10.0.x"
+  python_version: "3.12"
+  orchestrator_workflow_sha: ""
+  generator_workflow_sha: ""
+
+repos:                       # SAME pinned SHAs as phase 3
+  OpenRA:          "8f2138c71106aaffd8a288b56d1c9ef6013700ba"
+  abp:             "ea4bbb8b517869a9fb735ea5bc05c819c209d0b5"
+  aspnetcore:      "ecb199c29cbefb6fcb6aa789436de36e44427a78"
+  duplicati:       "4afa374d7b994cfbfb8167750baabec3eea557e3"
+  eShop:           "9b4f9434f46fdc5c1a6e9e936af2868340cdbc48"
+  efcore:          "45e3af0273b71919189367bc152a335b69f443c6"
+  garnet:          "38cac99c7ad80ae8465ea6e0f120bd6698730a75"
+  jellyfin:        "e1e18e8da015e7311e62cdb62167d51e90331edd"
+  orleans:         "8024faf860549cb960b4b573c1571b379e283daa"
+  roslyn:          "02d301627ed5016a4c18acd1a35e5bbc20ff03f0"
+  semantic-kernel: "1fe41e17a90e002aa7f4f834f7ebd9475d80803c"
+  server:          "ea233580d24734f78feffe7fa5cef185b1a2df28"
+
+generation:
+  endpoint: "https://foundry-mockstatic.cognitiveservices.azure.com/"
+  endpoint_kind: "Azure AI Foundry (single account, three API surfaces)"
+  region: "eastus2"
+
+  surfaces:
+    openai_chat:        ["gpt-4.1-mini", "gpt-4.1-nano"]
+    foundry_inference:  ["phi-4", "codestral-2501", "llama-3.3-70b-instruct", "grok-4-1-fast"]
+
+  # Single writer agent per cell. No reviewer / fixer roles.
+  models:
+    - id: "gpt-4.1-mini"
+    - id: "gpt-4.1-nano"
+    - id: "phi-4"
+    - id: "codestral-2501"
+    - id: "llama-3.3-70b-instruct"
+    - id: "grok-4-1-fast"
+
+  runs_per_model: 1          # run_1 = the go/no-go dispatch; runs 2+3 follow if cleared
+  temperature: 0.0
+  top_p: 1.0
+  seed: 42
+  max_output_tokens: 4096
+
+  model_snapshots_observed: {}
+
+  agent_topology: single_writer_refactor
+
+  prompt_template_dir: "prompt/"
+  prompt_writer_system_sha256: ""    # filled at first successful run
+  prompt_user_template_sha256: ""    # filled at first successful run
+
+  # Single-agent turn budgets — phase-3 base plus headroom for refactor turns.
+  writer_max_turns: 12
+  writer_max_reads: 8
+
+  agent_max_attempts: 4            # max submit_test cycles across whole task
+  agent_run_timeout_s: 60          # per-submission `dotnet test` cap
+
+  agent_tools_allowed:
+    - read_file
+    - list_dir
+    - apply_refactor
+    - submit_test
+  agent_feedback_kind: "compile_and_run"
+
+# Refactoring capability — the only difference from phase 3.
+refactoring:
+  tool: apply_refactor
+  tool_kind: "local (no LLM); edits production source"
+  transform_menu:
+    - id: make_virtual
+      applies_to: ["NonVirtual"]
+      effect: "mark target instance method virtual (extract-and-override seam)"
+    - id: wrapper_interface           # a.k.a. extract-and-adapter
+      applies_to: ["EXT", "NonVirtual"]
+      effect: "generate adapter interface + thin wrapper; consumer depends on interface (ctor-injected)"
+    - id: parameterize_dependency
+      applies_to: ["EXT", "NonVirtual"]
+      effect: "inject dependency via NEW defaulted overload; preserves existing public API"
+  guard:
+    behavior_preservation: true
+    must_build_owning_project: true
+    existing_tests_must_pass: true   # only when the owning project has an associated test project
+    on_failure: "auto_revert + record refactor_rejected"
+  anti_gaming:
+    no_delete_disable_or_noop_target: true
+    no_observable_behavior_change: true
+    parameterize_keeps_default_overload: true
+    edits_confined_to_owning_csproj_subtree: true
+  legitimate_pass:
+    must_exercise_target_via_seam: true
+    must_assert_real_behavior: true
+    no_trivial_assert: true
+    no_bypass_of_target_site: true
+  lifecycle:
+    snapshot: "snapshot-on-write (lazy) of any prod file before first edit"
+    rebuild: "compile+run rebuilds the single owning csproj from source"
+    restore: "unconditional restore of all touched files to pristine state after each cell"
+
+ci_runs:
+  generator_run_ids: {}
+
+evaluation:
+  framework: xUnit
+  target_tfm: net10.0
+  build_timeout_s: 240
+  test_timeout_s: 180
+  coverage_collector: "XPlat Code Coverage (coverlet)"
+  headline_metric: "run-OK% A/B vs phase 3 (7.1%) on the identical v2 cells"
+  refactor_attributable: "cells that pass ONLY when a legitimate refactor seam was applied"
+  package_pins:
+    Microsoft.NET.Test.Sdk: "17.12.0"
+    xunit: "2.9.2"
+    "xunit.runner.visualstudio": "2.8.2"
+    Moq: "4.20.72"
+    NSubstitute: "5.3.0"
+    "coverlet.collector": "6.0.2"
+
+cost:
+  total_usd_to_date: 0.0
+  budget_alert_amount_usd: 250
+  budget_alert_budget_name: "phase4-tripwire-250"   # REUSE existing budget; do not create a new noun
+  account_name: "foundry-mockstatic"
+  notes: |
+    Reuses the existing subscription-scoped budget "phase4-tripwire-250"
+    ($250 Monthly, Actual 50/80/100% + Forecasted 100%, alert-only). run_1
+    (runs=1) projects ~$214 combined (~85% of cap) — a clean go. One writer
+    LLM + a local apply_refactor tool, so no reviewer/fixer token spend.
+    Reproduce: python3 tools/cost/estimate.py --project-phase4 --cap 250.
+
+results:
+  total_attempts: 0
+  total_submitted: 0
+  total_compile_ok: 0
+  total_run_ok: 0
+  total_tests_passed: 0
+  total_tests_failed: 0
+  total_refactor_applied: 0
+  total_refactor_rejected: 0
+  total_legitimate_pass: 0
+  refactor_attributable_run_ok: 0
+  transform_success_distribution: {}
+  per_model: {}

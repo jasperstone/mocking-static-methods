@@ -1,0 +1,14 @@
+[
+  {
+    "role": "writer",
+    "text": "The target is a non-virtual instance method `DoSomething` on the non-sealed class `MockService`. Before I decide on a seam I'll read the declaring file.\n\n<tool>read_file(mock.cs)</tool>\n"
+  },
+  {
+    "role": "writer",
+    "text": "`MockService.DoSomething()` is a plain non-virtual public instance method declared in-repo on a non-sealed class, so the cheapest seam is the extract-and-override seam: mark it `virtual` and subclass-and-override it in the test.\n\n<tool>apply_refactor(transform=make_virtual)</tool>\n"
+  },
+  {
+    "role": "writer",
+    "text": "The seam is in place \u2014 `DoSomething` is now virtual, so I can subclass `MockService` and override it. My test goes THROUGH the override and asserts on the value the seam produces.\n\n<tool>submit_test(csharp)</tool>\n```csharp\nusing Xunit;\n\nnamespace MockSmoke.Tests;\n\npublic class MockServiceTests\n{\n    private sealed class StubService : MockService\n    {\n        public override string DoSomething() => \"stubbed\";\n    }\n\n    [Fact]\n    public void DoSomething_OverriddenThroughVirtualSeam()\n    {\n        MockService svc = new StubService();\n        Assert.Equal(\"stubbed\", svc.DoSomething());\n    }\n}\n```\n"
+  }
+]

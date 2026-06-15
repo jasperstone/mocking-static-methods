@@ -134,9 +134,19 @@ A re-run that produces identical lock-file inputs must produce identical results
 
 ## Setup
 
-### Option 1: Dev Container (Recommended)
+The **dev container is the canonical execution environment** for this project. Open
+the workspace in VS Code and run "Dev Containers: Reopen in Container", then run
+every command inside the container. Local/dev steps run in the devcontainer;
+production sweeps run via the (also containerized) GitHub Actions workflows.
+Phase 4 and later assume devcontainer-only execution — see
+[phases/phase4-refactoring/REPLICATION.md](phases/phase4-refactoring/REPLICATION.md).
 
-The easiest way to get started is using the included dev container, which provides all dependencies pre-configured:
+### Dev Container (canonical)
+
+The dev container ([`.devcontainer/devcontainer.json`](.devcontainer/devcontainer.json))
+provides all dependencies pre-configured — .NET SDK 10.0, Python 3.12, pytest/pip
+(`requirements.txt`), mono-complete, `dotnet-reportgenerator-globaltool`, and the
+build tooling the matrix needs:
 
 1. **Prerequisites:**
    - [Docker Desktop](https://www.docker.com/products/docker-desktop)
@@ -155,9 +165,13 @@ The easiest way to get started is using the included dev container, which provid
 
 4. **You're ready!** All tools (.NET SDKs, Python, PowerShell, coverage tools) are pre-installed.
 
-### Option 2: Local Installation
+### Local installation (legacy — phases 1–3 only)
 
-If you prefer to run locally without containers:
+> **Phase 4 and later require the devcontainer.** This bare-machine install is kept
+> only for reproducing the historical phase 1–3 tooling and is not a supported path
+> for newer phases — use the dev container above.
+
+If you are reproducing the legacy phase 1–3 tooling without containers:
 
 ### Prerequisites
 - .NET 8.0 SDK

@@ -345,3 +345,470 @@ all untouched. Verified: `--project-phase4 --cap 250` (EXIT 0, $213.79),
 phase-3 residual still −$0.18).
 
 **No Azure spend. Estimator-only change.**
+
+### 2026-06-11: Phase-4 (agentic loop + refactoring tool) experiment directory scaffolded + design-of-record
+
+**By:** Lewis (Lead), requested by Jasper (autopilot)
+
+**What:** Created the NEW `phases/phase4-refactoring/` experiment directory on branch
+`jasper/phase4-refactoring`, mirroring the phase-5 layout, and authored the authoritative
+design-of-record. Watney built the `apply_refactor` tool + runner to this same spec in parallel.
+
+**The authoritative design:**
+
+- **Goal:** measure the effect of giving the proven phase-3 single writer agent a *refactoring
+  capability*. The agent may introduce a testability seam into PRODUCTION code so a Mode #1 static
+  call site becomes mockable (Moq/NSubstitute), then write a test exploiting the seam. Same frozen
+  v2 300-cell target set, same 6-model panel, same compile/run harness as phases 2–3. **Headline =
+  run-OK% A/B vs phase-3's 7.1% on the identical cells.** The contribution is capability/tooling
+  augmentation, NOT prompt engineering — the writer prompt stays generic; the only new degree of
+  freedom is `apply_refactor`.
+
+- **Mode #1 sites** = (1) extension methods on interface receivers (EXT); (2) non-virtual instance
+  methods on non-sealed concrete classes (NonVirtual). Neither is directly mockable — the refactor
+  introduces the seam.
+
+- **`apply_refactor` — constrained transform menu** (local tool, no LLM; the bounded menu IS the
+  anti-gaming mechanism, NOT free-form prod editing):
+  1. `make_virtual` — NonVirtual kind: mark the target method `virtual` (extract-and-override seam).
+  2. `wrapper_interface` (extract-and-adapter) — generate an adapter interface + thin wrapper around
+     the receiver; consumer depends on the interface (ctor-injected); tests substitute a mock.
+  3. `parameterize_dependency` — inject the dependency via a NEW defaulted overload that preserves
+     the existing public API (no breaking change).
+
+- **Anti-gaming rules:** refactor must NOT delete/disable/no-op the target site and must not change
+  observable behavior; `parameterize_dependency` keeps a default-preserving overload; all edits
+  confined to the owning `.csproj` subtree. **Behavior-preservation guard:** after a refactor, the
+  owning production project MUST still build, and if it has an associated existing test project those
+  tests MUST still pass — else the refactor is auto-reverted and recorded `refactor_rejected`.
+  **Legitimate pass** = the test exercises the target via the seam and asserts on real behavior (no
+  trivial assert, no bypass of the site).
+
+- **Per-cell lifecycle:** snapshot-on-write (lazy) of any prod file before its first edit → agent
+  loop (read_file / list_dir / apply_refactor / submit_test; apply_refactor edits prod source and the
+  next compile+run rebuilds the single owning csproj from source for free) → UNCONDITIONAL restore of
+  all touched files to pristine state after the cell (cells never contaminate each other) → log
+  applied refactors + guard outcomes per cell.
+
+- **Metrics:** run-OK% vs phase 3; a **refactor-attributable** breakdown (cells that pass ONLY when a
+  legitimate refactor was applied — run-fail in phase 3, run-OK in phase 4 through a seam); the
+  `refactor_rejected` rate; and which transform types succeed by Mode #1 kind.
+
+- **Cost:** one writer LLM + one local tool — no reviewer/fixer LLM, so far cheaper than phase 5.
+  run_1 (runs=1) ≈ **$214 combined / ~85% of the $250 cap — clean go** (`tools/cost/estimate.py
+  --project-phase4`). Full 3-run ≈ $641 (over cap, ~half of phase-5's $1,197). run_1 is the honest
+  default dispatch + go/no-go.
+
+**Files created:** `phases/phase4-refactoring/{PLAN.md, REPLICATION.md, REPORT.md, phase.lock.yaml,
+prompt/writer-system.md, prompt/user-template.md, results/.gitkeep}`.
+
+**Consistency choices:**
+- `phase.lock.yaml` copies phase-5's EXACT `targets_sha256` (`4db523f966ff…2823`) + `targets_count`
+  300, the same `infrastructure`, the same `repos` SHA pins, and the same 6-model panel. Adds a
+  `refactoring:` section (transform menu + guard + anti-gaming + legitimate-pass + lifecycle) and
+  `agent_topology: single_writer_refactor`; `runs_per_model: 1` (run_1). seal_date / git_tag /
+  digests left blank as phase 5 does.
+- REPLICATION reuses the EXISTING Azure budget noun `phase4-tripwire-250` (did NOT invent a new
+  budget) and references the `phase4-refactoring.yml` workflow Vogel is stubbing.
+- Single-agent → NO reviewer/fixer prompts (unlike phase 5). Only `writer-system.md` (writer who also
+  wields apply_refactor) + `user-template.md` (phase-3 interpolation vars plus TEST_FRAMEWORK /
+  TARGET_TFM).
+- REPORT.md is explicitly marked predictions-only ("will be filled once phase 4 has N runs"), with a
+  Phase 3 vs Phase 4 predicted table + per-bucket conversion prediction (unmockable Mode #1 converts;
+  no_fact_methods is NOT a phase-4 target — that's phase 5's reviewer).
+
+**Tool paths Watney owns (referenced from PLAN):** `tools/generation/apply_refactor.py`,
+`tools/generation/strategies/agentic_loop_refactor.py`, `tools/generation/agentic_refactor_runner.py`.
+
+**No Azure spend. No workflow dispatched. No Foundry model invoked.** Scaffold + docs only.
+
+### 2026-06-11: Phase-4 apply_refactor tool + strategy + runner (the seam-introducing build)
+
+**By:** Watney (Build/Infra), requested by Jasper (autopilot)
+
+**What:** Built the phase-4 "agentic loop + testability refactoring" stack on branch
+`jasper/phase4-refactoring`. Phase 4 = the phase-3 single-agent compile+run feedback loop
+PLUS an `apply_refactor` tool that edits PRODUCTION source to introduce a testability seam,
+so a Mode #1 static call site becomes mockable. `compile_and_run_check` already rebuilds the
+owning csproj from source, so seam edits are picked up on the next `submit_test`.
+
+**New files:**
+- `tools/generation/apply_refactor.py` — `RefactorEngine` + `RefactorResult`.
+- `tools/generation/strategies/agentic_loop_refactor.py` — phase-4 strategy; `RefactorLoopResult(FeedbackLoopResult)` adds `refactor_attempts`; `parse_refactor_args()`.
+- `tools/generation/agentic_refactor_runner.py` — phase-4 runner (mirrors `agentic_runner_feedback.py`; adds `--mock-llm/--mock-fixtures-dir/--out-dir` + `--i-understand-this-will-spend-money` from the phase-5 runner). Default `--phase phase4-refactoring`, `--target-set v2`.
+
+**apply_refactor tool-call syntax (PROMPTS + SMOKE-TEST FIXTURE MUST MATCH):**
+```
+<tool>apply_refactor(transform=make_virtual)</tool>          (primary)
+<tool>apply_refactor(make_virtual)</tool>                    (bare)
+<tool>apply_refactor(transform=make_virtual, method=GetAsync)</tool>   (extra kwargs)
+<tool>apply_refactor({"transform": "wrapper_interface", "interface_name": "IFoo"})</tool>   (json for extra args)
+```
+Parsed by `parse_refactor_args(raw) -> (transform, kwargs)`. read_file/list_dir/submit_test keep
+the EXACT phase-3 `TOOL_RE` protocol unchanged; apply_refactor uses its own `APPLY_REFACTOR_RE`
+and is preferred when it appears first. Per-cell budget: `--max-refactors` (default 3).
+
+**Transform menu (the constraint IS the anti-gaming mechanism):**
+1. `make_virtual` — **IMPLEMENTED**. Line-anchored text edit: finds a non-virtual instance
+   declaration of the target method and inserts `virtual` after the access modifier. Only works
+   when the method is declared in-repo (framework types → graceful rejection).
+2. `wrapper_interface` — STUB (`NotImplementedError` + contract: emit `I{Receiver}Wrapper` +
+   concrete wrapper, constructor-inject defaulted to concrete).
+3. `parameterize_dependency` — STUB (`NotImplementedError` + contract: defaulted overload taking
+   the dependency; original delegates; public API preserved).
+Roslyn (Mode1Analyzer infra, Microsoft.CodeAnalysis.CSharp 4.14.0) is the robust future path for
+the harder transforms — not built this pass.
+
+**RefactorResult schema (smoke test + prompts align to this):**
+`{transform: str, applied: bool, reverted: bool, reason: str, files_changed: list[str],
+build_ok: bool|None, errors: list[dict]}`. `.to_dict()` truncates `errors` to 5. Logged per cell
+to `refactors/{repo}/{target_id}.jsonl` and embedded in `attempts.jsonl` as `refactor_attempts`.
+
+**Safety rails (all implemented now):**
+- **Prod-write guard** `_safe_prod_path(repo_root, owning_csproj_dir, raw)` — writes allowed ONLY
+  inside the owning .csproj subtree (owner via `compile_only.find_owning_csproj`); rejects escapes.
+- **Snapshot/restore** — originals snapshotted before first edit; `restore_all()` returns every
+  touched file to byte-pristine (deletes engine-created files). Runner calls it in a `finally`
+  after EVERY cell → cells never contaminate each other; git tree clean between cells.
+- **Behaviour-preservation** — after a successful edit, `dotnet build` the owning csproj (reuses
+  `compile_only` toolchain). Build fail → AUTO-REVERT + `refactor_rejected` with errors. Engine
+  ctor `verify_build` flag (default True; runner sets False only under `--mock-llm`). Running the
+  owning project's existing test suite is a documented TODO (build-preservation is the minimum).
+
+**Verify (no Foundry / no money):** all three modules import cleanly under `.venv`; all four
+arg-syntaxes parse; temp-snippet smoke confirmed make_virtual `public string GetAsync` →
+`public virtual string GetAsync`, the guard rejects `../../etc/passwd` / allows in-subtree,
+`restore_all()` reverts to pristine, unknown transforms rejected, stubs raise NotImplementedError
+(caught by the strategy). Full mock-LLM end-to-end run handed to Beck — needs
+`tools/generation/tests/fixtures/refactor/default.json` (writer-role fixture exercising the
+tool-call syntax above).
+
+**No Azure spend. No Foundry model invoked. No dotnet build run in verification.**
+
+### 2026-06-11: Phase-4 mock-LLM smoke test + fixture (hermetic, green)
+
+**By:** Beck (Test/Coverage), requested by Jasper (autopilot)
+
+**What:** Added the phase-4 end-to-end smoke test Watney handed off:
+- `tools/generation/tests/fixtures/refactor/default.json` — writer-role mock fixture exercising `read_file → apply_refactor(transform=make_virtual) → submit_test(csharp)` using Watney's exact tool-call syntax.
+- `tools/generation/tests/test_refactor_smoke.py` — subprocess-drives `agentic_refactor_runner.py` in `--mock-llm` mode; asserts all four artifacts (`attempts.jsonl`, `generated_tests/{repo}/{tid}/test.cs`, `turns/{repo}/{tid}.jsonl`, `refactors/{repo}/{tid}.jsonl`) and that the refactor log records an APPLIED `make_virtual`. **1 passed in ~0.3s, fully hermetic — no dotnet, no Foundry, no Azure spend.**
+
+**Notable runner finding (NOT a bug fix — documented behavior to be aware of) [FLAGGED]:**
+The phase-4 runner's `--mock-llm` mode **synthesizes a single hardcoded cell**
+(`target_id=mock:0001, repo=mock-repo, file=mock.cs, method=DoSomething, kind=NonVirtual`)
+and ignores `targets/v2/targets.csv`. The `--target-ids` filter then runs against that
+synthesized row. Consequence: passing a *real* targets.csv id (like the `OpenRA:0003`
+in the runner's own docstring usage example) filters the cell set to EMPTY → the runner
+exits 0 having written only an empty `attempts.jsonl`, silently producing no test/turns/
+refactor artifacts. **The smoke test pins `--target-ids mock:0001`** to match the
+synthesized cell. Did not change the runner — the hardcoded mock cell is the intended
+plumbing-only contract; flagging so future callers of mock mode don't chase a phantom
+"no output" failure. (If we later want mock mode to honor a real target, that's a
+deliberate runner change, not a smoke-test concern.)
+
+**Hermeticity mechanism:** mock mode constructs `RefactorEngine(verify_build=False)` and a
+stub check (run_ok=True, no dotnet). To make `make_virtual` actually APPLY (vs. record
+`applied=False` "no owning .csproj"), the test points `--cloned-repos` at a tmp dir with a
+real `mock-repo/MockLib.csproj` + `mock.cs` (`public string DoSomething()`), so
+`find_owning_csproj` resolves and `_inject_virtual` runs for real. No build is triggered.
+
+**No Azure spend. No Foundry. No dotnet invoked.**
+
+### 2026-06-11: Phase-4 generate workflow created (.github/workflows/phase4-refactoring.yml)
+
+**By:** Vogel (CI/CD), requested by Jasper (autopilot)
+
+**What:** Authored `.github/workflows/phase4-refactoring.yml`, the phase-4 generate
+workflow. Modeled structurally on `phase5-generate.yml` (the most complete template:
+mock|foundry mode switch, mock smoke job, foundry guard + spend gate + freeze
+confirmation) but adapted for phase 4 = **single-agent writer + a LOCAL `apply_refactor`
+tool** (NOT multi-agent). `name:` = "Phase 4 — generate (agentic loop + refactoring
+tool)"; `env: PHASE: phase4-refactoring`.
+
+**Design / key choices:**
+- **Hard-gated foundry, default mock.** `mode` input defaults to `mock`; workflow_dispatch
+  only (no schedule/push/PR). A stray "Run workflow" click runs the no-Azure smoke path.
+- **Smoke job (mock):** Python 3.12 + .NET 10 SDK setup, runs
+  `pytest tools/generation/tests/test_refactor_smoke.py` (Beck's test, built in parallel),
+  prints runner `--help`, plus a **best-effort** mock-runner shakedown
+  (`--mock-llm --mock-fixtures-dir tools/generation/tests/fixtures/refactor --limit 1`)
+  guarded to skip if the fixtures dir doesn't exist yet (parallel authoring).
+- **Foundry guard:** requires `i_understand_this_will_spend_money=yes` +
+  `confirm_after_freeze=yes` + date ≥ 2026-06-08 (same freeze noun as phase5), and a
+  spend-gate step that **reuses the EXISTING Azure budget `phase4-tripwire-250`**
+  ($250 Monthly, subscription scope) — deliberately did NOT mint a new budget name.
+- **Matrix reuse:** `plan` job uses the shared `.github/scripts/plan_matrix.py`, so the
+  6-model panel resolves identically to phase3/phase5; target-set sha256 integrity gate
+  carried over. `generate` job runs in the dotnet SDK container (the refactor tool
+  recompiles the owning csproj in-loop) and invokes
+  `tools/generation/agentic_refactor_runner.py` — NOT `multi_agent_runner.py`, NOT the
+  phase-3 `agentic_runner_feedback.py`.
+
+**Runner flag cross-check (verified against the runner's argparse):** `max_compile_attempts`
+→ `--max-attempts`; phase-4-specific `--max-refactors 3` and `--refactor-build-timeout-s 240`;
+`--repo-filter`; real-Foundry gate is `--i-understand-this-will-spend-money` (exact hyphenated
+flag name); mock flags `--mock-llm` / `--mock-fixtures-dir` / `--out-dir`.
+
+**Faithful-stub posture:** syntactically valid and runnable today; foundry path gated hard
+and defaults to run_1 shakedown (limit_per_repo=1) since the phase isn't sealed.
+
+**VERIFIED:** `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/phase4-refactoring.yml')); print('YAML OK')"` → **YAML OK**.
+
+**No Azure spend. No workflow dispatched. File authoring + YAML validation only.**
+
+### 2026-06-11: Phase-4 refactoring PR (#30) open against main
+**By:** Vogel (CI/CD), requested by Jasper
+
+**What:** The phase-4 (agentic loop + testability refactoring tool) work is now an open PR
+against `main`: **PR #30** — https://github.com/jasperstone/mocking-static-methods/pull/30
+(branch `jasper/phase4-refactoring`, tip `f7b42ecd`).
+
+**Git provenance / why a rebase happened:** PR #28 (phase-5 renumbering + report updates +
+phase-4 cost model, from `jasper/phase4-scaffold` / `4dbc35e9`) was **SQUASH-merged** into
+`main` as squash commit `8d9b0ada` (the original `4dbc35e9` is therefore NOT reachable from
+main). `jasper/phase4-refactoring` had been branched from the scaffold, so it carried the
+now-duplicated `4dbc35e9` plus the new phase-4 work. Rebased with
+`git rebase --onto main 4dbc35e9 jasper/phase4-refactoring` to drop the duplicate and replay
+only the phase-4 scaffold commit (new sha `f7b42ecd`); clean, zero conflicts. Force-pushed
+with `--force-with-lease`. The PR diff cleanly shows ONLY phase-4 files.
+
+**Scope of PR #30:** `phases/phase4-refactoring/` scaffold (PLAN/REPLICATION/REPORT/phase.lock
++ single-agent prompts), `tools/generation/apply_refactor.py` (RefactorEngine; `make_virtual`
+end-to-end, `wrapper_interface`/`parameterize_dependency` stubbed),
+`agentic_loop_refactor.py` strategy, `agentic_refactor_runner.py`, hermetic smoke test (green),
+and `.github/workflows/phase4-refactoring.yml` (mock|foundry; foundry guard reuses the existing
+`phase4-tripwire-250` budget).
+
+**Status:** Scaffold only — no Azure spend, no foundry run. Phase-4 cost model projects
+$213.79 (85.5% of the $250 cap) for run_1. **PR is OPEN, not merged; no branches deleted.**
+
+### 2026-06-11: Phase-4 prompts held identical to phase 3 — `apply_refactor` is the sole manipulated variable
+
+**By:** Lewis (Lead), requested by Jasper (reviewing PR #30)
+
+**What:** Rewrote the phase-4 prompts so they are phase 3's prompts held constant
+(the control), with the availability of the `apply_refactor` tool as the ONLY
+manipulated independent variable.
+
+- `phases/phase4-refactoring/prompt/writer-system.md` is now phase 3's
+  `system.md` **verbatim**, with **exactly one addition**: a single factual line in
+  the tool menu declaring `apply_refactor` (same terse style as the
+  `read_file` / `list_dir` lines, no coaching).
+- `phases/phase4-refactoring/prompt/user-template.md` is now **byte-for-byte**
+  phase 3's `user-template.md`. The "This is a Mode #1 site … apply_refactor"
+  sentence and the `{{TEST_FRAMEWORK}}` / `{{TARGET_TFM}}` variables (which phase 3
+  does not have) were removed.
+
+**Removed confounds (all previously in the phase-4 prompts, all deleted):** the
+Mode #1 / seam explanation, the EXT-vs-NonVirtual taxonomy, the coached transform
+menu (incl. "`make_virtual` is the cheapest when it applies"), the anti-gaming
+essay, the transient-seam paragraph, the 5-point self-check checklist, the
+12-turn budget (phase 3 has no turns budget), and the user-template seam-coaching
+sentence. One factual correction: phase 3's intro phrase "read-only tool access"
+was changed to "tool access" because `apply_refactor` writes production source —
+leaving "read-only" would bias the agent AGAINST using the treatment tool.
+
+**Why (the design rationale):** the phase-4 contribution under test is a
+*capability/tooling augmentation*, NOT prompt engineering. If the prompt also
+explains Mode #1, coaches transform selection, and pre-warns about gaming, then
+any run-OK% delta vs phase 3 is un-attributable — it could be the tool or the
+prose. Holding the prompts identical isolates **tool-availability** as the single
+independent variable, so any delta in run-OK% vs phase 3's 7.1% on the identical
+frozen v2 300-cell set (same 6-model panel, same harness) is attributable to the
+tool. Anti-gaming and behavior-preservation are enforced by the **harness** and
+surfaced to the agent **only through tool feedback** (`refactor_rejected`),
+exactly the way compile/run errors are surfaced in phase 3 — never pre-coached.
+
+### 2026-06-11: Phase-4 boundary refined — tool documentation ≠ task coaching (richer apply_refactor spec)
+
+**By:** Lewis (Lead), requested by Jasper
+
+**Refines** the 2026-06-11 decision "Phase-4 prompts held IDENTICAL to phase 3
+(single-variable control)". That decision stands; this one sharpens where the line sits.
+
+**The distinction Jasper drew:** the earlier pass stripped the `apply_refactor` entry to
+ONE terse menu line to avoid a prompt-engineering confound. That over-corrected by
+conflating two different things. **Documenting what a tool does and how to call it is
+standard tool-calling practice, NOT experiment coaching.** What must stay out is *task
+framing* — telling the agent it faces a Mode #1 site, that it "will need" a seam, or a
+transform-selection strategy / cost ranking.
+
+**What changed (only the `apply_refactor` tool description in
+`phases/phase4-refactoring/prompt/writer-system.md`):**
+- Menu entry enriched from a terse one-liner to a richer (still parallel) line pointing to
+  a dedicated block.
+- Added a dedicated `apply_refactor` block after "Tool-call rules:" / before "Submitting:",
+  mirroring how phase 3 gives `submit_test` and compile+run feedback their own blocks. The
+  block documents, factually and neutrally:
+  - the three transforms — `make_virtual` (adds `virtual` to a non-virtual instance method
+    so a test can subclass-and-override); `wrapper_interface` (adapter interface + thin
+    wrapper + ctor injection so a test can mock the interface); `parameterize_dependency`
+    (NEW defaulted overload preserving the public API so a test can pass a fake);
+  - all three accepted calling forms (`apply_refactor(transform=make_virtual)`,
+    `apply_refactor(make_virtual)`, `apply_refactor(transform=make_virtual, method=Foo)`) —
+    verified against `parse_refactor_args` (accepts JSON / key=value / bare);
+  - the mechanics/contract — edits confined to the owning project; rebuild after the edit;
+    auto-revert + `refactor_rejected` if it no longer builds; applied change live for the
+    next submit_test; change is transient (reverted after the task);
+  - honest implementation status — only `make_virtual` is wired end-to-end;
+    `wrapper_interface` / `parameterize_dependency` may report not-yet-available (verified:
+    they raise `NotImplementedError`, surfaced as a neutral "not implemented in this pass /
+    NOT applied" tool result). Stated as a tool limitation, not a hint to use make_virtual.
+
+**Boundary held (NOT added back):** no Mode #1 label, no EXT/NonVirtual taxonomy, no
+"you'll need a seam", no transform cost/ease ranking, no anti-gaming essay, no self-check
+checklist, no motivational transient-seam lecture. The auto-revert/transient mechanic is
+stated factually as tool behavior (needed to interpret `refactor_rejected`), not as a
+legitimacy lecture.
+
+**Held constant vs phase 3 = the TASK FRAMING, not the tool inventory.**
+`user-template.md` left byte-for-byte phase-3's (untouched). The **sole manipulated
+variable remains the availability of `apply_refactor`**; the agent must still DISCOVER that
+the tool helps and which transform fits.
+
+**Docs updated:** PLAN.md "Prompts held identical to phase 3 (the control)" section and
+REPLICATION.md single-variable blockquote reworded to state the boundary precisely —
+"the apply_refactor TOOL is documented like any other tool (capability + calling contract),
+consistent with how phase 3 documents submit_test and the compile/run loop; what is held
+constant is the task framing; tool documentation is not task coaching."
+
+**Methodological rule worth keeping:** "hold the prompt constant" means **hold the task
+framing constant** — documenting a new capability's *interface* is part of giving the agent
+the tool, not a confound. The confound is *strategy/situation coaching*, not *interface
+documentation*.
+
+**Safety:** code parses the tool by regex (`APPLY_REFACTOR_RE`) + `parse_refactor_args`,
+never the prose, so enriching the description cannot change parsing. Smoke test green:
+`python -m pytest tools/generation/tests/test_refactor_smoke.py -q` → 1 passed in 0.09s.
+Committed by coordinator as d2bfb2d3 (code/docs).
+The agent must DISCOVER on its own that the tool helps.
+
+**Methodological rule (team-relevant):** when a phase adds a capability, hold
+prompts/panel/harness/params constant vs the prior phase and push all
+enforcement/coaching into the harness + tool feedback. Before dispatch, diff the
+new phase's prompt against the control — it must differ by only the one declared
+variable.
+
+**Verified:** the runner (`tools/generation/agentic_refactor_runner.py`) and the
+strategy (`tools/generation/strategies/agentic_loop_refactor.py`) parse
+`<tool>apply_refactor(...)</tool>` by **regex** (`APPLY_REFACTOR_RE`), not by
+prompt prose — confirmed by grep — so removing the prose is safe. Smoke test
+green: `python -m pytest tools/generation/tests/test_refactor_smoke.py -q`
+→ **1 passed in 0.10s**.
+
+**Docs updated:** `PLAN.md` and `REPLICATION.md` now state the single-variable
+design explicitly. `REPORT.md` already said "the writer prompt stays generic"
+(consistent — left untouched).
+
+**Not committed** (coordinator commits this round). **Phase-3 files untouched.**
+No Azure spend; no workflow dispatched.
+
+### 2026-06-11: Phase-4 Transform Contract (wrapper_interface + parameterize_dependency)
+
+**By:** Lewis (Lead), requested by Jasper. Artifact: `phases/phase4-refactoring/TRANSFORM_CONTRACT.md`. Implements against Watney (builder).
+
+**Key contract decisions:**
+1. **Fully general Roslyn rewriter (not family-scoped).** Both stubbed transforms implemented in a new C# tool `RoslynRefactorTool` (net10.0, Microsoft.CodeAnalysis.CSharp 4.14.0, mirroring `Mode1Analyzer`'s ref-assembly fast-path build). Binds any receiver/method in the owning project via the semantic model. The known families (ILogger/IServiceProvider/IConfiguration/HttpClient) are the *validation set*, not the capability bound. `make_virtual` stays in the menu, unchanged.
+2. **Pure tool, Python owns mutation.** `RoslynRefactorTool` reads source and returns JSON `{ok, applicable, reason, files{path:text}, seam{}}` on stdout; NEVER writes the repo. Python (`RefactorEngine`) writes via the existing snapshot/`_write` + `_safe_prod_path` guard + behavior-preservation build + `restore_all()` auto-revert. That lifecycle is untouched.
+3. **Distinct code paths over a shared core.** `SeamCore` (shared) does reference loading, compilation, invocation binding, signature reconstruction from `IMethodSymbol`, wrapper emission, naming/defaults, seam-descriptor build. `WrapperInterfaceRewriter` (type-level ctor-field injection, rewrites all same-receiver sites) and `ParameterizeDependencyRewriter` (method-level overload-delegation, one site + delegator) are distinct rewriters — identical front half, structurally different rewrites with divergent applicability rules.
+4. **Defaults so a bare call works.** Infers `interface_name = I{Recv}Wrapper`, `wrapper_name = {Recv}Wrapper`, `param_name = camelCase(wrapper_name)` from `receiver_type` (strip one leading `I`; collision ⇒ numeric suffix). For parameterize, `param_type` defaults to the generated `interface_name`.
+5. **Anti-gaming verification mechanism.** A transform is "legitimately applied" only if the production call site, post-rewrite, invokes ONLY the injected interface (call-site exclusivity) with the default path constructing the real forwarder. Legitimacy decided post-hoc by a verifier step in `agentic_refactor_runner.py` cross-referencing the seam descriptor against the final submitted test: (1) seam interface mocked, (2) mock injected at the recorded injection point, (3) containing method/overload driven, (4) non-trivial assertion. Gates the refactor-attributable metric in PLAN.md.
+6. **`via_seam` field.** Add `seam: dict` to `RefactorResult` (apply-time, `{}` for make_virtual, surfaced in `to_dict()`). Add `via_seam: bool|None` to the per-cell attempts row — `None` until the post-`submit_test` verifier sets it. Persist `seam` next to it so attribution is auditable from `attempts.jsonl` alone.
+7. **Edge cases: handle-or-reject-cleanly, never corrupt.** Exact `reason` tokens pinned (`multiple_ctors`, `ctor_chaining`, `primary_ctor`, `record_type`, `struct_type`, `static_method_no_instance`, `partial_split`, `receiver_not_in_method_scope`, `no_receiver_source`, `receiver_is_this`, `site_not_found`, `unbound_receiver`). Static containing methods rejected by wrapper_interface but handled by parameterize_dependency. The owning-project build is the backstop.
+
+Contract complete and prescriptive. Watney builds the tool + wires the subprocess call + adds the `seam` field and `via_seam` verifier, and lands the §9 C#/Python/smoke tests before run_1 dispatch.
+
+### 2026-06-11: bundler must exclude its own output dir (self-inclusion fix)
+
+**By:** Watney (Build/Infra), requested by Jasper.
+
+**What:** `tools/bundle_dissertation_context.py` concatenates every narrative `.md` in the repo into `dissertation_bundle/dissertation_context.md`. Its `EXCLUDE_DIRS` set omitted the output directory, so each run after the first folded the PREVIOUS bundle (and `schedule.md`) back into the new one — self-inclusion. Added `"dissertation_bundle"` to `EXCLUDE_DIRS` (first entry); one line fixes both the `os.walk` in-place prune and `is_excluded()` (same set). **Why:** a tool that writes into the tree it scans must never ingest its own output.
+
+**Verification (regenerated clean):** `grep "=== dissertation_bundle/"` → none; `multi-team` count = 0; phase4-refactoring + phase5-multiagent docs present; README ladder confirmed (4 = agentic loop + testability refactoring, 5 = multi-agent). Bundle = 50 files, 232,483 bytes; MANIFEST updated. Did NOT commit — coordinator commits this round.
+
+### 2026-06-11: Fix `IServiceProvider` Case-B `unbound_receiver` false-negative
+
+**By:** Watney (Build/Infra). Context: Beck flagged that `RoslynRefactorTool` returned `applicable=false / reason=unbound_receiver` for the framework generic extension `IServiceProvider.GetRequiredService<T>()`, contradicting `TRANSFORM_CONTRACT.md` §2.2 (Case B must be applicable). Impact: `System.IServiceProvider` 77 sites + `IServiceScopeFactory` 6 → ~83/300 targets (~28%). Changes confined to `RoslynRefactorTool/**` + two now-passing xfail markers.
+
+**Root cause (corrected from Beck's hypothesis):** NOT a net9/net10 reference-identity split. Instrumenting `SeamCore.Locate` showed `IServiceProvider` resolved as `ErrorTypeSymbol` / `CS0246` (type not found). The fast-path `BuildCompilation` parses every `*.cs` under the owning project but deliberately skips `obj/` (§0.2), which is exactly where the SDK emits `*.GlobalUsings.g.cs` for `<ImplicitUsings>enable</ImplicitUsings>` projects. Target files relying on implicit `global using System;` never bind `System.IServiceProvider`, so the genuine `unbound_receiver` guard fires as a false-negative. (ILogger/HttpClient fixtures import explicitly, so they never tripped it.)
+
+**Decision (Beck's option (a), refined):** re-supply the SDK default implicit usings in the analysis compilation rather than relaxing the receiver-identity check. `BuildCompilation` now prepends a synthetic `__ImplicitGlobalUsings.g.cs` carrying the default `Microsoft.NET.Sdk` set (`System`, `System.Collections.Generic`, `System.IO`, `System.Linq`, `System.Net.Http`, `System.Threading`, `System.Threading.Tasks`). Global usings are additive + lowest-precedence — never break files with explicit usings. Repairs **every** implicit-usings target, not just IServiceProvider. **Defensive hardening:** extension receiver type now taken from the declared `this` parameter (`methodDef.ReducedFrom.Parameters[0].Type`) before falling back — a concrete always-bound symbol.
+
+**Guard integrity:** the genuine `unbound_receiver` reject is unchanged (a truly-unbindable receiver still yields a null method symbol). **Verification (hermetic):** tool build clean; both transforms on `tests/cases/isp/Site.cs` → `applicable=true`, seam `T GetRequiredService<T>()` with `where T : notnull` preserved, rewritten output compiles. `pytest tools/generation/tests/ -q` → **25 passed** (was 23 + 2 xfailed); the 2 Case-B xfails promoted to full positive rows. No Azure/Foundry.
+
+### 2026-06-12: RoslynRefactorTool — build & architecture choices
+
+**By:** Watney (Build/Infra). Implementing the two stubbed transforms per Lewis's TRANSFORM_CONTRACT. Records implementation-level decisions where the contract left freedom; none change externally observable behaviour — flagged for Lewis sign-off.
+
+1. **Generated wrapper file uses `global::`-qualified type names; extension members forward via the fully-qualified STATIC form.** A fully general rewriter cannot assume the right `using`s are importable in a generated file; a statically-resolved extension method is not callable as `_inner.LogInformation(...)` without the using. Decision: emit all types with `global::` FQNs (no usings, never collides) and forward reduced-extension members through their unreduced static method. All 5 contract cases compile; the rewritten call-site file still uses clean short names.
+2. **`param_name` for parameterize derives from `wrapper_name` (`camelCase(wrapper_name)` → `loggerWrapper`)**, not `camelCase(param_type)` (which gives the awkward `iLoggerWrapper`). Prioritised the concrete §3.1 AFTER example over the §1.2 table prose; matches §3.1/§3.2 verbatim. Easy to flip.
+3. **Release dll preferred, Debug fallback** for `ROSLYN_REFACTOR_TOOL_DLL`; missing both → clean `roslyn_tool_missing` (no crash).
+4. **Tool emits ABSOLUTE paths in `files{}` and `seam.call_site`** — the argv (§0.3) doesn't pass the repo root so it cannot compute relative. Python already accepts absolute in `_safe_prod_path` + converts via `_rel()`; the `via_seam` verifier works off simple-name seam fields. Add `--repo-root` if a future verifier needs relative.
+5. **Signature reconstruction from `IMethodSymbol.OriginalDefinition`; delegator targets the enclosing method, not the seam member** — correctness invariants for generics + overload-delegation; any future edit must preserve them.
+
+**Status:** builds clean, added to the .sln. All 5 §2/§3 cases compile end-to-end; §5 reject tokens verified; `make_virtual` smoke still GREEN. C#/Python test files (§9) intentionally NOT added — Beck's per the confinement constraint. No Azure/Foundry.
+
+### 2026-06-12: §4.3 via_seam verifier + §9.1/§9.2 refactor test artifacts
+
+**By:** Beck (Test & Coverage). Implements phase-4 §9 test obligations + the §4.3 anti-gaming `via_seam` verifier. Changes confined to `agentic_refactor_runner.py`, `tools/generation/tests/**` (+ fixtures), `RoslynRefactorTool/tests/cases/**`. No edits to `apply_refactor.py`, the C# tool source, or prompts.
+
+**Built:**
+1. **§4.3 `via_seam` verifier** — `verify_via_seam(seam, test_source) -> (bool, checks)` in `agentic_refactor_runner.py`. Runs AFTER `submit_test` returns run-OK for a cell whose refactor applied with a non-empty seam. Four checks over the final submitted test source: `seam_type_referenced` (Moq/NSubstitute/FakeItEasy/hand-rolled mock construction), `injected_at_injection_point` (ctor arg list or overload call contains a mock token / named arg), `target_method_driven`, `non_trivial_assertion` (`.Verify(`/`.Received(`/fluent or non-trivial `Assert.*`; rejects `Assert.True(true)` stubs). `via_seam = all(checks)`. Persisted on the attempts row (`via_seam`, `via_seam_checks`, `seam`) AND as a `{"verification": true, ...}` line on the per-cell refactors log (§4.4 auditable). Stays `None` for make_virtual / non-passing cells.
+2. **§9.1 hermetic C# checks** — `tools/generation/tests/test_roslyn_tool.py` (manifest-driven) + fixtures. 4 positive cases assert `applicable=true` + seam matches + rewritten output COMPILES against bundled refs (no NuGet restore); 7 reject cases assert `applicable=false` with the exact §5 reason token.
+3. **§9.2 Python integration smoke** — extended `test_refactor_smoke.py` (+`--mock-cell-json` to target a real ILogger/HttpClient temp repo). Three end-to-end cases drive both transforms through the runner; LEGIT fixture (injects the mock → `via_seam=true`) + GAMED fixture (builds a mock but never injects → `via_seam=false`) prove discrimination. Plus 7 pure-Python verifier unit tests.
+
+**Verification:** `pytest tools/generation/tests/ -q` → 23 passed, 2 xfailed (the ISP bug, since fixed by Watney). All hermetic.
+
+**Decisions:** (a) verifier is regex-based over test source text, not semantic — §4.3 specifies the conditions not the mechanism; conservative + dependency-free + fast; sufficient to discriminate realistic gaming. (b) overload-call match uses `(?<!\w)enclosing\s*\(` so the common member-access form `client.FetchAsync(...)` matches while longer identifiers don't.
+
+**Flagged for Watney (since fixed):** IServiceProvider generic extension `GetRequiredService<T>()` returned `unbound_receiver` contradicting §2.2 — marked `xfail(strict=False)`. (Watney root-caused to skipped `obj/` implicit-usings and fixed.) Deferred low-value §5 reject rows (`static_method_no_instance` flaky, `ctor_chaining`, `partial_split`, `receiver_is_this`) until stable fixtures exist.
+
+### 2026-06-12: Phase-4 transform applicability sweep — coverage stats + 2 real-repo bugs (since fixed)
+
+**By:** Watney (Build/Infra). Deterministic (NO LLM, NO Azure) validation that the two new AST transforms fire on messy real code. New harness `tools/generation/refactor_applicability_sweep.py` runs `RefactorEngine.apply(...)` directly against the real cloned repos for all 300 `targets/v2/targets.csv` rows, restoring each repo after every target (`restore_all()` in a `finally`). Artifacts: `applicability_all.csv` (900 rows, no build), `build_sample_{parameterize,wrapper}.csv` (`--verify-build`).
+
+**FAST applicability pass (all 300, no build):** parameterize 190/300 (63.3%), wrapper 120/300 (40.0%), make_virtual 6/300 (2.0%). make_virtual near-zero by design (282/300 targets are extension-method sites → no instance method to mark virtual). Per-family: ILogger (192) param 130 / wrapper 113; IServiceProvider (77) param 48 / wrapper 4; HttpClient (17) param 7 / wrapper 1. Reject tokens are all clean §5 rejections — the tool never corrupts, it declines (`receiver_is_this`, `unbound_receiver`, `no_receiver_source` dominate; `no_owning_csproj` ×3 is a target-set data issue).
+
+**BUILD-VERIFIED sample (`--verify-build`):** 9/9 produced a seam; 5/9 passed the owning-project build. All 4 build failures were auto-reverted by the build backstop — no repo corrupted. Caveat: the 190/120 "applicable" counts are an upper bound on *behaviour-preserving* applicability.
+
+**NON-DESTRUCTIVE — VERIFIED CLEAN:** after the full 300-row pass + build sample + error probe, 0 tracked `.cs` left modified, 0 leftover `I*Wrapper.cs`; `restore_all()` reverted every edit to byte-pristine. ⚠️ Cleanliness-check false positive: the harness's built-in `git status --porcelain` flags several clones as DIRTY, but every flagged path is pre-existing clutter from earlier agents (untracked `*.Tests.cs`, `CoverageReport/`, mtimes Dec-2025/Jan-2026) — none production `.cs` or our generated files. Recommend diffing against a pre-sweep snapshot or scoping to `*.cs` + `I*Wrapper.cs`.
+
+**BUGS FOUND (flagged, fixed in the analyzer-hardening drop below):** (1) parameterize emits CS1737 when the enclosing method already ends in an optional/`params` parameter (appends the injected param to the END). (2) wrapper emits CS1503 when sibling same-receiver call sites use other unmodeled extension overloads (rewrites ALL same-receiver sites to a wrapper declaring only the target shape). Both safe — the build backstop reverts them.
+
+### 2026-06-12: Analyzer-hardening of generated/injected refactor edits + overload-candidate arity fix
+
+**By:** Watney (Build/Infra), coordinated by Squad — requested by Jasper. Status: implemented, tests green, build-sample re-verified.
+
+**Why:** the general transforms emit logically-correct C#, but strict target repos (aspnetcore, efcore, abp, orleans, jellyfin) enable `TreatWarningsAsErrors` + StyleCop + XML doc generation — turning correct refactors into build failures for reasons unrelated to our logic. Concrete jellyfin:0006 failures: CS1591 (missing XML docs), CS1573 (injected ctor param missing `<param>` tag), SA1137/SA1505 (wrong indentation / blank line after `{`), CS8632 (nullable `?` in a `#nullable disable` region).
+
+**Fixes (SeamCore.cs / WrapperInterfaceRewriter.cs / ParameterizeDependencyRewriter.cs):** (1) generated wrapper file now starts `// <auto-generated/>` + `#nullable enable`. (2) injected members in the existing prod file: emit minimal `<param>`/`///` when siblings carry docs (+ `#pragma warning disable CS1591, CS1573` fallback); detect file newline + insertion-site indent and match; detect effective nullable context and emit WITHOUT `?` if disabled. (3) behavior preserved — overload precision, required-before-optional insertion, seam descriptor, JSON-only stdout, via_seam markers unchanged.
+
+**Applicability (post-bugfix, deterministic, 300 targets):** parameterize 158/300 (52.7%), wrapper 118/300 (39.3%), make_virtual 6/300, union 163/300 (54.3%). Lower than the pre-fix 190/120 — correct: false-accepts that didn't build are now clean rejects (a truthful build-safe upper bound).
+
+**Build-sample build_ok (strict-repo slice):** wrapper 4/5 built OK (jellyfin:0006 was failing CS1591/CS1573/SA/CS8632 → now clean); parameterize 7/8 built OK. Other rows are honest rejects.
+
+**Follow-up: overload-candidate arity fix.** Root-caused orleans:0116. When overload resolution doesn't fully bind (`symInfo.Symbol == null` — net9-Abstractions vs net10-runtime reference-identity split on the `ILogger` receiver), `SeamCore.Locate` fell back to `CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault()` — an ARBITRARY overload. For `logger.LogDebug("…", message, diag)` it grabbed the 4-param `LogDebug(EventId, Exception?, string?, params object?[])` instead of the reduced `LogDebug(string?, params object?[])`, so the wrapper exposed the wrong signature → CS7036/CS1503 → owning build failed. Fix: a new arity-aware `SeamCore.PickBestCandidate(...)` selects the candidate whose extension-reduced parameter list is arity-compatible with the call (accounting for `this` reduction, optional params, `params` arrays, explicit generic arity) and best matches the positional arg types; falls back to first-candidate only when nothing is compatible. `SameReceiverCallRewriter` uses the same helper so the call-site overload key matches `BoundMethod`. orleans:0116 build_ok was False/False → now True/True (both transforms); seam now reports the 2-param reduced overload. Added regression fixture `RoslynRefactorTool/tests/cases/overload_candidate_arity/`.
+
+**Tests/cleanliness:** full pytest **36 passed** (was 31, +5 robustness/regression fixtures). All touched repos left clean (only pre-existing local artifacts remain). ZERO Azure/Foundry spend — deterministic local Roslyn + dotnet builds. Open item `aspnetcore:0669` = `baseline_build_failed` (repo doesn't build pre-edit — not our bug).
+
+### 2026-06-12: CI input-limit fix + writer-prompt transform-status correction
+
+**By:** Lewis (Lead). Branch `jasper/phase4-refactoring` (PR #30), commit 441a8418.
+
+**(a) workflow_dispatch input consolidation (11 → 10).** actionlint failed PR #30: `workflow_dispatch` declared 11 inputs; GitHub's hard maximum is 10. Merged the two foundry safety confirmations (`i_understand_this_will_spend_money` + `confirm_after_freeze`) into a SINGLE required-token input `confirm_spend` (type string, default `no`); to dispatch foundry mode the operator must type exactly `yes-after-2026-06-08-freeze`. Rationale: two identical low-entropy `yes` boxes were weaker than they looked; one compound token naming BOTH the spend acknowledgement AND the freeze date is higher-friction — defensibly stronger. The independent runtime date check (`date >= 2026-06-08`) is retained as a second non-bypassable gate; `mode` default stays `mock`. All downstream references updated (inputs block, `guard-foundry` step, header comment, `mode` description). Rejected folding `run_index_start` into `runs_per_cell` (distinct semantics). Verification: local actionlint v1.7.7 clean, inputs == 10, CI actionlint green on 441a8418.
+
+**(b) writer-system prompt transform-status correction.** phase4 `writer-system.md` line 33 still said only `make_virtual` was wired and the other two "may report back as not-yet-available." All three are now production-wired via the local Roslyn tool. This prompt is FED TO THE MODEL during the run, so a stale line would bias the writer away from two of the three transforms — and transform choice is the manipulated variable in phase 4, so it would confound the comparison. Replaced with an accurate statement: all three are wired end-to-end; applicability varies per target so any may return `refactor_rejected` when it doesn't apply or doesn't compile — pick a different transform or submit as-is. (phase5 `writer-system.md` lacks the stale line; no change.)
+
+### 2026-06-12: Mock end-to-end validation of the phase-4 agentic loop on REAL targets
+
+**By:** Beck (Test/Coverage), requested by Jasper. Spend: $0 — MOCK mode only (`--mock-llm` + `--mock-cell-json`); no Foundry/Azure call, no workflow dispatch.
+
+**Why:** before the ~$214 real Foundry run, de-risk the full chain end-to-end (`read_file/list_dir → apply_refactor → seam descriptor → submit_test → compile+run feedback → via_seam verification`). Until now the now-fixed `wrapper_interface`/`parameterize_dependency` transforms had never been driven through the runner against genuine cloned-repo targets.
+
+**What ran:** per case a fixture-scripted writer turn calls `apply_refactor(transform=…)` for the real target then submits a C# test. `apply_refactor` invoked the **real** `RoslynRefactorTool.dll` against real production source (real seam descriptor); `verify_via_seam` ran the four §4.3 checks. In MOCK mode the in-loop compile/run is stubbed (`run_ok=True`) and the behaviour-preservation build is skipped (`build_ok` = n/a mock — confirmed True separately in the build-sample CSVs).
+
+**Results:** LEGIT cases all via_seam=True with all four checks true — jellyfin:0006 (wrapper), abp:0147 (wrapper), server:0053 (parameterize), semantic-kernel:0125 (parameterize); real seams emitted (e.g. `ILoggerWrapper` ctor-injected, `UpdateTaxInformation(ISubscriber, TaxInformation, ILoggerWrapper)` overload). make_virtual on real non-virtual `OAuthHttpClient.SendAsync` → via_seam correctly `None` (subclass-and-override path). **GAMED case** (jellyfin:0006): identical seam but the test constructed `Mock<ILoggerWrapper>` and never injected it (`new ApplicationHost()` no-arg) + trivial `Assert.NotNull` → via_seam=**False** with exactly one failing check (`injected_at_injection_point=False`) — the anti-gaming check discriminates on a real target, not just fixtures.
+
+**Safety/cleanliness:** zero Azure/Foundry spend; no workflow dispatched. All five touched repos clean after `restore_all()` (jellyfin/semantic-kernel/duplicati fully clean; abp/server show only pre-existing unrelated artifacts; none of the refactored files leaked). Comment-only change: `apply_refactor.py` module docstring corrected the stale `wrapper_interface`/`parameterize_dependency` "STUB" labels to IMPLEMENTED (delegate to `RoslynRefactorTool` via `_invoke_roslyn_tool`). `pytest tools/generation/tests/ -q` → 36 passed.
+
+**Decision: end-to-end loop validated against real targets — YES.** The full phase-4 chain drives real Roslyn seam transforms on genuine targets, legit/gamed via_seam discrimination holds on real seams, the working tree stays pristine. Caveat: in MOCK mode the in-loop compile+run and behaviour-preservation build are stubbed/skipped — those signals come live only under the real Foundry run (build_ok already independently confirmed True for these targets). Cleared to proceed to the funded run.

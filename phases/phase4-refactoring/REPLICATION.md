@@ -33,6 +33,24 @@ Same as phase 3 plus:
 - The phase 2/3 Azure account and the six panel models must already exist — phase
   4 reuses them and tracks spend against the existing `phase4-tripwire-250` budget.
 
+## Environment — run everything in the devcontainer
+
+There is **one** execution environment for phase 4. Open the workspace in VS Code
+and run **"Dev Containers: Reopen in Container"** (Command Palette), then run every
+command below **inside the container**. The devcontainer
+([`.devcontainer/devcontainer.json`](../../.devcontainer/devcontainer.json)) is the
+canonical environment: base `mcr.microsoft.com/devcontainers/dotnet:1-10.0`
+(.NET SDK 10.0), Python 3.12 + pip/pytest (`requirements.txt`), mono-complete,
+`dotnet-reportgenerator-globaltool`, and the clang/build tooling the matrix needs —
+all pre-provisioned.
+
+The local/dev steps below (unit tests, the tool, the single-cell smoke test) run
+inside this devcontainer. The production run_1 sweep is **not** run by hand: it is
+dispatched via the containerized GitHub Actions workflow
+([`.github/workflows/phase4-refactoring.yml`](../../.github/workflows/phase4-refactoring.yml),
+which itself executes inside `mcr.microsoft.com/dotnet/sdk:10.0-noble`). Either way
+the code runs in a container — there is no separate "run it on your host" path.
+
 ## 1. Reuse the phase 2/3 Foundry account
 
 Skip to step 2 if you've already done [phase 3 replication](../phase3-agentic-loop/REPLICATION.md).
@@ -54,8 +72,9 @@ subscription spending-limit toggle, not the budget.
 
 ## 3. Unit-test the refactoring tool
 
-This step does NOT require Azure access. It exercises each transform in the
-`apply_refactor` menu plus the behavior-preservation guard's auto-revert path:
+Run this in the devcontainer. It does NOT require Azure access. It exercises each
+transform in the `apply_refactor` menu plus the behavior-preservation guard's
+auto-revert path:
 
 ```bash
 python3 -m pytest tools/generation/tests/test_apply_refactor.py -v
@@ -68,9 +87,10 @@ project is byte-identical after each test.
 
 ## 4. Smoke test the runner against the mock adapter
 
-Exercises the entire read → apply_refactor → submit_test loop end-to-end against
-canned fixture responses, validating the runner code, prompt rendering,
-snapshot/restore, and output JSONL shape before any tokens are spent:
+Also run in the devcontainer. Exercises the entire read → apply_refactor →
+submit_test loop end-to-end against canned fixture responses, validating the runner
+code, prompt rendering, snapshot/restore, and output JSONL shape before any tokens
+are spent:
 
 ```bash
 python3 -m pytest tools/generation/tests/test_refactor_smoke.py -v
@@ -84,8 +104,8 @@ after the cell.
 
 ## 5. Smoke test against real Foundry (one cell, one model)
 
-Once the run_1 budget is cleared, do a single-cell paid smoke test to validate the
-production wiring:
+Once the run_1 budget is cleared, do a single-cell paid smoke test from inside the
+devcontainer to validate the production wiring:
 
 ```bash
 python3 tools/generation/agentic_refactor_runner.py \
@@ -103,6 +123,12 @@ spend: < $0.10. Confirm the repo working tree is clean afterward (`git status`
 shows no modified prod files — snapshot/restore worked).
 
 ## 6. Dispatch the run_1 sweep via GitHub Actions
+
+The production sweep is dispatched via the GitHub Actions workflow
+([`.github/workflows/phase4-refactoring.yml`](../../.github/workflows/phase4-refactoring.yml)),
+which runs inside the `mcr.microsoft.com/dotnet/sdk:10.0-noble` container — this is
+the single production path (no by-hand local sweep). Trigger it with the `gh` CLI
+(from inside the devcontainer or any authenticated shell):
 
 ```
 gh workflow run phase4-refactoring.yml \
@@ -131,6 +157,8 @@ gh workflow run phase4-evaluate.yml \
 ```
 
 ## 8. Aggregate and refresh the dashboard
+
+Back in the devcontainer:
 
 ```bash
 python3 tools/viz/aggregate_phase_results.py

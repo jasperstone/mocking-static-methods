@@ -14,6 +14,8 @@ Each phase varies one thing — the test-generation strategy — against a fixed
 
 Every phase 2+ runs the **same 300-cell v2 sample** so cross-phase deltas reflect generation strategy, not target drift.
 
+> **Phase 4 and later are devcontainer-only.** Local/dev steps (unit tests, tools, single-cell smoke tests) run inside the dev container ([`.devcontainer/devcontainer.json`](../.devcontainer/devcontainer.json)); production sweeps run via the containerized GitHub Actions workflows. There is no separate host execution path. See [`phase4-refactoring/REPLICATION.md`](phase4-refactoring/REPLICATION.md).
+
 ### Model panel (as run)
 
 The panel has evolved with the experiment. Per-phase exact rosters live in each phase's `phase.lock.yaml`.

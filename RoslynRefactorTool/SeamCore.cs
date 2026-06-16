@@ -88,24 +88,81 @@ internal static class SeamCore
             | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
     // -- references (mirror Mode1Analyzer.LoadReferences) ------------------
-
+    //
+    // Reference loading is DEDUP-BY-SIMPLE-NAME and tiered, so each later tier
+    // only contributes assemblies whose file name is not already present. This
+    // is what keeps the augmentation REGRESSION-SAFE: the authoritative tiers
+    // (the NETCore.App runtime + the curated `refs/` set the transforms were
+    // validated against) always win, so any target that already bound under the
+    // old reference set binds IDENTICALLY. Later tiers can only ADD types that
+    // were previously unresolvable (the `unbound_receiver` root cause), never
+    // replace or shadow an existing reference identity.
+    //
+    //   1. NETCore.App runtime (typeof(object) dir) — System.* / BCL.
+    //   2. tool-bundled `refs/` — the curated net9 abstractions set
+    //      (DI / Logging / Configuration) the rewriters were validated against.
+    //   3. Microsoft.AspNetCore.App shared framework (version-aligned) — adds
+    //      the ASP.NET Core + extended Microsoft.Extensions.* surface
+    //      (HttpContext / RequestDelegate / IEndpointRouteBuilder / Options /
+    //      EF Core abstractions) that aspnetcore/eShop/server/jellyfin targets
+    //      bind their receivers through but which is NOT in tiers 1-2. Only
+    //      net-new names are added, so the curated DI/Logging refs stay
+    //      authoritative (avoids the net9-vs-net10 duplicate-type ambiguity).
     public static List<MetadataReference> LoadReferences()
     {
-        var refs = new List<MetadataReference>();
-        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
-        foreach (var dll in Directory.GetFiles(runtimeDir, "*.dll"))
+        var byName = new Dictionary<string, MetadataReference>(StringComparer.OrdinalIgnoreCase);
+
+        void AddDir(string? dir)
         {
-            try { refs.Add(MetadataReference.CreateFromFile(dll)); } catch { }
-        }
-        var ourRefs = Path.Combine(AppContext.BaseDirectory, "refs");
-        if (Directory.Exists(ourRefs))
-        {
-            foreach (var dll in Directory.GetFiles(ourRefs, "*.dll"))
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+            foreach (var dll in Directory.GetFiles(dir, "*.dll"))
             {
-                try { refs.Add(MetadataReference.CreateFromFile(dll)); } catch { }
+                var name = Path.GetFileName(dll);
+                if (byName.ContainsKey(name)) continue;   // earlier tier wins
+                try { byName[name] = MetadataReference.CreateFromFile(dll); } catch { }
             }
         }
-        return refs;
+
+        var runtimeDir = Path.GetDirectoryName(typeof(object).Assembly.Location)!;
+        AddDir(runtimeDir);                                          // tier 1
+        AddDir(Path.Combine(AppContext.BaseDirectory, "refs"));      // tier 2
+        AddDir(FindAspNetCoreSharedFramework(runtimeDir));           // tier 3
+
+        return byName.Values.ToList();
+    }
+
+    // Locate the Microsoft.AspNetCore.App shared-framework directory that sits
+    // alongside the running NETCore.App runtime, preferring the version whose
+    // major.minor matches the runtime, then the highest STABLE (non-preview)
+    // version, then the highest available. Returns null if not installed.
+    private static string? FindAspNetCoreSharedFramework(string netCoreRuntimeDir)
+    {
+        try
+        {
+            // runtimeDir = .../shared/Microsoft.NETCore.App/<ver>
+            var sharedRoot = Path.GetDirectoryName(Path.GetDirectoryName(netCoreRuntimeDir));
+            if (sharedRoot is null) return null;
+            var aspNetRoot = Path.Combine(sharedRoot, "Microsoft.AspNetCore.App");
+            if (!Directory.Exists(aspNetRoot)) return null;
+
+            var runtimeVer = new DirectoryInfo(netCoreRuntimeDir).Name;
+            var runtimeMajorMinor = string.Join('.', runtimeVer.Split('.').Take(2));
+
+            var versions = Directory.GetDirectories(aspNetRoot)
+                .Select(d => new DirectoryInfo(d).Name)
+                .ToList();
+
+            // 1. exact major.minor match (prefer stable over preview).
+            string? Pick(IEnumerable<string> cands) => cands
+                .OrderBy(v => v.Contains('-') ? 1 : 0)   // stable first
+                .ThenByDescending(v => v, StringComparer.OrdinalIgnoreCase)
+                .FirstOrDefault();
+
+            var matched = Pick(versions.Where(v => v.StartsWith(runtimeMajorMinor + ".", StringComparison.OrdinalIgnoreCase)));
+            var chosen = matched ?? Pick(versions);
+            return chosen is null ? null : Path.Combine(aspNetRoot, chosen);
+        }
+        catch { return null; }
     }
 
     // -- compilation over the owning .csproj directory ---------------------
@@ -131,6 +188,22 @@ internal static class SeamCore
 
     public static CSharpCompilation BuildCompilation(string owningDir, List<MetadataReference> refs)
     {
+        // Augment the global reference set with the owning project's own build
+        // output reference closure (bin/**/*.dll), dedup-by-simple-name against
+        // what is already loaded. This is the REGRESSION-SAFE fix for receivers
+        // whose type (or a base type they inherit a member from) is declared in
+        // a SIBLING project of the SAME repo — e.g. OpenRA.Game's HttpClient-
+        // Factory consumed from OpenRA.Mods.Common, bitwarden's base repository
+        // in Core, or an abp/orleans cross-assembly context type. When the
+        // project has been built (the build-verified gate builds the owning
+        // project before locating), its bin closure contains exactly those
+        // project-reference + package assemblies, so the receiver binds the
+        // same way the real compiler binds it. Only net-new names are added, so
+        // the runtime + curated refs stay authoritative (no duplicate-type
+        // ambiguity, no change to already-binding targets).
+        var allRefs = new List<MetadataReference>(refs);
+        AddOwningProjectBinReferences(owningDir, allRefs);
+
         var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
         var trees = new List<SyntaxTree>
         {
@@ -151,10 +224,76 @@ internal static class SeamCore
         return CSharpCompilation.Create(
             "RefactorTarget",
             trees,
-            refs,
+            allRefs,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary,
                 allowUnsafe: true,
                 nullableContextOptions: NullableContextOptions.Enable));
+    }
+
+    // Add the owning project's bin/ build-output reference closure, dedup by
+    // simple file name against what is already loaded. Skips ref-only facade
+    // copies (`/ref/`, `/refint/`) and prefers higher-sorting (newer-TFM /
+    // Release) paths deterministically so a project built for multiple TFMs
+    // resolves to a single stable copy per assembly name.
+    private static void AddOwningProjectBinReferences(string owningDir, List<MetadataReference> refs)
+    {
+        var binDir = Path.Combine(owningDir, "bin");
+        if (!Directory.Exists(binDir)) return;
+
+        var loaded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in refs)
+            if (r.Display is { } d) loaded.Add(Path.GetFileName(d));
+
+        IEnumerable<string> dlls;
+        try
+        {
+            dlls = Directory.EnumerateFiles(binDir, "*.dll", SearchOption.AllDirectories)
+                .OrderByDescending(p => p, StringComparer.OrdinalIgnoreCase);
+        }
+        catch { return; }
+
+        foreach (var dll in dlls)
+        {
+            var lower = dll.Replace('\\', '/').ToLowerInvariant();
+            if (lower.Contains("/ref/") || lower.Contains("/refint/")) continue;
+            var name = Path.GetFileName(dll);
+            if (!loaded.Add(name)) continue;   // dedup: earlier tier / first copy wins
+            try { refs.Add(MetadataReference.CreateFromFile(dll)); } catch { }
+        }
+    }
+
+    // -- diagnostics: explain WHY an invocation/receiver did not bind ------
+    //
+    // Appended (after a colon) to the `unbound_receiver` token so the reason
+    // stays bucket-compatible (sweep takes the leading token) while carrying
+    // the actual root cause: candidate-reason, candidate count, the receiver
+    // expression, and the distinct CS error ids the compiler reports inside
+    // the invocation span (CS0246 = missing using/assembly, CS1061 = no such
+    // member, CS0234 = missing namespace member, etc.).
+    private static string BindDiag(string where, SemanticModel model,
+        InvocationExpressionSyntax hit, SymbolInfo symInfo)
+    {
+        var sb = new StringBuilder();
+        sb.Append(where);
+        sb.Append(" candReason=").Append(symInfo.CandidateReason);
+        sb.Append(" cands=").Append(symInfo.CandidateSymbols.Length);
+        string recvText = hit.Expression is MemberAccessExpressionSyntax ma
+            ? ma.Expression.ToString()
+            : hit.Expression.ToString();
+        if (recvText.Length > 48) recvText = recvText.Substring(0, 48) + "…";
+        sb.Append(" recv='").Append(recvText).Append('\'');
+
+        // CS error ids reported within the invocation span.
+        var span = hit.Span;
+        var ids = model.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error && d.Location.SourceSpan.IntersectsWith(span))
+            .Select(d => d.Id)
+            .Distinct()
+            .Take(6)
+            .ToList();
+        if (ids.Count > 0)
+            sb.Append(" diags=[").Append(string.Join(",", ids)).Append(']');
+        return sb.ToString();
     }
 
     // -- locate + bind the target invocation -------------------------------
@@ -222,7 +361,7 @@ internal static class SeamCore
                         ?? PickBestCandidate(hit, symInfo.CandidateSymbols.OfType<IMethodSymbol>().ToImmutableArray(), model);
         if (methodSym is null)
         {
-            reason = "unbound_receiver";
+            reason = "unbound_receiver: " + BindDiag("method_unbound", model, hit, symInfo);
             return null;
         }
         // Reconstruct the seam member from the ORIGINAL (uninstantiated)
@@ -269,7 +408,7 @@ internal static class SeamCore
         {
             // Genuine failure: the receiver truly cannot be bound (e.g. a
             // non-existent / typo'd receiver type). This guard is preserved.
-            reason = "unbound_receiver";
+            reason = "unbound_receiver: " + BindDiag("recv_type_error", model, hit, symInfo);
             return null;
         }
 

@@ -32,6 +32,16 @@ internal static class WrapperInterfaceRewriter
         if (ctx.ReceiverSymbol is not (IFieldSymbol or IPropertySymbol))
             return RewriteResult.Reject("no_receiver_source");
 
+        // The receiver EXPRESSION (not just its final member) must be reachable
+        // from the CONSTRUCTOR, where `_field = param ?? new Wrapper(<recv>)` is
+        // emitted. A receiver rooted in a method parameter / local / lambda
+        // parameter (e.g. `workerContext.ServiceProvider`, `httpContext.Request-
+        // Services`) is out of scope in the ctor → the emitted ctor fails to
+        // compile (CS0103). Reject cleanly rather than emit non-compiling code.
+        if (ctx.ReceiverExpr is not null
+            && !SeamCore.ReceiverIsConstructorReachable(ctx.ReceiverExpr, ctx.Model))
+            return RewriteResult.Reject("receiver_not_ctor_reachable");
+
         // Site inside a static method → no instance to hold the field.
         if (ctx.EnclosingMethod is not null
             && ctx.EnclosingMethod.Modifiers.Any(SyntaxKind.StaticKeyword))

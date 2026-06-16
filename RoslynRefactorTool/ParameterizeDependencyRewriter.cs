@@ -49,6 +49,21 @@ internal static class ParameterizeDependencyRewriter
         if (method is null)
             return RewriteResult.Reject("site_not_found: no enclosing method to overload");
 
+        // The receiver EXPRESSION must be reachable from the TOP of the method
+        // we overload, because the delegator emits `M(args, new Wrapper(<recv>))`
+        // there. A receiver rooted in a LOCAL declared mid-body (e.g.
+        // `appHost.Services` where `appHost` is a local) or in a NESTED lambda /
+        // local-function parameter (e.g. `httpContext.RequestServices` inside a
+        // `static httpContext => …`) is out of scope at the method top → the
+        // delegator fails to compile (CS0103, or CS8820/CS8821 in a static
+        // anonymous function). Reject cleanly instead of emitting broken code.
+        if (ctx.ReceiverExpr is not null)
+        {
+            var enclosingSym = ctx.Model.GetDeclaredSymbol(method) as IMethodSymbol;
+            if (!SeamCore.ReceiverReachableFromMethodTop(ctx.ReceiverExpr, ctx.Model, enclosingSym))
+                return RewriteResult.Reject("receiver_not_in_method_scope");
+        }
+
         // A `__arglist` parameter must remain the last parameter and cannot be
         // forwarded positionally by the delegator → no legal overload shape (§5).
         if (method.ParameterList.ToString().Contains("__arglist"))
@@ -104,6 +119,22 @@ internal static class ParameterizeDependencyRewriter
                 overload.ParameterList.Parameters.Insert(insertIdx, newParam)))
             .WithAttributeLists(method.AttributeLists);
 
+        // The new overload is a BRAND-NEW method, not part of the type's
+        // inheritance chain: it overrides/hides nothing. Carrying `override`
+        // (or `virtual`/`abstract`/`sealed`/`new`) from the original method
+        // makes it illegal — there is no base member with the augmented
+        // signature to override (CS0115) — so strip those inheritance modifiers.
+        // Access/async/static/etc. are preserved. (The delegator keeps the
+        // original signature, so it legitimately retains `override`.)
+        var overloadMods = SyntaxFactory.TokenList(
+            overload.Modifiers.Where(m =>
+                !m.IsKind(SyntaxKind.OverrideKeyword)
+                && !m.IsKind(SyntaxKind.VirtualKeyword)
+                && !m.IsKind(SyntaxKind.AbstractKeyword)
+                && !m.IsKind(SyntaxKind.SealedKeyword)
+                && !m.IsKind(SyntaxKind.NewKeyword)));
+        overload = overload.WithModifiers(overloadMods);
+
         // -- delegator: original signature byte-for-byte → calls the overload
         var callArgs = method.ParameterList.Parameters
             .Select(p =>
@@ -117,7 +148,16 @@ internal static class ParameterizeDependencyRewriter
         // Insert the dependency argument at the SAME position the parameter was
         // inserted into the overload, so the positional call binds correctly.
         callArgs.Insert(insertIdx, $"new {wrapper}({recvText})");
-        var delegateCall = $"{enclosingName}({string.Join(", ", callArgs)})";
+
+        // If the method we overload is GENERIC, the delegator must pass its own
+        // type parameters explicitly: the injected dependency argument carries no
+        // information about the method type parameters, so overload resolution
+        // cannot infer them from arguments alone (CS0411). Forwarding
+        // `M<T1,…>(args, dep)` binds the generic overload unambiguously.
+        var typeArgs = method.TypeParameterList is { Parameters.Count: > 0 } tpl
+            ? "<" + string.Join(", ", tpl.Parameters.Select(p => p.Identifier.Text)) + ">"
+            : "";
+        var delegateCall = $"{enclosingName}{typeArgs}({string.Join(", ", callArgs)})";
 
         // Delegator is never async; it just forwards/returns the overload result.
         var delegatorMods = SyntaxFactory.TokenList(

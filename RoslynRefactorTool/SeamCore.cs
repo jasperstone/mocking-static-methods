@@ -635,6 +635,73 @@ internal static class SeamCore
         return c.Parameters;
     }
 
+    // -- receiver-expression reachability (seam-injection-site scoping) ----
+    //
+    // Both transforms re-materialize the receiver expression at a point that is
+    // NOT the original call site:
+    //   * wrapper_interface emits `_field = param ?? new Wrapper(<recv>)` in the
+    //     CONSTRUCTOR — so <recv> must reference no method-local and no parameter
+    //     (only `this`/base, fields, properties, static members, or types).
+    //   * parameterize_dependency emits the delegator at the TOP of the enclosing
+    //     method — so <recv> may additionally reference a parameter of that
+    //     enclosing method (and primary-constructor parameters, which are captured
+    //     like fields), but never a local declared mid-body nor a parameter/local
+    //     of a NESTED lambda or local function.
+    // When the receiver root is out of scope at the injection site the emitted
+    // code fails to compile (CS0103 "the name 'x' does not exist", or CS8820/
+    // CS8821 inside a static anonymous function), which the build-preservation
+    // guard then auto-reverts. Detecting it here lets the transform reject the
+    // target cleanly instead of producing non-compiling code.
+
+    // Identifier names in a receiver expression that denote VALUE roots. The
+    // member-name side of a member/conditional access (`a.B` → `B`) denotes a
+    // member lookup, not a binding root, and is skipped.
+    private static IEnumerable<IdentifierNameSyntax> ReceiverRootIdentifiers(ExpressionSyntax expr)
+    {
+        foreach (var id in expr.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
+        {
+            if (id.Parent is MemberAccessExpressionSyntax ma && ma.Name == id) continue;
+            if (id.Parent is MemberBindingExpressionSyntax mb && mb.Name == id) continue;
+            yield return id;
+        }
+    }
+
+    // wrapper_interface: receiver reachable from the constructor (no local / no
+    // parameter / no range variable).
+    public static bool ReceiverIsConstructorReachable(ExpressionSyntax expr, SemanticModel model)
+    {
+        foreach (var id in ReceiverRootIdentifiers(expr))
+        {
+            var sym = model.GetSymbolInfo(id).Symbol;
+            if (sym is ILocalSymbol or IParameterSymbol or IRangeVariableSymbol)
+                return false;
+        }
+        return true;
+    }
+
+    // parameterize_dependency: receiver reachable from the TOP of `enclosing`.
+    // Parameters of `enclosing` itself, and primary-constructor parameters of the
+    // containing type, are reachable; locals and nested-function parameters are not.
+    public static bool ReceiverReachableFromMethodTop(
+        ExpressionSyntax expr, SemanticModel model, IMethodSymbol? enclosing)
+    {
+        foreach (var id in ReceiverRootIdentifiers(expr))
+        {
+            var sym = model.GetSymbolInfo(id).Symbol;
+            if (sym is ILocalSymbol or IRangeVariableSymbol) return false;
+            if (sym is IParameterSymbol p)
+            {
+                if (enclosing is not null
+                    && SymbolEqualityComparer.Default.Equals(p.ContainingSymbol, enclosing))
+                    continue;   // parameter of the method we overload
+                if (p.ContainingSymbol is IMethodSymbol pm && pm.MethodKind == MethodKind.Constructor)
+                    continue;   // primary-constructor parameter (captured like a field)
+                return false;   // lambda / local-function parameter → out of scope
+            }
+        }
+        return true;
+    }
+
     // -- signature reconstruction from IMethodSymbol -----------------------
 
     public static string TypeParamList(IMethodSymbol m) =>

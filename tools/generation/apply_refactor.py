@@ -237,6 +237,28 @@ class RefactorEngine:
         env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
         env["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
         env["NUGET_PACKAGES"] = NUGET_CACHE
+
+        # Warm NuGet/package assets once before build so project-level restore
+        # failures are surfaced as a dedicated error class.
+        try:
+            rr = subprocess.run(
+                [DOTNET, "restore", str(self.owning_csproj), "--nologo", "/p:TreatWarningsAsErrors=false"],
+                cwd=str(self.owning_csproj_dir), capture_output=True, text=True,
+                timeout=self.build_timeout_s, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return False, [{"code": "RESTORE_FAIL", "message": f"restore timeout after {self.build_timeout_s}s"}], ""
+        except OSError as e:
+            return False, [{"code": "RESTORE_FAIL", "message": f"dotnet restore invocation failed: {e}"}], ""
+
+        restore_out = (rr.stdout or "") + (rr.stderr or "")
+        if rr.returncode != 0:
+            errors = [{"code": "RESTORE_FAIL", "message": "dotnet restore failed for owning project"}]
+            parsed = first_compile_errors(restore_out)
+            if parsed:
+                errors.extend(parsed[:4])
+            return False, errors, restore_out[-2000:]
+
         try:
             br = subprocess.run(
                 [DOTNET, "build", str(self.owning_csproj),

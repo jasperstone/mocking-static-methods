@@ -300,6 +300,39 @@ def test_candidate_fallback_picks_matching_arity_overload():
     assert "Exception" not in sig and "int" not in sig, sig
 
 
+@pytest.mark.parametrize(
+    "transform,expected_injection_ref",
+    [
+        ("wrapper_interface", None),
+        ("parameterize_dependency", "Run(string, ILoggerWrapper)"),
+    ],
+)
+def test_locator_picks_correct_duplicate_invocation_under_line_drift(
+    transform, expected_injection_ref,
+):
+    """Regression: when two same-name invocations exist in one type and the
+    recorded target line drifts to the enclosing method signature, locator must
+    still resolve the intended invocation deterministically (Run, not Audit)."""
+    payload = run_tool(
+        "locator_line_drift_duplicate",
+        transform,
+        14,  # drifted to `Run` signature line (actual call is line 17)
+        "LogInformation",
+        "ILogger",
+        "DriftWorker",
+        "Extension",
+    )
+    assert payload["ok"] is True, payload
+    assert payload["applicable"] is True, payload.get("reason")
+
+    seam = payload["seam"]
+    assert seam["member"] == "LogInformation"
+    assert seam["call_site"].endswith("Site.cs:17"), seam["call_site"]
+
+    if expected_injection_ref is not None:
+        assert seam["injection_ref"] == expected_injection_ref, seam["injection_ref"]
+
+
 # ======================================================================
 # unbound_receiver reference-coverage fixes (2026-06-15) — regression guards.
 # ======================================================================

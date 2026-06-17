@@ -305,6 +305,9 @@ internal static class SeamCore
         int line,
         string method,
         string transform,
+        string receiverTypeHint,
+        string containingTypeHint,
+        string kindHint,
         string interfaceOverride,
         string wrapperOverride,
         string paramOverride,
@@ -330,26 +333,25 @@ internal static class SeamCore
         var root = tree.GetRoot();
         var model = compilation.GetSemanticModel(tree);
 
-        // Candidate invocations: simple name matches `method`, located near `line`.
-        InvocationExpressionSyntax? hit = null;
-        foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        var byName = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(i => InvokedName(i) == method).ToList();
+        if (byName.Count == 0)
         {
-            if (InvokedName(inv) != method) continue;
-            var nameLine = NameLine(inv);
-            var startLine = inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-            if (nameLine == line || startLine == line)
-            {
-                hit = inv;
-                break;
-            }
+            reason = "site_not_found";
+            return null;
         }
-        // Fallback: unique name match anywhere (line drift tolerance).
-        if (hit is null)
-        {
-            var byName = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
-                .Where(i => InvokedName(i) == method).ToList();
-            if (byName.Count == 1) hit = byName[0];
-        }
+
+        var lineContext = BuildLineContext(root, tree, line);
+        var hit = SelectBestInvocationCandidate(
+            byName,
+            model,
+            compilation,
+            line,
+            method,
+            receiverTypeHint,
+            containingTypeHint,
+            kindHint,
+            lineContext);
         if (hit is null)
         {
             reason = "site_not_found";
@@ -449,6 +451,192 @@ internal static class SeamCore
 
         ResolveNames(ctx, interfaceOverride, wrapperOverride, paramOverride);
         return ctx;
+    }
+
+    private static (TypeDeclarationSyntax? type, MethodDeclarationSyntax? method) BuildLineContext(
+        SyntaxNode root,
+        SyntaxTree tree,
+        int line)
+    {
+        if (line <= 0) return (null, null);
+        var text = tree.GetText();
+        var lineIndex = Math.Clamp(line - 1, 0, Math.Max(0, text.Lines.Count - 1));
+        var pos = text.Lines[lineIndex].Start;
+        var token = root.FindToken(pos);
+        var node = token.Parent;
+        return (
+            node?.FirstAncestorOrSelf<TypeDeclarationSyntax>(),
+            node?.FirstAncestorOrSelf<MethodDeclarationSyntax>());
+    }
+
+    private static InvocationExpressionSyntax? SelectBestInvocationCandidate(
+        List<InvocationExpressionSyntax> byName,
+        SemanticModel model,
+        CSharpCompilation compilation,
+        int targetLine,
+        string method,
+        string receiverTypeHint,
+        string containingTypeHint,
+        string kindHint,
+        (TypeDeclarationSyntax? type, MethodDeclarationSyntax? method) lineContext)
+    {
+        var receiverHints = NormalizeReceiverHints(receiverTypeHint);
+        var containingHint = NormalizeSimpleName(containingTypeHint);
+        var expectedExtension = string.Equals(kindHint?.Trim(), "Extension", StringComparison.OrdinalIgnoreCase)
+            ? true
+            : string.Equals(kindHint?.Trim(), "NonVirtual", StringComparison.OrdinalIgnoreCase)
+                ? false
+                : (bool?)null;
+
+        var scored = new List<(InvocationExpressionSyntax inv, int score)>();
+
+        foreach (var inv in byName)
+        {
+            var symInfo = model.GetSymbolInfo(inv);
+            var bound = symInfo.Symbol as IMethodSymbol
+                ?? PickBestCandidate(inv, symInfo.CandidateSymbols.OfType<IMethodSymbol>().ToImmutableArray(), model);
+            if (bound is null) continue;
+
+            int score = 0;
+            var nameLine = NameLine(inv);
+            var startLine = inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+            var dist = targetLine > 0
+                ? Math.Min(Math.Abs(nameLine - targetLine), Math.Abs(startLine - targetLine))
+                : int.MaxValue / 4;
+
+            // Primary locator: line proximity with explicit bonus for exact line.
+            if (targetLine > 0)
+            {
+                score += Math.Max(0, 200 - Math.Min(dist, 200));
+                if (nameLine == targetLine || startLine == targetLine) score += 180;
+            }
+
+            var invType = inv.FirstAncestorOrSelf<TypeDeclarationSyntax>();
+            var invMethod = inv.FirstAncestorOrSelf<MethodDeclarationSyntax>();
+
+            if (lineContext.type is not null && invType is not null
+                && string.Equals(invType.Identifier.Text, lineContext.type.Identifier.Text, StringComparison.Ordinal))
+                score += 120;
+
+            if (lineContext.method is not null && invMethod is not null
+                && string.Equals(invMethod.Identifier.Text, lineContext.method.Identifier.Text, StringComparison.Ordinal)
+                && invMethod.ParameterList.Parameters.Count == lineContext.method.ParameterList.Parameters.Count)
+                score += 200;
+
+            if (!string.IsNullOrEmpty(containingHint))
+            {
+                if (invType is null || !string.Equals(invType.Identifier.Text, containingHint, StringComparison.Ordinal))
+                    continue;
+                score += 220;
+            }
+
+            if (expectedExtension.HasValue)
+            {
+                bool isExt = bound.MethodKind == MethodKind.ReducedExtension
+                             || bound.IsExtensionMethod
+                             || bound.ReducedFrom is not null;
+                if (isExt != expectedExtension.Value) continue;
+                score += 160;
+            }
+
+            var recvType = ResolveReceiverTypeForCandidate(inv, bound, model);
+            if (receiverHints.Count > 0)
+            {
+                if (!ReceiverTypeMatchesHints(recvType, receiverHints, method))
+                    continue;
+                score += 180;
+            }
+
+            // Prefer signatures whose overload key is fully resolved and stable.
+            score += OverloadKey(bound).ToDisplayString().Length % 17;
+
+            scored.Add((inv, score));
+        }
+
+        if (scored.Count == 0) return null;
+        scored.Sort((a, b) => b.score.CompareTo(a.score));
+        if (scored.Count > 1 && scored[0].score == scored[1].score)
+            return null; // ambiguity-safe: avoid rewriting the wrong duplicate site.
+        return scored[0].inv;
+    }
+
+    private static HashSet<string> NormalizeReceiverHints(string raw)
+    {
+        var hs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(raw)) return hs;
+
+        foreach (var part in raw.Split('/'))
+        {
+            var p = part.Trim();
+            if (p.Length == 0) continue;
+            hs.Add(p);
+            hs.Add(NormalizeSimpleName(p));
+        }
+        return hs;
+    }
+
+    private static string NormalizeSimpleName(string? t)
+    {
+        if (string.IsNullOrWhiteSpace(t)) return "";
+        var s = t.Trim();
+        var slash = s.LastIndexOf('/');
+        if (slash >= 0) s = s.Substring(slash + 1);
+        var dot = s.LastIndexOf('.');
+        if (dot >= 0) s = s.Substring(dot + 1);
+        var tick = s.IndexOf('`');
+        if (tick >= 0) s = s.Substring(0, tick);
+        var gen = s.IndexOf('<');
+        if (gen >= 0) s = s.Substring(0, gen);
+        return s.Trim();
+    }
+
+    private static ITypeSymbol? ResolveReceiverTypeForCandidate(
+        InvocationExpressionSyntax inv,
+        IMethodSymbol bound,
+        SemanticModel model)
+    {
+        var def = bound.OriginalDefinition;
+        ITypeSymbol? recvType = null;
+        if (def.MethodKind == MethodKind.ReducedExtension
+            && def.ReducedFrom is { } unreduced
+            && unreduced.Parameters.Length > 0)
+        {
+            var declaredRecv = unreduced.Parameters[0].Type;
+            if (declaredRecv is not null && declaredRecv is not IErrorTypeSymbol)
+                recvType = declaredRecv;
+        }
+        recvType ??= def.ReceiverType;
+        if (recvType is null || recvType is IErrorTypeSymbol)
+        {
+            if (inv.Expression is MemberAccessExpressionSyntax ma)
+                recvType = model.GetTypeInfo(ma.Expression).Type;
+        }
+        return recvType;
+    }
+
+    private static bool ReceiverTypeMatchesHints(ITypeSymbol? recvType, HashSet<string> hints, string method)
+    {
+        if (recvType is null || recvType is IErrorTypeSymbol) return false;
+
+        var simple = NormalizeSimpleName(recvType.Name);
+        var full = recvType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            .Replace("global::", "", StringComparison.Ordinal);
+        var fullSimple = NormalizeSimpleName(full);
+
+        if (hints.Contains(simple) || hints.Contains(full) || hints.Contains(fullSimple))
+            return true;
+
+        // Compatibility fallback for framework aliases, e.g. HttpMessageInvoker rows
+        // targeting HttpClient call sites.
+        if (string.Equals(method, "GetAsync", StringComparison.Ordinal)
+            || string.Equals(method, "PostAsync", StringComparison.Ordinal)
+            || string.Equals(method, "SendAsync", StringComparison.Ordinal))
+        {
+            if ((hints.Contains("HttpMessageInvoker") && (simple == "HttpClient" || fullSimple == "HttpClient"))
+                || (hints.Contains("HttpClient") && (simple == "HttpMessageInvoker" || fullSimple == "HttpMessageInvoker")))
+                return true;
+        }
+        return false;
     }
 
     // -- name inference + collision suffixing (§1.1) -----------------------

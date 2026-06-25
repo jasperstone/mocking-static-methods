@@ -15,6 +15,72 @@ namespace RoslynRefactorTool;
 // Edge cases per §5 are rejected with the exact reason tokens.
 internal static class WrapperInterfaceRewriter
 {
+    // Convert a primary constructor (params on class declaration) to an explicit
+    // constructor with backing fields. Returns the modified class, or null if
+    // the class has no primary constructor.
+    private static ClassDeclarationSyntax? ConvertPrimaryConstructorToExplicit(
+        ClassDeclarationSyntax classDecl, SemanticModel model, string indentUnit, string eol, string classIndent)
+    {
+        if (classDecl.ParameterList is null || classDecl.ParameterList.Parameters.Count == 0)
+            return null; // No primary constructor
+
+        var memberIndent = classIndent + indentUnit;
+        var primaryParams = classDecl.ParameterList;
+        
+        // Build explicit constructor signature matching primary parameters
+        var ctorSignature = string.Join(", ",
+            primaryParams.Parameters.Select(p => $"{p.Type!.ToFullString().Trim()} {p.Identifier.Text}"));
+        
+        // Build field assignments from primary parameters
+        var fieldAssignments = string.Join("\n",
+            primaryParams.Parameters.Select(p =>
+            {
+                var fieldName = "_" + char.ToLower(p.Identifier.Text[0]) + p.Identifier.Text.Substring(1);
+                return $"{memberIndent}{memberIndent}{fieldName} = {p.Identifier.Text};";
+            }));
+
+        // Create explicit constructor that assigns all primary params to backing fields
+        var explicitCtorCode =
+            $"public {classDecl.Identifier.Text}({ctorSignature})\n" +
+            $"{{\n{fieldAssignments}\n{memberIndent}}}";
+        
+        var explicitCtor = (ConstructorDeclarationSyntax)SyntaxFactory.ParseMemberDeclaration(explicitCtorCode)!;
+        
+        // Format the constructor with proper indentation
+        var formattedCtor = SeamCore.FormatMember(
+            explicitCtor, memberIndent, indentUnit, eol,
+            leading: SyntaxFactory.TriviaList(),
+            trailing: SyntaxFactory.TriviaList(SyntaxFactory.EndOfLine(eol)));
+
+        // Create backing fields for each primary parameter
+        var backingFields = primaryParams.Parameters.Select(p =>
+        {
+            var fieldName = "_" + char.ToLower(p.Identifier.Text[0]) + p.Identifier.Text.Substring(1);
+            var fieldType = p.Type!.ToFullString().Trim();
+            var isReadonly = p.Modifiers.Any(m => m.IsKind(SyntaxKind.ReadOnlyKeyword)) ? "readonly " : "";
+            var fieldCode = $"private {isReadonly}{fieldType} {fieldName};";
+            var field = (FieldDeclarationSyntax)SyntaxFactory.ParseMemberDeclaration(fieldCode)!;
+            return SeamCore.FormatMember(
+                field, memberIndent, indentUnit, eol,
+                leading: SyntaxFactory.TriviaList(),
+                trailing: SyntaxFactory.TriviaList(SyntaxFactory.EndOfLine(eol)));
+        }).ToList();
+
+        // Remove the primary constructor parameter list and add explicit constructor + fields
+        var newClass = classDecl.WithParameterList(null);
+        
+        // Add backing fields first
+        foreach (var field in backingFields)
+        {
+            newClass = newClass.WithMembers(newClass.Members.Insert(0, field));
+        }
+        
+        // Add explicit constructor after fields
+        newClass = newClass.WithMembers(newClass.Members.Insert(backingFields.Count, formattedCtor));
+        
+        return newClass;
+    }
+
     public static RewriteResult Apply(SeamContext ctx)
     {
         // -- §5 structural guards ------------------------------------------
@@ -23,14 +89,35 @@ internal static class WrapperInterfaceRewriter
 
         if (ctx.ContainingType is not ClassDeclarationSyntax classDecl)
             return RewriteResult.Reject("site_not_found: containing type is not a class");
+        var originalClassDecl = classDecl;
+        bool hasPrimaryConstructor = classDecl.ParameterList is not null;
+
+        var fileText = ctx.Tree.GetText().ToString();
+        var eol = SeamCore.DetectEol(fileText);
+        var indentUnit = SeamCore.IndentUnitOf(classDecl);
+        var classIndent = SeamCore.LineIndentOf(classDecl);
 
         // Receiver must be `this`/implicit → reject.
         if (ctx.ReceiverExpr is null || ctx.ReceiverExpr is ThisExpressionSyntax)
             return RewriteResult.Reject("receiver_is_this");
 
-        // Receiver must be a field/property the ctor can re-reference.
-        if (ctx.ReceiverSymbol is not (IFieldSymbol or IPropertySymbol))
+        // Receiver must be rooted in a constructor-reachable source: field,
+        // property, or constructor parameter (primary-constructor style).
+        // Classify by the receiver's leftmost source root rather than the
+        // symbol of the full expression, so chains like
+        // `_loggerFactory.CreateLogger<T>()` and `_context.HttpContext.RequestServices`
+        // are accepted when their root is ctor-reachable.
+        if (!HasSupportedReceiverSource(ctx))
+        {
+            // ENHANCEMENT: Check if this can be wrapped as a static utility
+            // (external/framework type that can be instantiated internally).
+            if (SeamCore.CanWrapAsStaticUtility(ctx))
+            {
+                // Proceed with static utility wrapper pattern instead of rejecting
+                return ApplyStaticUtilityWrapper(ctx);
+            }
             return RewriteResult.Reject("no_receiver_source");
+        }
 
         // The receiver EXPRESSION (not just its final member) must be reachable
         // from the CONSTRUCTOR, where `_field = param ?? new Wrapper(<recv>)` is
@@ -62,19 +149,30 @@ internal static class WrapperInterfaceRewriter
             var syntaxRef = ctorSym.DeclaringSyntaxReferences.FirstOrDefault();
             var ctorNode = syntaxRef?.GetSyntax() as ConstructorDeclarationSyntax;
             if (ctorNode is null)
-                return RewriteResult.Reject("site_not_found: constructor syntax unavailable");
+            {
+                // Primary constructors can surface as constructor symbols whose
+                // syntax declaration is on the type declaration, not a
+                // ConstructorDeclarationSyntax node. In that case we fall back
+                // to the synthesized-constructor insertion path.
+                if (ctx.ContainingType.ParameterList is not null)
+                    ctorDecl = null;
+                else
+                    return RewriteResult.Reject("site_not_found: constructor syntax unavailable");
+            }
+            else
+            {
+                // Ctor in a different file than the site (partial split).
+                if (Path.GetFullPath(ctorNode.SyntaxTree.FilePath).Replace('\\', '/')
+                    != ctx.TargetFileAbs.Replace('\\', '/'))
+                    return RewriteResult.Reject("partial_split");
 
-            // Ctor in a different file than the site (partial split).
-            if (Path.GetFullPath(ctorNode.SyntaxTree.FilePath).Replace('\\', '/')
-                != ctx.TargetFileAbs.Replace('\\', '/'))
-                return RewriteResult.Reject("partial_split");
+                // `: this(...)` chaining → reject.
+                if (ctorNode.Initializer is { } init
+                    && init.ThisOrBaseKeyword.IsKind(SyntaxKind.ThisKeyword))
+                    return RewriteResult.Reject("ctor_chaining");
 
-            // `: this(...)` chaining → reject.
-            if (ctorNode.Initializer is { } init
-                && init.ThisOrBaseKeyword.IsKind(SyntaxKind.ThisKeyword))
-                return RewriteResult.Reject("ctor_chaining");
-
-            ctorDecl = ctorNode;
+                ctorDecl = ctorNode;
+            }
         }
 
         var iface = ctx.InterfaceName;
@@ -94,10 +192,7 @@ internal static class WrapperInterfaceRewriter
         // Match the production file's newline + indentation so injected members
         // sit at the correct nesting depth (NormalizeWhitespace only formats
         // relative to column 0, which is what tripped SA1137 in strict repos).
-        var fileText = ctx.Tree.GetText().ToString();
-        var eol = SeamCore.DetectEol(fileText);
-        var indentUnit = SeamCore.IndentUnitOf(classDecl);
-        var classIndent = SeamCore.LineIndentOf(classDecl);
+        // (eol, indentUnit, and classIndent already computed earlier)
         var memberIndent = classIndent + indentUnit;
 
         // -- 2. constructor: add trailing optional param + append assignment
@@ -110,6 +205,7 @@ internal static class WrapperInterfaceRewriter
             (ctx.Model.GetNullableContext(nullablePos) & NullableContext.AnnotationsEnabled) != 0;
         var optMark = annotationsEnabled ? "?" : "";
 
+        bool fieldInsertedViaPrimaryCtor = false;
         if (ctorDecl is not null)
         {
             // re-find the (possibly rewritten) ctor node inside newClass by span match on identifier+param count
@@ -160,6 +256,16 @@ internal static class WrapperInterfaceRewriter
                 trailing: liveCtor.GetTrailingTrivia());
             newClass = newClass.ReplaceNode(liveCtor, newCtor);
         }
+        else if (hasPrimaryConstructor && newClass.ParameterList is not null)
+        {
+            // Primary constructor path: add the seam parameter to the type's
+            // parameter list and initialize the seam field from it directly.
+            var newParam = SyntaxFactory.ParseParameterList($"({iface}{optMark} {param} = null)").Parameters[0];
+            newClass = newClass.WithParameterList(newClass.ParameterList.AddParameters(newParam));
+            var initExpr = $"{param} ?? new {wrapper}({recvText})";
+            newClass = InsertInitializedField(newClass, iface, field, initExpr, recvText, memberIndent, eol);
+            fieldInsertedViaPrimaryCtor = true;
+        }
         else
         {
             // §5: No explicit ctor → synthesize one taking `{iface}? {param}=null`.
@@ -180,11 +286,12 @@ internal static class WrapperInterfaceRewriter
         }
 
         // -- 3. add the backing field --------------------------------------
-        newClass = InsertField(newClass, iface, field, recvText, memberIndent, eol);
+        if (!fieldInsertedViaPrimaryCtor)
+            newClass = InsertField(newClass, iface, field, recvText, memberIndent, eol);
 
         // -- 4. produce the rewritten file + generated wrapper file --------
         var root = ctx.Tree.GetRoot();
-        var newRoot = root.ReplaceNode(classDecl, newClass);
+        var newRoot = root.ReplaceNode(originalClassDecl, newClass);
         var files = new Dictionary<string, string>
         {
             [ctx.TargetFileAbs] = newRoot.ToFullString(),
@@ -195,6 +302,194 @@ internal static class WrapperInterfaceRewriter
         var reason = $"wrapper_interface applied: injected {iface} via ctor param '{param}' on "
                    + $"{ctx.ContainingTypeSymbol.Name}; rewrote {siteRewriter.Rewrites} call site(s).";
         return RewriteResult.Ok(reason, files, seam);
+    }
+
+    /// <summary>
+    /// Apply static utility wrapper pattern for external/framework types.
+    /// Unlike normal wrapper, the wrapper's constructor creates the inner instance
+    /// rather than accepting it as a parameter.
+    /// </summary>
+    private static RewriteResult ApplyStaticUtilityWrapper(SeamContext ctx)
+    {
+        // -- Structural guards (same as normal wrapper) ----------------------
+        var classify = SeamCore.ClassifyContainingType(ctx);
+        if (classify is not null) return RewriteResult.Reject(classify);
+
+        if (ctx.ContainingType is not ClassDeclarationSyntax classDecl)
+            return RewriteResult.Reject("site_not_found: containing type is not a class");
+        var originalClassDecl = classDecl;
+
+        var fileText = ctx.Tree.GetText().ToString();
+        var eol = SeamCore.DetectEol(fileText);
+        var indentUnit = SeamCore.IndentUnitOf(classDecl);
+        var classIndent = SeamCore.LineIndentOf(classDecl);
+
+        // Receiver must not be `this`
+        if (ctx.ReceiverExpr is null || ctx.ReceiverExpr is ThisExpressionSyntax)
+            return RewriteResult.Reject("receiver_is_this");
+
+        // Site inside a static method → no instance to hold the field
+        if (ctx.EnclosingMethod is not null
+            && ctx.EnclosingMethod.Modifiers.Any(SyntaxKind.StaticKeyword))
+            return RewriteResult.Reject("static_method_no_instance");
+
+        var iface = ctx.InterfaceName;
+        var wrapper = ctx.WrapperName;
+        var param = ctx.ParamName;
+        var field = ctx.FieldName;
+        var recvText = ctx.ReceiverText;
+        var method = ctx.Method.Name;
+
+        // -- 1. Rewrite all call sites to use injected wrapper ---------------
+        var siteRewriter = new SameReceiverCallRewriter(method, recvText, field, ctx.Model, ctx.BoundMethod);
+        var newClass = (ClassDeclarationSyntax)siteRewriter.Visit(classDecl)!;
+        if (siteRewriter.Rewrites == 0)
+            return RewriteResult.Reject("site_not_found: no rewritable call site for the target member");
+
+        var memberIndent = classIndent + indentUnit;
+
+        // -- 2. Constructor: add optional parameter + initialize wrapper instance
+        var nullablePos = (SyntaxNode)ctx.ContainingType;
+        bool annotationsEnabled =
+            (ctx.Model.GetNullableContext(nullablePos.SpanStart) & NullableContext.AnnotationsEnabled) != 0;
+        var optMark = annotationsEnabled ? "?" : "";
+
+        // For static utility wrapper, the initialization creates a new wrapper instance:
+        // _field = param ?? new {wrapper}()
+        // (Unlike normal wrapper which does: param ?? new {wrapper}({recvText}))
+        var initExpr = $"{param} ?? new {wrapper}()";
+
+        var userCtors = ctx.ContainingTypeSymbol.InstanceConstructors
+            .Where(c => !c.IsImplicitlyDeclared)
+            .ToList();
+
+        if (userCtors.Count > 1)
+            return RewriteResult.Reject("multiple_ctors");
+
+        ConstructorDeclarationSyntax? ctorDecl = null;
+        if (userCtors.Count == 1)
+        {
+            var ctorSym = userCtors[0];
+            var syntaxRef = ctorSym.DeclaringSyntaxReferences.FirstOrDefault();
+            var ctorNode = syntaxRef?.GetSyntax() as ConstructorDeclarationSyntax;
+            if (ctorNode is null)
+            {
+                if (ctx.ContainingType.ParameterList is not null)
+                    ctorDecl = null;
+                else
+                    return RewriteResult.Reject("site_not_found: constructor syntax unavailable");
+            }
+            else
+            {
+                if (Path.GetFullPath(ctorNode.SyntaxTree.FilePath).Replace('\\', '/')
+                    != ctx.TargetFileAbs.Replace('\\', '/'))
+                    return RewriteResult.Reject("partial_split");
+
+                if (ctorNode.Initializer is { } init
+                    && init.ThisOrBaseKeyword.IsKind(SyntaxKind.ThisKeyword))
+                    return RewriteResult.Reject("ctor_chaining");
+
+                ctorDecl = ctorNode;
+            }
+        }
+
+        // Insert or modify constructor to accept optional {wrapper} param
+        if (ctorDecl is not null)
+        {
+            var ctorIndent = SeamCore.LineIndentOf(ctorDecl);
+
+            // Parse the new parameter using existing pattern
+            var newParam = SyntaxFactory.ParseParameterList($"({iface}{optMark} {param} = null)").Parameters[0];
+            var withParam = ctorDecl.WithParameterList(ctorDecl.ParameterList.AddParameters(newParam));
+
+            // Add initialization of _field in the constructor body
+            var assignStmt = (StatementSyntax)SyntaxFactory.ParseStatement($"{field} = {initExpr};");
+            
+            BlockSyntax block;
+            if (withParam.Body is { } body)
+            {
+                block = body.AddStatements(assignStmt);
+            }
+            else
+            {
+                block = SyntaxFactory.Block(assignStmt);
+            }
+            
+            var newCtorDecl = withParam.WithBody(block);
+
+            var docTrivia = AugmentCtorDoc(ctorDecl.GetLeadingTrivia(), param, eol);
+            var formattedCtor = SeamCore.FormatMember(
+                newCtorDecl, ctorIndent, indentUnit, eol,
+                leading: docTrivia,
+                trailing: ctorDecl.GetTrailingTrivia());
+
+            newClass = newClass.ReplaceNode(ctorDecl, formattedCtor);
+        }
+        else
+        {
+            // No explicit ctor → synthesize one
+            var synthCtor = SyntaxFactory.ParseMemberDeclaration(
+                $"public {classDecl.Identifier.Text}({iface}{optMark} {param} = null)\n" +
+                $"{{\n    this.{field} = {initExpr};\n}}")!;
+            var formattedCtor = SeamCore.FormatMember(
+                (ConstructorDeclarationSyntax)synthCtor, memberIndent, indentUnit, eol,
+                leading: SyntaxFactory.TriviaList(),
+                trailing: SyntaxFactory.TriviaList(SyntaxFactory.EndOfLine(eol)));
+            newClass = InsertCtor(newClass, formattedCtor);
+        }
+
+        // -- 3. Add the backing field ----------------------------------------
+        // For static utility wrapper, receiver is internal so pass empty string
+        newClass = InsertField(newClass, iface, field, "", memberIndent, eol);
+
+        // -- 4. Produce the rewritten file + generated wrapper ---------------
+        var root = ctx.Tree.GetRoot();
+        var newRoot = root.ReplaceNode(originalClassDecl, newClass);
+        var files = new Dictionary<string, string>
+        {
+            [ctx.TargetFileAbs] = newRoot.ToFullString(),
+            [SeamCore.GeneratedFilePath(ctx)] = SeamCore.EmitStaticUtilityWrapperSource(ctx),
+        };
+
+        var seam = SeamCore.BuildSeam(ctx, injection: "ctor", injectionRef: param);
+        var reason = $"static_utility_wrapper applied: wrapped {ctx.ReceiverType.Name} and injected {iface} via ctor param '{param}' on "
+                   + $"{ctx.ContainingTypeSymbol.Name}; rewrote {siteRewriter.Rewrites} call site(s).";
+        return RewriteResult.Ok(reason, files, seam);
+    }
+
+    private static bool HasSupportedReceiverSource(SeamContext ctx)
+    {
+        var source = GetReceiverSourceSymbol(ctx.ReceiverExpr, ctx.Model);
+        if (source is IFieldSymbol or IPropertySymbol)
+            return true;
+
+        return source is IParameterSymbol p
+            && p.ContainingSymbol is IMethodSymbol pm
+            && pm.MethodKind == MethodKind.Constructor;
+    }
+
+    private static ISymbol? GetReceiverSourceSymbol(ExpressionSyntax? expr, SemanticModel model)
+    {
+        if (expr is null)
+            return null;
+
+        return expr switch
+        {
+            ParenthesizedExpressionSyntax paren => GetReceiverSourceSymbol(paren.Expression, model),
+            CastExpressionSyntax cast => GetReceiverSourceSymbol(cast.Expression, model),
+            AwaitExpressionSyntax awaitExpr => GetReceiverSourceSymbol(awaitExpr.Expression, model),
+            PostfixUnaryExpressionSyntax postfix
+                when postfix.IsKind(SyntaxKind.SuppressNullableWarningExpression)
+                => GetReceiverSourceSymbol(postfix.Operand, model),
+            BinaryExpressionSyntax binary
+                when binary.IsKind(SyntaxKind.AsExpression)
+                => GetReceiverSourceSymbol(binary.Left, model),
+            MemberAccessExpressionSyntax memberAccess => GetReceiverSourceSymbol(memberAccess.Expression, model),
+            ConditionalAccessExpressionSyntax conditional => GetReceiverSourceSymbol(conditional.Expression, model),
+            ElementAccessExpressionSyntax elementAccess => GetReceiverSourceSymbol(elementAccess.Expression, model),
+            InvocationExpressionSyntax invocation => GetReceiverSourceSymbol(invocation.Expression, model),
+            _ => model.GetSymbolInfo(expr).Symbol,
+        };
     }
 
     // If the enclosing ctor carries an XML doc comment that already documents its
@@ -233,6 +528,25 @@ internal static class WrapperInterfaceRewriter
     {
         var fieldDecl = ((FieldDeclarationSyntax)SyntaxFactory.ParseMemberDeclaration(
                 $"private readonly {iface} {field};")!)
+            .WithLeadingTrivia(SyntaxFactory.Whitespace(memberIndent))
+            .WithTrailingTrivia(SyntaxFactory.EndOfLine(eol));
+        for (int i = 0; i < cls.Members.Count; i++)
+        {
+            if (cls.Members[i] is FieldDeclarationSyntax fd
+                && fd.Declaration.Variables.Any(v => v.Identifier.Text == recvText.TrimStart('@')))
+            {
+                return cls.WithMembers(cls.Members.Insert(i + 1, fieldDecl));
+            }
+        }
+        return cls.WithMembers(cls.Members.Insert(0, fieldDecl));
+    }
+
+    private static ClassDeclarationSyntax InsertInitializedField(
+        ClassDeclarationSyntax cls, string iface, string field, string initializer,
+        string recvText, string memberIndent, string eol)
+    {
+        var fieldDecl = ((FieldDeclarationSyntax)SyntaxFactory.ParseMemberDeclaration(
+                $"private readonly {iface} {field} = {initializer};")!)
             .WithLeadingTrivia(SyntaxFactory.Whitespace(memberIndent))
             .WithTrailingTrivia(SyntaxFactory.EndOfLine(eol));
         for (int i = 0; i < cls.Members.Count; i++)
@@ -317,5 +631,30 @@ internal sealed class SameReceiverCallRewriter : CSharpSyntaxRewriter
             return visited.WithExpression(newMa);
         }
         return visited;
+    }
+
+    public override SyntaxNode? VisitConditionalAccessExpression(ConditionalAccessExpressionSyntax node)
+    {
+        var inv0 = node.WhenNotNull as InvocationExpressionSyntax;
+        bool match = inv0 is not null
+            && inv0.Expression is MemberBindingExpressionSyntax
+            && SeamCore.InvokedName(inv0) == _method
+            && node.Expression.ToString().Trim() == _recvText.Trim();
+
+        if (match && _model is not null && _targetKey is not null && inv0 is not null)
+        {
+            var info = _model.GetSymbolInfo(inv0);
+            var sym = info.Symbol as IMethodSymbol
+                      ?? SeamCore.PickBestCandidate(inv0, info.CandidateSymbols.OfType<IMethodSymbol>().ToImmutableArray(), _model);
+            match = sym is not null
+                && SymbolEqualityComparer.Default.Equals(SeamCore.OverloadKey(sym), _targetKey);
+        }
+
+        var visited = (ConditionalAccessExpressionSyntax)base.VisitConditionalAccessExpression(node)!;
+        if (!match) return visited;
+
+        Rewrites++;
+        return visited.WithExpression(
+            SyntaxFactory.IdentifierName(_newReceiver).WithTriviaFrom(visited.Expression));
     }
 }

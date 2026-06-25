@@ -333,6 +333,25 @@ def test_locator_picks_correct_duplicate_invocation_under_line_drift(
         assert seam["injection_ref"] == expected_injection_ref, seam["injection_ref"]
 
 
+def test_locator_accepts_extension_declaring_type_containing_hint():
+    """Regression: target rows often carry `containing_type` as the extension
+    declaring type (e.g. LoggerExtensions), not the call-site enclosing type.
+    Locator must still match the call site and apply."""
+    payload = run_tool(
+        "ilogger",
+        "wrapper_interface",
+        16,
+        "LogInformation",
+        "ILogger",
+        "LoggerExtensions",
+        "Extension",
+    )
+    assert payload["ok"] is True, payload
+    assert payload["applicable"] is True, payload.get("reason")
+    assert payload["seam"]["member"] == "LogInformation"
+    assert payload["seam"]["containing_type"].split(".")[-1] == "Worker"
+
+
 # ======================================================================
 # unbound_receiver reference-coverage fixes (2026-06-15) — regression guards.
 # ======================================================================

@@ -455,4 +455,4 @@ tools/generation/ping_results.json
 dissertation_bundle/
 
 test_results_local/
-*.csv
+tools/generation/results/*.csv

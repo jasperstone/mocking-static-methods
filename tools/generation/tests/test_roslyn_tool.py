@@ -300,6 +300,185 @@ def test_candidate_fallback_picks_matching_arity_overload():
     assert "Exception" not in sig and "int" not in sig, sig
 
 
+@pytest.mark.parametrize(
+    "transform,expected_injection_ref",
+    [
+        ("wrapper_interface", None),
+        ("parameterize_dependency", "Run(string, ILoggerWrapper)"),
+    ],
+)
+def test_locator_picks_correct_duplicate_invocation_under_line_drift(
+    transform, expected_injection_ref,
+):
+    """Regression: when two same-name invocations exist in one type and the
+    recorded target line drifts to the enclosing method signature, locator must
+    still resolve the intended invocation deterministically (Run, not Audit)."""
+    payload = run_tool(
+        "locator_line_drift_duplicate",
+        transform,
+        14,  # drifted to `Run` signature line (actual call is line 17)
+        "LogInformation",
+        "ILogger",
+        "DriftWorker",
+        "Extension",
+    )
+    assert payload["ok"] is True, payload
+    assert payload["applicable"] is True, payload.get("reason")
+
+    seam = payload["seam"]
+    assert seam["member"] == "LogInformation"
+    assert seam["call_site"].endswith("Site.cs:17"), seam["call_site"]
+
+    if expected_injection_ref is not None:
+        assert seam["injection_ref"] == expected_injection_ref, seam["injection_ref"]
+
+
+def test_locator_accepts_extension_declaring_type_containing_hint():
+    """Regression: target rows often carry `containing_type` as the extension
+    declaring type (e.g. LoggerExtensions), not the call-site enclosing type.
+    Locator must still match the call site and apply."""
+    payload = run_tool(
+        "ilogger",
+        "wrapper_interface",
+        16,
+        "LogInformation",
+        "ILogger",
+        "LoggerExtensions",
+        "Extension",
+    )
+    assert payload["ok"] is True, payload
+    assert payload["applicable"] is True, payload.get("reason")
+    assert payload["seam"]["member"] == "LogInformation"
+    assert payload["seam"]["containing_type"].split(".")[-1] == "Worker"
+
+
+# ======================================================================
+# unbound_receiver reference-coverage fixes (2026-06-15) — regression guards.
+# ======================================================================
+#
+# Two distinct binding-coverage sub-causes were behind the bulk of the
+# `unbound_receiver` rejects on real targets, both fixed by extending the
+# analysis compilation's reference set (NOT by relaxing applicability):
+#   A. the receiver's type is reached through a Microsoft.AspNetCore.App
+#      shared-framework type (e.g. HttpContext) absent from the bundled refs;
+#   B. the receiver's type is declared in a SIBLING project of the same repo,
+#      resolved via the owning project's built bin/ closure.
+
+# (transform, expected injection) for the AspNetCore.App framework-receiver case.
+ASPNETCORE_FRAMEWORK_CASES = [
+    ("wrapper_interface", "ctor"),
+    ("parameterize_dependency", "overload"),
+]
+
+
+@pytest.mark.parametrize(
+    "transform,injection", ASPNETCORE_FRAMEWORK_CASES,
+    ids=[c[0] for c in ASPNETCORE_FRAMEWORK_CASES],
+)
+def test_aspnetcore_framework_receiver_binds(transform, injection):
+    """REGRESSION (sub-cause A): the seam receiver `_ctx.RequestServices` is
+    reached through `HttpContext`, a type in the Microsoft.AspNetCore.App shared
+    framework — NOT in the NETCore.App runtime nor the bundled `refs/`. Before the
+    AspNetCore.App reference tier was added, HttpContext bound to an ErrorType and
+    GetRequiredService<T> could not bind (spurious `unbound_receiver`). With the
+    tier loaded the receiver binds and the seam applies. Mirrors aspnetcore:0020.
+
+    Compile is intentionally NOT asserted here: the rewritten Site.cs references
+    HttpContext, which needs the AspNetCore.App refs the hermetic
+    `compile_rewritten` classlib (bundled `refs/` only) does not carry. Binding +
+    seam correctness is the regression surface; real-repo compilation is covered
+    by the build-verified sweep (unbound_recheck_*.csv)."""
+    payload = run_tool("aspnetcore_framework_receiver", transform, 29,
+                       "GetRequiredService", "IServiceProvider",
+                       "FrameworkReceiverWorker", "Extension")
+    assert payload["ok"] is True, payload
+    assert payload["applicable"] is True, payload.get("reason")
+    seam = payload["seam"]
+    assert seam["kind"] == transform
+    assert seam["interface"].split(".")[-1] == "IServiceProviderWrapper"
+    assert seam["member"] == "GetRequiredService"
+    assert seam["injection"] == injection
+
+
+def test_bin_closure_resolves_cross_assembly_receiver(tmp_path):
+    """REGRESSION (sub-cause B): the seam receiver's type is declared in a SIBLING
+    assembly of the same repo (e.g. OpenRA.Game's HttpClientFactory consumed from
+    OpenRA.Mods.Common, bitwarden's base repository in Core). The owning-dir source
+    compilation cannot see it, so the receiver bound to an ErrorType →
+    `unbound_receiver`. BuildCompilation now augments the reference set with the
+    owning project's built `bin/**/*.dll` closure, so once the project is built the
+    sibling type resolves and the seam applies (the build-verified gate builds the
+    owning project before locating).
+
+    This builds a one-type sibling assembly, drops it in the owning project's bin/,
+    and asserts the tool binds a receiver typed ONLY from that assembly."""
+    if SKIP_COMPILE:
+        pytest.skip("BECK_SKIP_DOTNET_COMPILE=1 (needs dotnet to build the sibling assembly)")
+
+    # 1. Build the sibling assembly that declares the receiver's type.
+    lib = tmp_path / "sibling"
+    lib.mkdir()
+    (lib / "Sibling.cs").write_text(
+        "namespace Sibling;\n"
+        "public sealed class SiblingClient\n"
+        "{\n"
+        "    public string Fetch(string url) => url;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (lib / "Sibling.csproj").write_text(
+        "<Project Sdk=\"Microsoft.NET.Sdk\">\n"
+        "  <PropertyGroup><TargetFramework>net10.0</TargetFramework>"
+        "<OutputType>Library</OutputType></PropertyGroup>\n"
+        "</Project>\n",
+        encoding="utf-8",
+    )
+    proc = subprocess.run(
+        [_DOTNET, "build", str(lib / "Sibling.csproj"), "-v", "quiet", "--nologo",
+         "-c", "Debug", "-o", str(lib / "out")],
+        capture_output=True, text=True, env=_tool_env(),
+    )
+    assert proc.returncode == 0, (proc.stdout + proc.stderr)[-2000:]
+
+    # 2. Owning project whose Site.cs consumes the sibling type; drop the sibling
+    #    DLL into the owning project's bin/ closure.
+    owning = tmp_path / "owning"
+    bin_dir = owning / "bin" / "Debug" / "net10.0"
+    bin_dir.mkdir(parents=True)
+    shutil.copy(lib / "out" / "Sibling.dll", bin_dir / "Sibling.dll")
+    site = owning / "Site.cs"
+    site.write_text(
+        "namespace Demo;\n"
+        "public sealed class Consumer\n"
+        "{\n"
+        "    private readonly Sibling.SiblingClient _client;\n"
+        "    public Consumer(Sibling.SiblingClient client) { _client = client; }\n"
+        "    public string Go() => _client.Fetch(\"x\");\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    # 3. The receiver `_client` is typed SiblingClient, reachable ONLY via the
+    #    bin closure. Without it the call is unbound_receiver.
+    argv = [
+        _DOTNET, str(DLL),
+        "--transform", "wrapper_interface",
+        "--owning-dir", str(owning),
+        "--file", str(site.resolve()),
+        "--line", "6",
+        "--method", "Fetch",
+        "--receiver-type", "SiblingClient",
+        "--containing-type", "Consumer",
+        "--kind", "NonVirtual",
+    ]
+    proc = subprocess.run(argv, capture_output=True, text=True, env=_tool_env())
+    assert proc.stdout.strip(), f"tool produced no stdout; stderr:\n{proc.stderr}"
+    payload = json.loads(proc.stdout)
+    assert payload["applicable"] is True, payload.get("reason")
+    assert payload["seam"]["member"] == "Fetch"
+    assert payload["seam"]["interface"].split(".")[-1] == "ISiblingClientWrapper"
+
+
 # (case, transform, line, method, receiver, containing, kind, expected reason)
 REJECT_CASES = [
     ("reject_struct", "wrapper_interface", 16, "LogInformation", "ILogger",

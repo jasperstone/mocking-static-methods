@@ -2,10 +2,7 @@
 
 Experiment in generating unit tests and mocks for code containing static method calls.
 
-## Documentation
-
-Use [docs/README.md](docs/README.md) as the entry point for curated project
-documentation and process notes.
+Project documentation is now under [docs/README.md](docs/README.md). The repository root keeps only this `README.md`.
 
 ## Experimental design
 
@@ -77,7 +74,7 @@ tools/                   Global, evolving — analyzers, orchestrator helpers
   repo_search/           GitHub Code Search candidate finder
 .github/workflows/       Global CI — coverage-orchestrator.yml runs the matrix
 Mode1Analyzer/           Roslyn analyzer that detects Mode#1 static-call sites
-RESULTS.md               Cross-phase comparison table (the headline scoreboard)
+docs/RESULTS.md          Cross-phase comparison table (the headline scoreboard)
 ```
 
 **Tooling lives outside `phases/` and evolves freely.** Each phase pins the SHAs it ran against in its own `phase.lock.yaml`, so reproducibility is anchored by the lock file, not by frozen tooling copies. This avoids back-porting bug fixes into N phase directories every time we improve an analyzer.

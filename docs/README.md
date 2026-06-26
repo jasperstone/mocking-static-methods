@@ -9,3 +9,8 @@ Repository documentation is organized by purpose:
 
 - [Workspace Audit](process/WORKSPACE_AUDIT.md)
 - [Reports Index](reports/README.md)
+- [Results](RESULTS.md)
+- [Testing Index](TESTING_INDEX.md)
+- [Test Counts](TEST_COUNTS.md)
+- [Test Discovery](TEST_DISCOVERY.md)
+- [Refactoring Gaps Analysis](REFACTORING_GAPS_ANALYSIS.md)

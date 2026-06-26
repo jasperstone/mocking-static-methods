@@ -2,7 +2,7 @@
 
 Experiment in generating unit tests and mocks for code containing static method calls.
 
-Project documentation is now under [`docs/`](docs/README.md). The repository root keeps only this `README.md`.
+Project documentation is now under [docs/README.md](docs/README.md). The repository root keeps only this `README.md`.
 
 ## Experimental design
 

@@ -327,6 +327,15 @@ def main() -> int:
     ap.add_argument("--max-output-tokens", type=int, default=4096)
     ap.add_argument("--timeout-s", type=int, default=180)
     ap.add_argument("--compile-timeout-s", type=int, default=240)
+    ap.add_argument(
+        "--require-baseline-compile",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Require owning project baseline `dotnet build` to pass before any "
+            "generation/refactor work for a target (default: true)."
+        ),
+    )
     ap.add_argument("--run-timeout-s", type=int, default=60)
     ap.add_argument("--refactor-build-timeout-s", type=int, default=240,
                     help="behaviour-preservation `dotnet build` timeout per refactor")
@@ -452,6 +461,113 @@ def main() -> int:
         for row in rows:
             target_id = row["target_id"]
             repo_dir = cloned_root / row["repo"]
+
+            baseline_compile_ok = None
+            baseline_build_ms = None
+            baseline_csproj = None
+            baseline_errors: list[dict] = []
+            baseline_timeout = None
+            baseline_halt = None
+
+            if args.require_baseline_compile and not args.mock_llm:
+                csproj_path = _compile_only.find_owning_csproj(repo_dir, row["file"])
+                if csproj_path is None:
+                    baseline_compile_ok = False
+                    baseline_halt = "baseline_no_owning_csproj"
+                else:
+                    baseline_csproj = str(csproj_path.relative_to(repo_dir))
+                    env = os.environ.copy()
+                    env["DOTNET_NOLOGO"] = "1"
+                    env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
+                    env["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
+                    env["NUGET_PACKAGES"] = _compile_only.NUGET_CACHE
+                    t_build = time.monotonic()
+                    try:
+                        br = subprocess.run(
+                            [
+                                _compile_only.DOTNET,
+                                "build",
+                                str(csproj_path),
+                                "-c",
+                                "Debug",
+                                "-v",
+                                "minimal",
+                                "--nologo",
+                                "/p:TreatWarningsAsErrors=false",
+                                "/p:GenerateDocumentationFile=false",
+                            ],
+                            cwd=repo_dir,
+                            capture_output=True,
+                            text=True,
+                            timeout=args.compile_timeout_s,
+                            env=env,
+                        )
+                        baseline_build_ms = int((time.monotonic() - t_build) * 1000)
+                        baseline_compile_ok = (br.returncode == 0)
+                        if not baseline_compile_ok:
+                            out_text = (br.stdout or "") + (br.stderr or "")
+                            baseline_errors = _compile_only.first_compile_errors(out_text)
+                            baseline_halt = "baseline_compile_failed"
+                    except subprocess.TimeoutExpired:
+                        baseline_build_ms = int((time.monotonic() - t_build) * 1000)
+                        baseline_compile_ok = False
+                        baseline_timeout = "build"
+                        baseline_halt = "baseline_build_timeout"
+
+                if baseline_compile_ok is False:
+                    _record(
+                        out,
+                        target_id,
+                        args,
+                        sys_sha,
+                        tmpl_sha,
+                        repo=row["repo"],
+                        test_path=None,
+                        submitted=False,
+                        halt_reason=baseline_halt,
+                        turns_used=0,
+                        tool_calls={
+                            "read_file": 0,
+                            "list_dir": 0,
+                            "apply_refactor": 0,
+                            "submit_test": 0,
+                            "no_tool": 0,
+                        },
+                        reads_done=0,
+                        submission_attempts_n=0,
+                        final_compile_ok=False,
+                        final_run_ok=False,
+                        submission_iterations=[],
+                        refactor_attempts_n=0,
+                        refactor_attempts=[],
+                        via_seam=None,
+                        via_seam_checks=None,
+                        seam=None,
+                        files_restored=[],
+                        baseline_compile_ok=baseline_compile_ok,
+                        baseline_build_ms=baseline_build_ms,
+                        baseline_csproj=baseline_csproj,
+                        baseline_timeout=baseline_timeout,
+                        baseline_first_compile_errors=baseline_errors[:5],
+                        total_prompt_tokens=0,
+                        total_completion_tokens=0,
+                        total_latency_ms=0,
+                        wall_ms=baseline_build_ms or 0,
+                        model_snapshot=None,
+                        rendered_user_prompt_sha256=None,
+                        final_code_sha256=None,
+                        turns_log=None,
+                        refactors_log=None,
+                        error=baseline_halt,
+                    )
+                    n_fail += 1
+                    print(
+                        f"{target_id:<30} {args.model:<22} "
+                        f"submitted=False compile_ok=False run_ok=False "
+                        f"halt={baseline_halt} baseline={baseline_csproj or 'n/a'} "
+                        f"wall={baseline_build_ms or 0}ms"
+                    )
+                    continue
 
             if user_msg_override is not None:
                 user_msg = user_msg_override
@@ -616,6 +732,11 @@ def main() -> int:
                 via_seam_checks=via_seam_checks,
                 seam=effective_seam,
                 files_restored=restored,
+                baseline_compile_ok=baseline_compile_ok,
+                baseline_build_ms=baseline_build_ms,
+                baseline_csproj=baseline_csproj,
+                baseline_timeout=baseline_timeout,
+                baseline_first_compile_errors=baseline_errors[:5],
                 total_prompt_tokens=loop.total_prompt_tokens,
                 total_completion_tokens=loop.total_completion_tokens,
                 total_latency_ms=loop.total_latency_ms,

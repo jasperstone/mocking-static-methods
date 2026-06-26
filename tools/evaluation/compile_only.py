@@ -183,6 +183,67 @@ def compile_check(
         shutil.rmtree(work, ignore_errors=True)
 
 
+def baseline_compile_check(
+    repo_dir: Path,
+    target_file: str,
+    timeout_s: int = 240,
+) -> CompileResult:
+    """Compile the owning production project for `target_file`.
+
+    This is a preflight gate used by generation/refactor runners to avoid
+    spending model turns on targets whose owning project does not compile in
+    baseline state.
+    """
+    rec = CompileResult(ok=False)
+
+    repo_dir = repo_dir.resolve()
+    csproj_path = find_owning_csproj(repo_dir, target_file)
+    if csproj_path is None:
+        rec.error = f"no owning csproj found under {repo_dir}/{target_file}"
+        return rec
+    rec.prod_csproj = str(csproj_path.relative_to(repo_dir))
+
+    env = os.environ.copy()
+    env["DOTNET_NOLOGO"] = "1"
+    env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
+    env["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
+    env["NUGET_PACKAGES"] = NUGET_CACHE
+
+    t0 = time.monotonic()
+    try:
+        br = subprocess.run(
+            [
+                DOTNET,
+                "build",
+                str(csproj_path),
+                "-c",
+                "Debug",
+                "-v",
+                "minimal",
+                "--nologo",
+                "/p:TreatWarningsAsErrors=false",
+                "/p:GenerateDocumentationFile=false",
+            ],
+            cwd=repo_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        rec.build_ms = int((time.monotonic() - t0) * 1000)
+        rec.error = f"baseline build timeout after {timeout_s}s"
+        return rec
+
+    rec.build_ms = int((time.monotonic() - t0) * 1000)
+    rec.ok = (br.returncode == 0)
+    out_text = (br.stdout or "") + (br.stderr or "")
+    if not rec.ok:
+        rec.errors = first_compile_errors(out_text)
+        rec.stdout_tail = out_text[-2000:]
+    return rec
+
+
 def format_errors_for_model(errors: list[dict], max_errors: int = 6) -> str:
     """Render compile errors as a compact human-readable block for the agent."""
     if not errors:

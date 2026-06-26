@@ -64,7 +64,7 @@ from tools.evaluation.compile_only import (
 )
 
 # Transform names the agent may request. The menu IS the contract.
-TRANSFORMS = ("make_virtual", "wrapper_interface", "parameterize_dependency", "static_field_injection")
+TRANSFORMS = ("make_virtual", "wrapper_interface", "parameterize_dependency", "static_field_injection", "auto_prioritized")
 
 # The pure C# Roslyn rewriter that performs `wrapper_interface` and
 # `parameterize_dependency` (TRANSFORM_CONTRACT §0). Built via
@@ -284,6 +284,72 @@ class RefactorEngine:
 
     # -- dispatch ----------------------------------------------------------
 
+    def _dispatch_single(self, name: str, **args) -> RefactorResult:
+        if name == "make_virtual":
+            return self._make_virtual(**args)
+        if name == "wrapper_interface":
+            return self._wrapper_interface(**args)
+        if name == "parameterize_dependency":
+            return self._parameterize_dependency(**args)
+        return self._static_field_injection(**args)
+
+    def _prioritized_order(self) -> list[str]:
+        """Choose a conservative transform order based on target context.
+
+        Goal: avoid obviously weak first picks while keeping behavior stable.
+        """
+        kind = (self.kind or "").strip().lower()
+        receiver = (self.receiver_type or "").strip().lower()
+
+        # Default historical order.
+        order = ["wrapper_interface", "parameterize_dependency", "make_virtual", "static_field_injection"]
+
+        # NonVirtual instance methods are often best served by virtual seams.
+        if kind == "nonvirtual":
+            return ["make_virtual", "wrapper_interface", "parameterize_dependency", "static_field_injection"]
+
+        # Service-locator style extension calls often parameterize better than
+        # wrapping IServiceProvider first.
+        if "iserviceprovider" in receiver:
+            return ["parameterize_dependency", "wrapper_interface", "make_virtual", "static_field_injection"]
+
+        return order
+
+    def _auto_prioritized(self, **args) -> RefactorResult:
+        attempts: list[str] = []
+        for t in self._prioritized_order():
+            res = self._dispatch_single(t, **args)
+            attempts.append(f"{t}:{res.reason or ('applied' if res.applied else 'not_applicable')}")
+
+            if not res.applied:
+                continue
+
+            if self.verify_build:
+                ok, errors, _tail = self._build_owning_project()
+                res.build_ok = ok
+                if not ok:
+                    self.restore_all()
+                    res.applied = False
+                    res.reverted = True
+                    res.errors = errors
+                    res.reason = "refactor_rejected: owning project no longer builds after the edit"
+                    attempts.append(f"{t}:build_rejected")
+                    continue
+
+            # Normalize outward transform identity while preserving seam kind.
+            res.transform = "auto_prioritized"
+            if res.reason:
+                res.reason = f"auto_prioritized_selected_{t}: {res.reason}"
+            else:
+                res.reason = f"auto_prioritized_selected_{t}"
+            return res
+
+        return RefactorResult(
+            transform="auto_prioritized",
+            applied=False,
+            reason="auto_prioritized not applicable; attempts=" + " | ".join(attempts),
+        )
+
     def apply(self, transform_name: str, **args) -> RefactorResult:
         """Dispatch a transform from the fixed menu. Unknown transforms are
         rejected. On success, runs the behaviour-preservation build (unless
@@ -303,14 +369,10 @@ class RefactorEngine:
                 reason=f"no owning .csproj found for target file '{self.target_file}'.",
             )
 
-        if name == "make_virtual":
-            res = self._make_virtual(**args)
-        elif name == "wrapper_interface":
-            res = self._wrapper_interface(**args)
-        elif name == "parameterize_dependency":
-            res = self._parameterize_dependency(**args)
-        else:  # static_field_injection
-            res = self._static_field_injection(**args)
+        if name == "auto_prioritized":
+            return self._auto_prioritized(**args)
+
+        res = self._dispatch_single(name, **args)
 
         # Behaviour-preservation: if we changed code, the owning project must
         # still build. Otherwise auto-revert and report rejection.

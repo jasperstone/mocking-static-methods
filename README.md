@@ -2,6 +2,11 @@
 
 Experiment in generating unit tests and mocks for code containing static method calls.
 
+## Documentation
+
+Use [docs/README.md](docs/README.md) as the entry point for curated project
+documentation and process notes.
+
 ## Experimental design
 
 The experiment progresses in phases. Each phase fixes the input set and varies one thing — the test-generation strategy — so we can attribute coverage gains and failure modes to that strategy.

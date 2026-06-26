@@ -61,7 +61,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.generation.apply_refactor import RefactorEngine  # noqa: E402
 from tools.evaluation.compile_only import DOTNET, NUGET_CACHE  # noqa: E402
 
-TRANSFORM_CHOICES = ("wrapper_interface", "parameterize_dependency", "make_virtual", "static_field_injection", "all")
+TRANSFORM_CHOICES = ("wrapper_interface", "parameterize_dependency", "make_virtual", "static_field_injection", "auto_prioritized", "all")
 _REAL_TRANSFORMS = ("wrapper_interface", "parameterize_dependency", "make_virtual", "static_field_injection")
 
 
@@ -113,6 +113,8 @@ def reason_token(res, applicable: bool) -> str:
         return "prod_write_guard"
     if low.startswith("unknown transform"):
         return "unknown_transform"
+        if low.startswith("auto_prioritized_selected_"):
+            return low.split(":", 1)[0]
     # Roslyn §5 tokens / engine tokens: first whitespace/colon-delimited token.
     first = re.split(r"[\s:]+", r, maxsplit=1)[0].strip(".:'\"") if r else ""
     return first or "unknown"
@@ -224,7 +226,9 @@ def print_aggregate(results: list[dict], verify_build: bool) -> None:
     print("APPLICABILITY SWEEP — AGGREGATE")
     print("=" * 78)
 
-    for transform in _REAL_TRANSFORMS:
+    for transform in TRANSFORM_CHOICES:
+        if transform == "all":
+            continue
         rows = by_transform.get(transform)
         if not rows:
             continue

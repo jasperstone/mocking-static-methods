@@ -42,6 +42,7 @@ from tools.generation.adapters import foundry  # noqa: E402
 from tools.generation.prompt_render import render  # noqa: E402
 from tools.generation.source_window import read_window  # noqa: E402
 from tools.generation.strategies import agentic_loop  # noqa: E402
+from tools.evaluation import compile_only as _compile_only  # noqa: E402
 
 
 def slug(model_id: str) -> str:
@@ -87,6 +88,17 @@ def main() -> int:
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-output-tokens", type=int, default=4096)
     ap.add_argument("--timeout-s", type=int, default=180)
+    ap.add_argument("--compile-timeout-s", type=int, default=240,
+                    help="baseline project build timeout in seconds")
+    ap.add_argument(
+        "--require-baseline-compile",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Require owning project baseline `dotnet build` to pass before test "
+            "generation starts (default: true)."
+        ),
+    )
     ap.add_argument("--limit", type=int, default=None,
                     help="cap on number of targets to process")
     ap.add_argument("--target-ids", default=None,
@@ -142,6 +154,65 @@ def main() -> int:
         for row in rows:
             target_id = row["target_id"]
             repo_dir = cloned_root / row["repo"]
+
+            baseline_compile_ok = None
+            baseline_build_ms = None
+            baseline_csproj = None
+            baseline_errors: list[dict] = []
+            baseline_timeout = None
+
+            if args.require_baseline_compile:
+                baseline = _compile_only.baseline_compile_check(
+                    repo_dir,
+                    row["file"],
+                    timeout_s=args.compile_timeout_s,
+                )
+                baseline_compile_ok = baseline.ok
+                baseline_build_ms = baseline.build_ms
+                baseline_csproj = baseline.prod_csproj
+                baseline_errors = baseline.errors[:5]
+                if baseline.error and "timeout" in baseline.error.lower():
+                    baseline_timeout = "build"
+                if not baseline.ok:
+                    halt = "baseline_compile_failed"
+                    if baseline.error and "timeout" in baseline.error.lower():
+                        halt = "baseline_build_timeout"
+                    elif baseline.error and "no owning csproj" in baseline.error.lower():
+                        halt = "baseline_no_owning_csproj"
+                    _record(
+                        out,
+                        target_id,
+                        args,
+                        sys_sha,
+                        tmpl_sha,
+                        test_path=None,
+                        submitted=False,
+                        halt_reason=halt,
+                        turns_used=0,
+                        tool_calls={"read_file": 0, "list_dir": 0, "submit_test": 0, "no_tool": 0},
+                        reads_done=0,
+                        baseline_compile_ok=baseline_compile_ok,
+                        baseline_build_ms=baseline_build_ms,
+                        baseline_csproj=baseline_csproj,
+                        baseline_timeout=baseline_timeout,
+                        baseline_first_compile_errors=baseline_errors,
+                        total_prompt_tokens=0,
+                        total_completion_tokens=0,
+                        total_latency_ms=0,
+                        wall_ms=baseline_build_ms or 0,
+                        model_snapshot=None,
+                        rendered_user_prompt_sha256=None,
+                        final_code_sha256=None,
+                        turns_log=None,
+                        error=halt,
+                    )
+                    n_fail += 1
+                    print(
+                        f"{target_id:<30} {args.model:<25} "
+                        f"submitted=False halt={halt} "
+                        f"baseline={baseline_csproj or 'n/a'} wall={baseline_build_ms or 0}ms"
+                    )
+                    continue
 
             try:
                 values = build_user_values(row, repo_dir)
@@ -210,6 +281,11 @@ def main() -> int:
                 turns_used=len(loop.turns),
                 tool_calls=tool_calls,
                 reads_done=loop.reads_done,
+                baseline_compile_ok=baseline_compile_ok,
+                baseline_build_ms=baseline_build_ms,
+                baseline_csproj=baseline_csproj,
+                baseline_timeout=baseline_timeout,
+                baseline_first_compile_errors=baseline_errors,
                 total_prompt_tokens=loop.total_prompt_tokens,
                 total_completion_tokens=loop.total_completion_tokens,
                 total_latency_ms=loop.total_latency_ms,

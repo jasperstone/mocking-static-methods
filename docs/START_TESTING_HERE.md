@@ -38,7 +38,7 @@ python3 tools/local_test_harness.py
 
 **1. Read Quick Start** (5 min)
 ```bash
-cat QUICK_START_TESTING.md
+cat docs/QUICK_START_TESTING.md
 ```
 
 **2. Run Phase A Tests** (15 min)
@@ -239,7 +239,7 @@ bash tools/test_local.sh eShop wrapper_interface 5 2>&1
 ### Low applicability
 ```bash
 # Might be expected - check against gap analysis
-# Review REFACTORING_GAPS_ANALYSIS.md
+# Review docs/REFACTORING_GAPS_ANALYSIS.md
 cat test_results_local/results_*.csv | cut -d',' -f6 | sort | uniq -c | sort -rn
 ```
 

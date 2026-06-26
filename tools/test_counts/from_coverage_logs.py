@@ -356,7 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         "--csv", default="test_counts.csv", help="Output CSV path (default: test_counts.csv)",
     )
     p.add_argument(
-        "--md", default="TEST_COUNTS.md", help="Output markdown path (default: TEST_COUNTS.md)",
+        "--md", default="docs/TEST_COUNTS.md", help="Output markdown path (default: docs/TEST_COUNTS.md)",
     )
     args = p.parse_args(argv)
 
@@ -376,6 +376,7 @@ def main(argv: list[str] | None = None) -> int:
     md_path = Path(args.md)
     write_csv(rows, csv_path)
     md = render_markdown(merged, run_ids)
+    md_path.parent.mkdir(parents=True, exist_ok=True)
     md_path.write_text(md)
 
     print(md)

@@ -276,7 +276,7 @@ For questions or issues:
 
 ## 🚀 Next Steps
 
-1. **Right now**: Read QUICK_START_TESTING.md
+1. **Right now**: Read docs/QUICK_START_TESTING.md
 2. **Next 15 min**: Run first test
 3. **Next 30 min**: Analyze results
 4. **Next 1 hour**: Decide on Phase B

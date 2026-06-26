@@ -42,7 +42,7 @@ Outputs:
 - `test_counts.csv` — one row per `(repo, project, framework)` with columns
   `repo, project, dll, framework, total, passed, failed, skipped, status,
   source_run_id, source_job_id`
-- `TEST_COUNTS.md` — per-repo aggregate plus top/bottom-10 tables and a
+- `docs/TEST_COUNTS.md` — per-repo aggregate plus top/bottom-10 tables and a
   "missing data" section listing repos whose log shape didn't yield counts.
 
 ## Merge semantics

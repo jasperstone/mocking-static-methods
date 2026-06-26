@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Aggregate test-discovery CSVs into TEST_DISCOVERY.md + summary CSV.
+"""Aggregate test-discovery CSVs into docs/TEST_DISCOVERY.md + summary CSV.
 
 Usage:
     # After: gh run download <run-id> -p 'test-discovery-*' -D test_discovery_artifacts
-    python3 tools/test_discovery/aggregate.py [artifacts_dir] [--out-md TEST_DISCOVERY.md] [--out-csv test_discovery_summary.csv]
+    python3 tools/test_discovery/aggregate.py [artifacts_dir] [--out-md docs/TEST_DISCOVERY.md] [--out-csv test_discovery_summary.csv]
 
 The artifacts dir is expected to contain one folder per uploaded artifact
 (test-discovery-<repo>/test-discovery-<repo>.csv), which is what
@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         default="test_discovery_artifacts",
         help="Directory containing test-discovery-*.csv (recursively). Default: test_discovery_artifacts",
     )
-    parser.add_argument("--out-md", default="TEST_DISCOVERY.md")
+    parser.add_argument("--out-md", default="docs/TEST_DISCOVERY.md")
     parser.add_argument("--out-csv", default="test_discovery_summary.csv")
     args = parser.parse_args(argv)
 
@@ -208,8 +208,13 @@ def main(argv: list[str] | None = None) -> int:
     rows = load_rows(csvs)
     summaries = per_repo_summary(rows)
 
-    write_summary_csv(summaries, Path(args.out_csv))
-    write_markdown(rows, summaries, Path(args.out_md))
+    out_csv = Path(args.out_csv)
+    out_md = Path(args.out_md)
+    out_csv.parent.mkdir(parents=True, exist_ok=True)
+    out_md.parent.mkdir(parents=True, exist_ok=True)
+
+    write_summary_csv(summaries, out_csv)
+    write_markdown(rows, summaries, out_md)
     print(f"Wrote {args.out_md} and {args.out_csv}", file=sys.stderr)
     return 0
 

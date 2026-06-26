@@ -17,7 +17,7 @@ included tests just not exercising production code?"*
    ```bash
    gh run download <run-id> -p 'test-discovery-*' -D test_discovery_artifacts
    python3 tools/test_discovery/aggregate.py
-   # → TEST_DISCOVERY.md + test_discovery_summary.csv
+   # → docs/TEST_DISCOVERY.md + test_discovery_summary.csv
    ```
 
 ## What's not in here

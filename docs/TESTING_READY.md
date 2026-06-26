@@ -80,7 +80,7 @@ Testing Execution:          ⏳  0% (Ready to launch)
 
 ### Step 1: Read Quick Start (5 min)
 ```bash
-cat QUICK_START_TESTING.md
+cat docs/QUICK_START_TESTING.md
 ```
 
 ### Step 2: Run Phase A Verification (15 min)
@@ -215,7 +215,7 @@ For each compiled site:
 
 ### Unexpected Rejection Reasons
 1. Check if new rejection reason or known?
-2. Review gap analysis (REFACTORING_GAPS_ANALYSIS.md)
+2. Review gap analysis (docs/REFACTORING_GAPS_ANALYSIS.md)
 3. Determine if expected or regression
 4. Document for Phase C improvements
 
@@ -290,7 +290,7 @@ Traditional way: Run tool once, hope it works, use expensive models to test.
 
 **Status**: Testing infrastructure complete and ready to launch ✅
 
-**Next action**: Read QUICK_START_TESTING.md and run Phase A tests
+**Next action**: Read docs/QUICK_START_TESTING.md and run Phase A tests
 
 **Expected time to insights**: 30 minutes
 
@@ -304,7 +304,7 @@ Traditional way: Run tool once, hope it works, use expensive models to test.
 
 ```bash
 cd /home/jastone/src/mocking-static-methods
-cat QUICK_START_TESTING.md
+cat docs/QUICK_START_TESTING.md
 bash tools/test_local.sh eShop wrapper_interface 25
 ```
 

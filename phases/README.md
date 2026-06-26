@@ -65,7 +65,7 @@ cp .github/workflow-templates/phase.yml .github/workflows/phaseN-name.yml
 gh workflow run .github/workflows/phaseN-name.yml
 ```
 
-After the run completes, fill in `phase.lock.yaml` (especially `model_snapshots_observed` and `ci_runs.generator_run_ids`), write `REPORT.md` + `COSTS.md` + `REPLICATION.md`, append a row to [`../RESULTS.md`](../RESULTS.md), and tag `phase-N-name-final`.
+After the run completes, fill in `phase.lock.yaml` (especially `model_snapshots_observed` and `ci_runs.generator_run_ids`), write `REPORT.md` + `COSTS.md` + `REPLICATION.md`, append a row to [`../docs/RESULTS.md`](../docs/RESULTS.md), and tag `phase-N-name-final`.
 
 ## Reproducibility envelope
 

@@ -15,7 +15,7 @@ Then:
 5. **Dispatch.** `gh workflow run .github/workflows/phaseN-name.yml`. Captures 5 models × 5 runs = 25 generation jobs, then one coverage CI run on the union of generated tests.
 6. **Fill `phase.lock.yaml`.** Every field. Especially `model_snapshots_observed` from the JSONL rows.
 7. **Write `REPORT.md`.** Phase narrative — what was tried, what worked, what didn't, per-model headlines.
-8. **Append to root `RESULTS.md`.** New row per model in the cross-phase table.
+8. **Append to `docs/RESULTS.md`.** New row per model in the cross-phase table.
 9. **Tag** `phase-N-name-final` and never edit this directory again. Bug fixes go in the next phase.
 
 ## Subdirectories
@@ -39,4 +39,4 @@ Then:
 - **Tooling** (analyzers, orchestrator workflow, target builder, adapters) lives **outside** `phases/` in `tools/` and `.github/`. It evolves freely; phase reproducibility is anchored by the SHAs recorded in `phase.lock.yaml`, not by frozen copies of the tooling.
 - **Inputs** (which Mode#1 sites we attempt) live in versioned `targets/v{N}/`. Phases pin to a specific version.
 - **Outputs** (tests, errors, coverage, per-model JSONL) live in this phase directory.
-- **The comparison table** lives once at the repo root in [`RESULTS.md`](../../RESULTS.md).
+- **The comparison table** lives once in [`docs/RESULTS.md`](../../docs/RESULTS.md).

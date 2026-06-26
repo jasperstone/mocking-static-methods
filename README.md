@@ -2,6 +2,18 @@
 
 Experiment in generating unit tests and mocks for code containing static method calls.
 
+## Documentation guide
+
+Start here if you want the shortest path through the repository docs:
+
+1. [START_TESTING_HERE.md](START_TESTING_HERE.md) for the practical testing entry point.
+2. [REFACTORING_PATTERNS_FOR_TESTABILITY.md](REFACTORING_PATTERNS_FOR_TESTABILITY.md) for the seam patterns the tool and models are expected to use.
+3. [REFACTORING_GAPS_ANALYSIS.md](REFACTORING_GAPS_ANALYSIS.md) for the strategic coverage map: what the current transforms can and cannot reach, and why.
+4. [BLOCKED_PATTERNS_AND_OPPORTUNITIES.md](BLOCKED_PATTERNS_AND_OPPORTUNITIES.md) for current blocker counts, implemented quick wins, and near-term opportunities validated against local/autopilot runs.
+5. [VISUAL_ENHANCEMENT_GUIDE.md](VISUAL_ENHANCEMENT_GUIDE.md) if you want the visual material and figure guidance.
+
+The two refactoring-analysis docs are intentionally separate: the gaps analysis is the durable capability map, while the blocked-patterns doc is the operational status page for what is blocked now, what shipped, and what is still worth doing.
+
 ## Experimental design
 
 The experiment progresses in phases. Each phase fixes the input set and varies one thing — the test-generation strategy — so we can attribute coverage gains and failure modes to that strategy.

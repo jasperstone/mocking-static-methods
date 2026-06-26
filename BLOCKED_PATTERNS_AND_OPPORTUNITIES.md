@@ -1,8 +1,10 @@
-# Blocked Patterns & Pre-Model Improvement Opportunities
+# Blocked Patterns & Near-Term Improvement Opportunities
 
 **Date**: 2026-06-22  
 **Based On**: Autopilot Phase A-D results + REFACTORING_GAPS_ANALYSIS.md + tool code inspection  
 **Question**: What static method calls won't our tool attempt now? What can we improve before models?
+
+This document is the operational companion to [REFACTORING_GAPS_ANALYSIS.md](REFACTORING_GAPS_ANALYSIS.md). Keep the companion doc for the durable capability map and coverage math; use this file for current blocker counts, quick wins already shipped, and small next steps that are worth doing only if the expected gain justifies the cost.
 
 ---
 
@@ -25,7 +27,7 @@ From our local testing (54 Phase A targets, 23 Phase B targets, 32 Phase D targe
 
 ---
 
-## 🔒 What WON'T Be Attempted (Hard Blocks)
+## 🔒 What WON'T Be Attempted (Operational View)
 
 ### 1. Framework/External Types (No Source)
 
@@ -255,6 +257,8 @@ services.TryAddScoped(sp =>
 
 **Implements**: Try better-fit transform first instead of default order
 
+**Priority**: Optional only. This is worth doing if the small expected gain is still useful after constructor-injection-first opportunities are exhausted.
+
 **Current Order**:
 1. wrapper_interface
 2. parameterize_dependency
@@ -388,31 +392,8 @@ public void MyMethod(IServiceWrapper service)
 
 ---
 
-## 📋 Summary: Blocked Patterns
+## 📋 Summary
 
-**Static method calls we WON'T attempt:**
+This file answers three operational questions: which blockers are showing up in current runs, which near-term improvements already shipped, and which remaining opportunities are small enough to justify before model-driven work. For the broader taxonomy, long-horizon coverage discussion, and capability framing, defer to [REFACTORING_GAPS_ANALYSIS.md](REFACTORING_GAPS_ANALYSIS.md).
 
-1. ✅ **Framework types** (HttpClient, IServiceProvider) → Handled by wrapper utility pattern
-2. ❌ **Local variables** (assigned mid-body) → Can't inject into constructor; no lexical scope
-3. ❌ **Lambda parameters** → Out of scope for delegator method
-4. ❌ **Unbound receivers** (cross-assembly binding fails) → Semantic analysis blocker
-5. ❌ **Static method in STATIC class** → Truly no instance ever (language constraint)
-6. ✅ **Static method in INSTANCE class** → FIXED with Win 1! (static field + setter injection)
-7. ❌ **Dynamic receivers** → Can't bind statically
-8. ❌ **Sealed/abstract/interface types** → Language constraints
-
-**Key Wins Deployed**:
-- ✅ Win 1 (Static field injection): Live, 3/100 applicable in real data
-- ⏳ Win 2 (Transform prioritization): Identified, low-effort, optional
-
-**Estimated Unrecoverable by Local Tool**: ~35-40% of Mode #1 sites (true static classes, lambdas, unbound, language constraints)
-
-**Recoverable by Models**: ~15-25% (context-aware decision making, pattern recognition, test-side code generation)
-
-**Not Worth Pursuing**: Risky advanced patterns (local flow analysis, dynamic binding)
-
-**Real Coverage Projection**: 21.1% → 25-26% (with Win 1 + phase improvements)
-
----
-
-**Bottom Line**: Tool works well within its constraints (50% applicability Phase A, 75% compilation Phase B, 100% validation Phase D). All hard blockers are understood and mostly un-fixable locally. Ready for model experiment.
+**Bottom Line**: Tool works well within its constraints (50% applicability Phase A, 75% compilation Phase B, 100% validation Phase D). The remaining local backlog is intentionally small and optional; the default preference remains constructor injection or explicit dependency parameters when those seams are available.

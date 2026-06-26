@@ -1,5 +1,7 @@
 # Static Method Refactoring Coverage Gaps Analysis
 
+This document is the strategic coverage map for the current transform set. Use it to understand which classes of Mode #1 sites are structurally reachable, which remain out of reach, and which optional backlog items might justify more investment. For current blocker counts, shipped quick wins, and autopilot-derived evidence, see [BLOCKED_PATTERNS_AND_OPPORTUNITIES.md](BLOCKED_PATTERNS_AND_OPPORTUNITIES.md).
+
 ## Executive Summary
 
 **Current Coverage**: 1,087 / 5,154 production Mode #1 sites = **21.1%** baseline
@@ -204,12 +206,14 @@ Assuming test set proportions hold across 5,154 production sites:
 
 ## Recommended Fixes (Ranked by Impact)
 
+Treat this as an optional, cost-justified backlog rather than a required roadmap. Prefer constructor injection or explicit dependency parameters when feasible; service-locator-style wrappers should stay the exception, not the default.
+
 ### High Impact (10-15% each)
 
 **1. Framework Type Handler**
 - Detect `System.Net.Http.HttpClient`, `IServiceProvider`, etc.
-- Don't try wrapper_interface (will fail)
-- Skip to parameterize or custom patterns
+- Don't try `wrapper_interface` when the type is structurally out of reach
+- Prefer constructor injection / explicit dependency parameters when feasible; use custom wrappers only when the dependency cannot be exposed cleanly
 
 **2. Enhanced Parameterize for Local Variables**
 - Current: Fails on locals (receiver_not_ctor_reachable)

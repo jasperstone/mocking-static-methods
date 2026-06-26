@@ -61,8 +61,8 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.generation.apply_refactor import RefactorEngine  # noqa: E402
 from tools.evaluation.compile_only import DOTNET, NUGET_CACHE  # noqa: E402
 
-TRANSFORM_CHOICES = ("wrapper_interface", "parameterize_dependency", "make_virtual", "all")
-_REAL_TRANSFORMS = ("wrapper_interface", "parameterize_dependency", "make_virtual")
+TRANSFORM_CHOICES = ("wrapper_interface", "parameterize_dependency", "make_virtual", "static_field_injection", "all")
+_REAL_TRANSFORMS = ("wrapper_interface", "parameterize_dependency", "make_virtual", "static_field_injection")
 
 
 # ---------------------------------------------------------------------------

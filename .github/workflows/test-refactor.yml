@@ -1,0 +1,157 @@
+name: Test Refactoring Tool
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'RoslynRefactorTool/**'
+      - '.github/workflows/test-refactor.yml'
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:  # Allow manual trigger
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-refactor-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # Need full history to access cloned_repos
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore dependencies
+      working-directory: ./RoslynRefactorTool
+      run: dotnet restore
+
+    - name: Build tool
+      working-directory: ./RoslynRefactorTool
+      run: dotnet build --configuration Release --no-restore
+      env:
+        DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+    - name: Verify build produces DLL
+      run: |
+        if [ ! -f RoslynRefactorTool/bin/Release/net10.0/RoslynRefactorTool.dll ] && [ ! -f RoslynRefactorTool/bin/Release/RoslynRefactorTool.dll ]; then
+          echo "ERROR: Tool DLL not found"
+          exit 1
+        fi
+        echo "✓ Tool built successfully"
+
+    - name: Build smoke test transform
+      run: bash tools/test_local.sh eShop wrapper_interface 10 noverify
+      continue-on-error: true
+
+  transform-tests:
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: eshop-wrapper-interface
+            repo: eShop
+            transform: wrapper_interface
+            limit: 25
+          - label: eshop-parameterize-dependency
+            repo: eShop
+            transform: parameterize_dependency
+            limit: 25
+          - label: aspnetcore-make-virtual
+            repo: aspnetcore
+            transform: make_virtual
+            limit: 25
+          - label: openra-wrapper-interface
+            repo: OpenRA
+            transform: wrapper_interface
+            limit: 15
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore dependencies
+      working-directory: ./RoslynRefactorTool
+      run: dotnet restore
+
+    - name: Build tool
+      working-directory: ./RoslynRefactorTool
+      run: dotnet build --configuration Release --no-restore
+      env:
+        DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+    - name: Run matrix transform test
+      run: |
+        bash tools/test_local.sh "${{ matrix.repo }}" "${{ matrix.transform }}" "${{ matrix.limit }}" noverify
+      continue-on-error: true
+
+    - name: Upload matrix test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.label }}-${{ github.run_number }}
+        path: test_results_local/
+        retention-days: 30
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ github.run_number }}
+        path: test_results_local/
+        retention-days: 30
+
+    - name: Print test summary
+      if: always()
+      run: |
+        if [ -d test_results_local ]; then
+          echo "=== Test Results ==="
+          ls -lh test_results_local/
+          tail -20 test_results_local/*.csv 2>/dev/null || true
+        fi
+
+  code-quality:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore dependencies
+      working-directory: ./RoslynRefactorTool
+      run: dotnet restore
+
+    - name: Check for errors/warnings
+      working-directory: ./RoslynRefactorTool
+      run: |
+        dotnet build --configuration Release --no-restore -p:TreatWarningsAsErrors=true
+        
+    - name: Code analysis
+      working-directory: ./RoslynRefactorTool
+      run: |
+        echo "=== File Statistics ==="
+        wc -l *.cs | sort -n
+        echo ""
+        echo "=== Compilation Check ==="
+        dotnet build --configuration Release --no-restore

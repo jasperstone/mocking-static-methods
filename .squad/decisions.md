@@ -812,3 +812,57 @@ Contract complete and prescriptive. Watney builds the tool + wires the subproces
 **Safety/cleanliness:** zero Azure/Foundry spend; no workflow dispatched. All five touched repos clean after `restore_all()` (jellyfin/semantic-kernel/duplicati fully clean; abp/server show only pre-existing unrelated artifacts; none of the refactored files leaked). Comment-only change: `apply_refactor.py` module docstring corrected the stale `wrapper_interface`/`parameterize_dependency` "STUB" labels to IMPLEMENTED (delegate to `RoslynRefactorTool` via `_invoke_roslyn_tool`). `pytest tools/generation/tests/ -q` → 36 passed.
 
 **Decision: end-to-end loop validated against real targets — YES.** The full phase-4 chain drives real Roslyn seam transforms on genuine targets, legit/gamed via_seam discrimination holds on real seams, the working tree stays pristine. Caveat: in MOCK mode the in-loop compile+run and behaviour-preservation build are stubbed/skipped — those signals come live only under the real Foundry run (build_ok already independently confirmed True for these targets). Cleared to proceed to the funded run.
+
+### 2026-06-16: site_not_found locator hardening retained despite zero gain in targeted recheck
+
+**By:** Watney (Build/Infra), requested by Jasper.
+
+**What:** Hardened `SeamCore.Locate(...)` candidate resolution for duplicate-name + line-drift scenarios using deterministic scoring (line proximity, enclosing context, containing-type hint, receiver-kind/type hints) with hard compatibility gates and ambiguity-safe tie reject.
+
+**Validation:** `dotnet build RoslynRefactorTool/RoslynRefactorTool.csproj -c Release` succeeded; `pytest tools/generation/tests/test_roslyn_tool.py -q` passed (38).
+
+**Observed outcome on targeted deterministic recheck:**
+- `wrapper_interface` site_not_found set (96 rows): applicable `0 -> 0`; after reasons split to `site_not_found=50`, `baseline_build_failed=46`.
+- `parameterize_dependency` site_not_found set (98 rows): applicable `0 -> 0`; after reasons split to `site_not_found=52`, `baseline_build_failed=46`.
+
+**Decision:** Keep the locator hardening as a correctness/ambiguity-safety improvement; next gains require separate work on true unresolved-site rows and baseline build exclusions.
+
+### 2026-06-17: verify-build now warms restore first and classifies restore failures explicitly
+
+**By:** Watney (Build/Infra), requested by Jasper.
+
+**What:** `tools/generation/apply_refactor.py` now runs one-time `dotnet restore <owning.csproj>` before `dotnet build` in verify-build flow using the same sandbox env knobs and timeout class.
+
+**Failure classification:** restore timeout/exec/non-zero now returns `ok=False` with `errors[0].code = RESTORE_FAIL` and parsed diagnostics when available. Existing revert semantics are unchanged (`reason=refactor_rejected` on verify-build failure).
+
+**Validation:**
+- `pytest -q tools/generation/tests/test_roslyn_tool.py` -> 38 passed.
+- `pytest -q tools/generation/tests/test_refactor_smoke.py -k "refactor_smoke or wrapper_interface_via_seam_legit"` -> 11 passed.
+
+**Decision:** Treat restore failures as first-class triage signals (`RESTORE_FAIL`) while preserving behavior-preservation gating and auto-revert guarantees.
+
+### 2026-06-17: serialize verify-build sweep families on shared cloned_repos roots
+
+**By:** Beck (Test/Coverage), requested by Jasper.
+
+**What:** Establish run-order convention for verify-build sweeps: run one sweep family at a time per shared `cloned_repos` root (wrapper targeted/full, parameterize targeted/full), and wait for CSV output before starting another sweep family.
+
+**Why:** Concurrent sweep processes against the same repo tree create cross-process contention and ambiguous run ownership/progress.
+
+**Decision:** Parallelize within one process (`--jobs N`), not by launching multiple concurrent sweep processes on the same shared repos root.
+
+### 2026-06-17: baselinefix recheck artifacts refreshed with deterministic counts unchanged
+
+**By:** Beck (Test/Coverage), requested by Jasper.
+
+**Artifacts refreshed:**
+- `tools/generation/results/baselinefix_recheck_wrapper.csv` (113 rows)
+- `tools/generation/results/baselinefix_recheck_parameterize.csv` (108 rows)
+
+**Reference full snapshots (unchanged):**
+- `build_verified_wrapper.csv`: applicable true `53`, build_ok true `41`.
+- `build_verified_parameterize.csv`: applicable true `75`, build_ok true `44`.
+
+**Reason-token deltas (before -> after):** unchanged for both transforms; no RESTORE_FAIL markers observed in this pass.
+
+**Decision:** Accept the refreshed baselinefix recheck artifacts as canonical for this batch; deterministic schema/distribution remained stable.

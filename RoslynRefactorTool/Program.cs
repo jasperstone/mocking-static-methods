@@ -47,7 +47,7 @@ internal static class Program
             EmitError("missing required argument(s): --transform, --owning-dir, --file, --method");
             return 1;
         }
-        if (transform is not ("wrapper_interface" or "parameterize_dependency" or "make_virtual"))
+        if (transform is not ("wrapper_interface" or "parameterize_dependency" or "make_virtual" or "static_field_injection"))
         {
             EmitError($"unsupported transform '{transform}'");
             return 1;
@@ -95,6 +95,9 @@ internal static class Program
             line,
             method,
             transform,
+            Get(a, "receiver-type"),
+            Get(a, "containing-type"),
+            Get(a, "kind"),
             Get(a, "interface-name"),
             Get(a, "wrapper-name"),
             Get(a, "param-name"),
@@ -108,7 +111,9 @@ internal static class Program
 
         RewriteResult result = transform == "wrapper_interface"
             ? WrapperInterfaceRewriter.Apply(ctx)
-            : ParameterizeDependencyRewriter.Apply(ctx);
+            : transform == "parameterize_dependency"
+            ? ParameterizeDependencyRewriter.Apply(ctx)
+            : StaticFieldInjectionRewriter.Apply(ctx);
 
         if (!result.Applicable)
         {

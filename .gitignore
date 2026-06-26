@@ -453,3 +453,6 @@ tools/generation/ping_results.json
 
 # Dissertation context bundle (regenerable via tools/bundle_dissertation_context.py)
 dissertation_bundle/
+
+test_results_local/
+tools/generation/results/*.csv

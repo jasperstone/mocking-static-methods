@@ -166,7 +166,7 @@ internal static class MakeVirtualRewriter
         {
             if (SeamCore.InvokedName(inv) != method) continue;
             var startLine = inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-            if (startLine == line || NameLine(inv) == line) { hit = inv; break; }
+            if (startLine == line || SeamCore.NameLine(inv) == line) { hit = inv; break; }
         }
         if (hit is null)
         {
@@ -213,18 +213,5 @@ internal static class MakeVirtualRewriter
         return count == 1 ? (found, comp.GetSemanticModel(foundTree!)) : (null, null);
     }
 
-    // Line of the invoked member's simple-name token (mirrors SeamCore.NameLine,
-    // which is private). Used so multi-line invocations match the CSV line.
-    private static int NameLine(InvocationExpressionSyntax inv)
-    {
-        SyntaxToken tok = inv.Expression switch
-        {
-            MemberAccessExpressionSyntax ma => ma.Name.Identifier,
-            MemberBindingExpressionSyntax mb => mb.Name.Identifier,
-            GenericNameSyntax gn => gn.Identifier,
-            IdentifierNameSyntax id => id.Identifier,
-            _ => inv.GetFirstToken(),
-        };
-        return tok.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-    }
+
 }

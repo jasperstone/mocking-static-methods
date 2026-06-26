@@ -43,3 +43,18 @@ Build/infra agent. `.devcontainer/` exists. Each repo in `cloned_repos/` has its
 - **2026-06-11** — Phase-4 `apply_refactor` tool + strategy + runner built (`make_virtual` end-to-end; other two stubbed at this date). bundler self-inclusion bug fixed; dissertation context regenerated (50 files / 232,483 bytes). (archive)
 - **2026-06-12** — `RoslynRefactorTool` built: `wrapper_interface` + `parameterize_dependency` as a fully-general pure Roslyn rewriter (all 5 §2/§3 cases compile; §5 reject tokens verified). ISP `unbound_receiver` false-negative fixed (implicit-usings). Deterministic applicability sweep over all 300 real targets (parameterize 190/300, wrapper 120/300 pre-hardening). (archive)
 - **2026-06-12** — Analyzer-hardening of generated/injected edits → jellyfin:0006 builds clean in strict repos; post-hardening applicability parameterize 158/300, wrapper 118/300, union 163/300. Overload-candidate arity fix → orleans:0116 builds True/True. Full pytest **36 passed**. ZERO Azure/Foundry spend. Decision drops merged to `.squad/decisions.md`.
+
+- **2026-06-16** — `site_not_found` locator hardening attempt (line-drift + duplicate-name invocations):
+	- `SeamCore.Locate(...)` now scores same-name candidates deterministically using line proximity + enclosing type/method context + receiver-kind/type hints (from CLI metadata) with an ambiguity-safe tie reject (`site_not_found` preserved).
+	- Added hermetic fixture `locator_line_drift_duplicate` and regression tests for both transforms proving drifted line targeting resolves the intended invocation (`Run` call line 17) rather than sibling duplicate in `Audit`.
+	- Required validation passed: `dotnet build RoslynRefactorTool -c Release`; `pytest tools/generation/tests/test_roslyn_tool.py -q` => **38 passed**.
+	- Targeted `site_not_found` build-verified rechecks produced **no applicability gain**:
+		- wrapper_interface: 96 prior-site_not_found targets, applicable 0 -> 0 (reasons now `site_not_found`=50, `baseline_build_failed`=46)
+		- parameterize_dependency: 98 prior-site_not_found targets, applicable 0 -> 0 (reasons now `site_not_found`=52, `baseline_build_failed`=46)
+	- Operational learning: wrapper recheck initially left `abp`/`aspnetcore`/`jellyfin` dirty despite `restore_all` expectation; manually restored (`git restore --worktree --staged . && git clean -fd`) before running parameterize recheck; final touched repos confirmed clean.
+
+- **2026-06-17** — `apply_refactor` owning-project restore warm-up + explicit restore-failure classification:
+	- Updated `RefactorEngine._build_owning_project()` to run a one-time `dotnet restore <owning.csproj>` before `dotnet build` using the same sandbox knobs (`NUGET_PACKAGES`, `DOTNET_NOLOGO`, `DOTNET_CLI_TELEMETRY_OPTOUT`, `DOTNET_SKIP_FIRST_TIME_EXPERIENCE`) and the same timeout budget class (`build_timeout_s`).
+	- New failure classification: restore failures now emit `errors[0].code = RESTORE_FAIL` (with parsed compile-style details appended when available), so verify-build rejections can be split from pure compile failures without changing revert semantics.
+	- Behavior preserved: any verify-build failure still auto-reverts the edit and returns `reason=refactor_rejected` with attached `errors`.
+	- Validation passed: `pytest -q tools/generation/tests/test_roslyn_tool.py` => **38 passed**; `pytest -q tools/generation/tests/test_refactor_smoke.py -k "refactor_smoke or wrapper_interface_via_seam_legit"` => **11 passed**.

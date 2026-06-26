@@ -64,7 +64,7 @@ from tools.evaluation.compile_only import (
 )
 
 # Transform names the agent may request. The menu IS the contract.
-TRANSFORMS = ("make_virtual", "wrapper_interface", "parameterize_dependency")
+TRANSFORMS = ("make_virtual", "wrapper_interface", "parameterize_dependency", "static_field_injection")
 
 # The pure C# Roslyn rewriter that performs `wrapper_interface` and
 # `parameterize_dependency` (TRANSFORM_CONTRACT §0). Built via
@@ -76,7 +76,12 @@ _ROSLYN_TOOL_DIR = _REPO_ROOT / "RoslynRefactorTool"
 def _resolve_roslyn_tool_dll() -> Path | None:
     """Locate the built RoslynRefactorTool.dll, preferring Release over Debug."""
     for cfg in ("Release", "Debug"):
+        # Try nested net10.0 directory first (older build output)
         cand = _ROSLYN_TOOL_DIR / "bin" / cfg / "net10.0" / "RoslynRefactorTool.dll"
+        if cand.exists():
+            return cand
+        # Try flat bin/Release/RoslynRefactorTool.dll (newer build output)
+        cand = _ROSLYN_TOOL_DIR / "bin" / cfg / "RoslynRefactorTool.dll"
         if cand.exists():
             return cand
     return None
@@ -237,6 +242,28 @@ class RefactorEngine:
         env["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1"
         env["DOTNET_SKIP_FIRST_TIME_EXPERIENCE"] = "1"
         env["NUGET_PACKAGES"] = NUGET_CACHE
+
+        # Warm NuGet/package assets once before build so project-level restore
+        # failures are surfaced as a dedicated error class.
+        try:
+            rr = subprocess.run(
+                [DOTNET, "restore", str(self.owning_csproj), "--nologo", "/p:TreatWarningsAsErrors=false"],
+                cwd=str(self.owning_csproj_dir), capture_output=True, text=True,
+                timeout=self.build_timeout_s, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return False, [{"code": "RESTORE_FAIL", "message": f"restore timeout after {self.build_timeout_s}s"}], ""
+        except OSError as e:
+            return False, [{"code": "RESTORE_FAIL", "message": f"dotnet restore invocation failed: {e}"}], ""
+
+        restore_out = (rr.stdout or "") + (rr.stderr or "")
+        if rr.returncode != 0:
+            errors = [{"code": "RESTORE_FAIL", "message": "dotnet restore failed for owning project"}]
+            parsed = first_compile_errors(restore_out)
+            if parsed:
+                errors.extend(parsed[:4])
+            return False, errors, restore_out[-2000:]
+
         try:
             br = subprocess.run(
                 [DOTNET, "build", str(self.owning_csproj),
@@ -280,8 +307,10 @@ class RefactorEngine:
             res = self._make_virtual(**args)
         elif name == "wrapper_interface":
             res = self._wrapper_interface(**args)
-        else:  # parameterize_dependency
+        elif name == "parameterize_dependency":
             res = self._parameterize_dependency(**args)
+        else:  # static_field_injection
+            res = self._static_field_injection(**args)
 
         # Behaviour-preservation: if we changed code, the owning project must
         # still build. Otherwise auto-revert and report rejection.
@@ -443,3 +472,14 @@ class RefactorEngine:
         param_name / interface_name / wrapper_name default-inferred tool-side.
         """
         return self._invoke_roslyn_tool("parameterize_dependency", args)
+
+    # -- transform 4: static_field_injection (Roslyn) --------------------
+
+    def _static_field_injection(self, **args) -> RefactorResult:
+        """For a static method in an instance class, inject a mockable interface via
+        a static field + setter pattern. This addresses the "new is glue" principle:
+        replace newed-up dependencies with injected static fields that tests can
+        replace. Implemented by `RoslynRefactorTool`. Args: interface_name,
+        wrapper_name default-inferred tool-side.
+        """
+        return self._invoke_roslyn_tool("static_field_injection", args)

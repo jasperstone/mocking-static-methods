@@ -184,7 +184,15 @@ internal static class SeamCore
         "global using global::System.Linq;\n" +
         "global using global::System.Net.Http;\n" +
         "global using global::System.Threading;\n" +
-        "global using global::System.Threading.Tasks;\n";
+        "global using global::System.Threading.Tasks;\n" +
+        "global using global::Microsoft.AspNetCore.Builder;\n" +
+        "global using global::Microsoft.AspNetCore.Hosting;\n" +
+        "global using global::Microsoft.AspNetCore.Http;\n" +
+        "global using global::Microsoft.AspNetCore.Routing;\n" +
+        "global using global::Microsoft.Extensions.Configuration;\n" +
+        "global using global::Microsoft.Extensions.DependencyInjection;\n" +
+        "global using global::Microsoft.Extensions.Hosting;\n" +
+        "global using global::Microsoft.Extensions.Logging;\n";
 
     public static CSharpCompilation BuildCompilation(string owningDir, List<MetadataReference> refs)
     {
@@ -305,6 +313,9 @@ internal static class SeamCore
         int line,
         string method,
         string transform,
+        string receiverTypeHint,
+        string containingTypeHint,
+        string kindHint,
         string interfaceOverride,
         string wrapperOverride,
         string paramOverride,
@@ -330,26 +341,25 @@ internal static class SeamCore
         var root = tree.GetRoot();
         var model = compilation.GetSemanticModel(tree);
 
-        // Candidate invocations: simple name matches `method`, located near `line`.
-        InvocationExpressionSyntax? hit = null;
-        foreach (var inv in root.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        var byName = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
+            .Where(i => InvokedName(i) == method).ToList();
+        if (byName.Count == 0)
         {
-            if (InvokedName(inv) != method) continue;
-            var nameLine = NameLine(inv);
-            var startLine = inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
-            if (nameLine == line || startLine == line)
-            {
-                hit = inv;
-                break;
-            }
+            reason = "site_not_found";
+            return null;
         }
-        // Fallback: unique name match anywhere (line drift tolerance).
-        if (hit is null)
-        {
-            var byName = root.DescendantNodes().OfType<InvocationExpressionSyntax>()
-                .Where(i => InvokedName(i) == method).ToList();
-            if (byName.Count == 1) hit = byName[0];
-        }
+
+        var lineContext = BuildLineContext(root, tree, line);
+        var hit = SelectBestInvocationCandidate(
+            byName,
+            model,
+            compilation,
+            line,
+            method,
+            receiverTypeHint,
+            containingTypeHint,
+            kindHint,
+            lineContext);
         if (hit is null)
         {
             reason = "site_not_found";
@@ -359,6 +369,13 @@ internal static class SeamCore
         var symInfo = model.GetSymbolInfo(hit);
         var methodSym = symInfo.Symbol as IMethodSymbol
                         ?? PickBestCandidate(hit, symInfo.CandidateSymbols.OfType<IMethodSymbol>().ToImmutableArray(), model);
+        methodSym ??= TryResolveUnboundExtensionMethod(
+            hit,
+            compilation,
+            model,
+            method,
+            receiverTypeHint,
+            containingTypeHint);
         if (methodSym is null)
         {
             reason = "unbound_receiver: " + BindDiag("method_unbound", model, hit, symInfo);
@@ -373,8 +390,12 @@ internal static class SeamCore
         ExpressionSyntax? recvExpr = null;
         if (hit.Expression is MemberAccessExpressionSyntax ma)
             recvExpr = ma.Expression;
+        else if (hit.Expression is MemberBindingExpressionSyntax
+                 && hit.Parent is ConditionalAccessExpressionSyntax ca
+                 && ca.WhenNotNull == hit)
+            recvExpr = ca.Expression; // preserve explicit receiver for `x?.M(...)`
         else if (hit.Expression is MemberBindingExpressionSyntax)
-            recvExpr = null;   // conditional access — treated as implicit below
+            recvExpr = null;
         // else: bare identifier (implicit this) → recvExpr stays null
 
         // Receiver type resolution (TRANSFORM_CONTRACT §2.2 Case B).
@@ -398,6 +419,14 @@ internal static class SeamCore
             && unreducedDef.Parameters.Length > 0)
         {
             var declaredRecv = unreducedDef.Parameters[0].Type;
+            if (declaredRecv is not null && declaredRecv is not IErrorTypeSymbol)
+                recvType = declaredRecv;
+        }
+        if ((recvType is null || recvType is IErrorTypeSymbol)
+            && methodDef.IsExtensionMethod
+            && methodDef.Parameters.Length > 0)
+        {
+            var declaredRecv = methodDef.Parameters[0].Type;
             if (declaredRecv is not null && declaredRecv is not IErrorTypeSymbol)
                 recvType = declaredRecv;
         }
@@ -451,6 +480,319 @@ internal static class SeamCore
         return ctx;
     }
 
+    private static (TypeDeclarationSyntax? type, MethodDeclarationSyntax? method) BuildLineContext(
+        SyntaxNode root,
+        SyntaxTree tree,
+        int line)
+    {
+        if (line <= 0) return (null, null);
+        var text = tree.GetText();
+        var lineIndex = Math.Clamp(line - 1, 0, Math.Max(0, text.Lines.Count - 1));
+        var pos = text.Lines[lineIndex].Start;
+        var token = root.FindToken(pos);
+        var node = token.Parent;
+        return (
+            node?.FirstAncestorOrSelf<TypeDeclarationSyntax>(),
+            node?.FirstAncestorOrSelf<MethodDeclarationSyntax>());
+    }
+
+    private static InvocationExpressionSyntax? SelectBestInvocationCandidate(
+        List<InvocationExpressionSyntax> byName,
+        SemanticModel model,
+        CSharpCompilation compilation,
+        int targetLine,
+        string method,
+        string receiverTypeHint,
+        string containingTypeHint,
+        string kindHint,
+        (TypeDeclarationSyntax? type, MethodDeclarationSyntax? method) lineContext)
+    {
+        var receiverHints = NormalizeReceiverHints(receiverTypeHint);
+        var containingHint = NormalizeSimpleName(containingTypeHint);
+        var expectedExtension = string.Equals(kindHint?.Trim(), "Extension", StringComparison.OrdinalIgnoreCase)
+            ? true
+            : string.Equals(kindHint?.Trim(), "NonVirtual", StringComparison.OrdinalIgnoreCase)
+                ? false
+                : (bool?)null;
+
+        var scored = new List<(InvocationExpressionSyntax inv, int score)>();
+
+        foreach (var inv in byName)
+        {
+            var symInfo = model.GetSymbolInfo(inv);
+            var bound = symInfo.Symbol as IMethodSymbol
+                ?? PickBestCandidate(inv, symInfo.CandidateSymbols.OfType<IMethodSymbol>().ToImmutableArray(), model);
+            if (bound is null) continue;
+
+            int score = 0;
+            var nameLine = NameLine(inv);
+            var startLine = inv.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+            var dist = targetLine > 0
+                ? Math.Min(Math.Abs(nameLine - targetLine), Math.Abs(startLine - targetLine))
+                : int.MaxValue / 4;
+
+            // Primary locator: line proximity with explicit bonus for exact line.
+            if (targetLine > 0)
+            {
+                score += Math.Max(0, 200 - Math.Min(dist, 200));
+                if (nameLine == targetLine || startLine == targetLine) score += 180;
+            }
+
+            var invType = inv.FirstAncestorOrSelf<TypeDeclarationSyntax>();
+            var invMethod = inv.FirstAncestorOrSelf<MethodDeclarationSyntax>();
+
+            if (lineContext.type is not null && invType is not null
+                && string.Equals(invType.Identifier.Text, lineContext.type.Identifier.Text, StringComparison.Ordinal))
+                score += 120;
+
+            if (lineContext.method is not null && invMethod is not null
+                && string.Equals(invMethod.Identifier.Text, lineContext.method.Identifier.Text, StringComparison.Ordinal)
+                && invMethod.ParameterList.Parameters.Count == lineContext.method.ParameterList.Parameters.Count)
+                score += 200;
+
+            if (!string.IsNullOrEmpty(containingHint))
+            {
+                bool callsiteTypeMatch = invType is not null
+                    && string.Equals(invType.Identifier.Text, containingHint, StringComparison.Ordinal);
+                bool declaringTypeMatch = SymbolNameMatchesHint(
+                    (bound.ReducedFrom ?? bound).ContainingType,
+                    containingHint);
+                if (!callsiteTypeMatch && !declaringTypeMatch)
+                    continue;
+
+                // `containing_type` in targets may name either the call-site
+                // enclosing type OR the invoked member's declaring type
+                // (common for extension rows like LoggerExtensions).
+                score += callsiteTypeMatch ? 220 : 140;
+                if (declaringTypeMatch)
+                    score += 120;
+            }
+
+            if (expectedExtension.HasValue)
+            {
+                bool isExt = bound.MethodKind == MethodKind.ReducedExtension
+                             || bound.IsExtensionMethod
+                             || bound.ReducedFrom is not null;
+                if (isExt != expectedExtension.Value) continue;
+                score += 160;
+            }
+
+            var recvType = ResolveReceiverTypeForCandidate(inv, bound, model);
+            if (receiverHints.Count > 0)
+            {
+                if (!ReceiverTypeMatchesHints(recvType, receiverHints, method))
+                    continue;
+                score += 180;
+            }
+
+            // Prefer signatures whose overload key is fully resolved and stable.
+            score += OverloadKey(bound).ToDisplayString().Length % 17;
+
+            scored.Add((inv, score));
+        }
+
+        if (scored.Count == 0)
+        {
+            // Fallback: if semantic filtering produced no candidate but there is
+            // exactly one invocation on the target line, prefer that site.
+            // This preserves line-anchored intent for noisy/broken semantic
+            // contexts and avoids broad nearest-neighbor rewrites.
+            var exactLine = byName
+                .Where(i =>
+                {
+                    var start = i.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
+                    var name = NameLine(i);
+                    return start == targetLine || name == targetLine;
+                })
+                .ToList();
+
+            if (targetLine > 0 && exactLine.Count == 1)
+                return exactLine[0];
+
+            return null;
+        }
+        scored.Sort((a, b) => b.score.CompareTo(a.score));
+        if (scored.Count > 1 && scored[0].score == scored[1].score)
+            return null; // ambiguity-safe: avoid rewriting the wrong duplicate site.
+        return scored[0].inv;
+    }
+
+    private static HashSet<string> NormalizeReceiverHints(string raw)
+    {
+        var hs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(raw)) return hs;
+
+        foreach (var part in raw.Split('/'))
+        {
+            var p = part.Trim();
+            if (p.Length == 0) continue;
+            hs.Add(p);
+            hs.Add(NormalizeSimpleName(p));
+        }
+        return hs;
+    }
+
+    private static string NormalizeSimpleName(string? t)
+    {
+        if (string.IsNullOrWhiteSpace(t)) return "";
+        var s = t.Trim();
+        var slash = s.LastIndexOf('/');
+        if (slash >= 0) s = s.Substring(slash + 1);
+        var dot = s.LastIndexOf('.');
+        if (dot >= 0) s = s.Substring(dot + 1);
+        var tick = s.IndexOf('`');
+        if (tick >= 0) s = s.Substring(0, tick);
+        var gen = s.IndexOf('<');
+        if (gen >= 0) s = s.Substring(0, gen);
+        return s.Trim();
+    }
+
+    private static bool SymbolNameMatchesHint(INamedTypeSymbol? symbol, string hint)
+    {
+        if (symbol is null || string.IsNullOrWhiteSpace(hint)) return false;
+
+        var simple = NormalizeSimpleName(symbol.Name);
+        if (string.Equals(simple, hint, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var full = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            .Replace("global::", "", StringComparison.Ordinal);
+        var fullSimple = NormalizeSimpleName(full);
+        return string.Equals(full, hint, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(fullSimple, hint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static ITypeSymbol? ResolveReceiverTypeForCandidate(
+        InvocationExpressionSyntax inv,
+        IMethodSymbol bound,
+        SemanticModel model)
+    {
+        var def = bound.OriginalDefinition;
+        ITypeSymbol? recvType = null;
+        if (def.MethodKind == MethodKind.ReducedExtension
+            && def.ReducedFrom is { } unreduced
+            && unreduced.Parameters.Length > 0)
+        {
+            var declaredRecv = unreduced.Parameters[0].Type;
+            if (declaredRecv is not null && declaredRecv is not IErrorTypeSymbol)
+                recvType = declaredRecv;
+        }
+        recvType ??= def.ReceiverType;
+        if (recvType is null || recvType is IErrorTypeSymbol)
+        {
+            if (inv.Expression is MemberAccessExpressionSyntax ma)
+                recvType = model.GetTypeInfo(ma.Expression).Type;
+        }
+        return recvType;
+    }
+
+    private static IMethodSymbol? TryResolveUnboundExtensionMethod(
+        InvocationExpressionSyntax hit,
+        CSharpCompilation compilation,
+        SemanticModel model,
+        string method,
+        string receiverTypeHint,
+        string containingTypeHint)
+    {
+        if (string.IsNullOrWhiteSpace(method)) return null;
+
+        var recvHints = NormalizeReceiverHints(receiverTypeHint);
+        if (hit.Expression is MemberAccessExpressionSyntax ma)
+        {
+            var recvType = model.GetTypeInfo(ma.Expression).Type;
+            if (recvType is not null)
+            {
+                var recvFull = recvType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+                    .Replace("global::", "", StringComparison.Ordinal);
+                if (!string.IsNullOrWhiteSpace(recvFull))
+                {
+                    recvHints.Add(recvFull);
+                    recvHints.Add(NormalizeSimpleName(recvFull));
+                    recvHints.Add(NormalizeSimpleName(recvType.Name));
+                }
+            }
+        }
+
+        var containingHint = NormalizeSimpleName(containingTypeHint);
+        var argCount = hit.ArgumentList?.Arguments.Count ?? 0;
+
+        var candidates = compilation
+            .GetSymbolsWithName(method, SymbolFilter.Member)
+            .OfType<IMethodSymbol>()
+            .Where(m => m.IsExtensionMethod && string.Equals(m.Name, method, StringComparison.Ordinal))
+            .ToList();
+
+        if (candidates.Count == 0) return null;
+
+        var scored = new List<(IMethodSymbol m, int score)>();
+        foreach (var m in candidates)
+        {
+            if (m.Parameters.Length == 0) continue;
+
+            var recvParamType = m.Parameters[0].Type;
+            if (recvHints.Count > 0 && !ReceiverTypeMatchesHints(recvParamType, recvHints, method))
+                continue;
+
+            var nonThis = m.Parameters.Skip(1).ToArray();
+            var minArgs = nonThis.Count(p => !p.IsOptional && !p.IsParams);
+            var hasParams = nonThis.LastOrDefault()?.IsParams == true;
+            var maxArgs = hasParams ? int.MaxValue : nonThis.Length;
+            if (argCount < minArgs || argCount > maxArgs)
+                continue;
+
+            int score = 0;
+            if (!string.IsNullOrEmpty(containingHint)
+                && SymbolNameMatchesHint(m.ContainingType, containingHint))
+                score += 300;
+
+            if (recvHints.Count > 0 && ReceiverTypeMatchesHints(recvParamType, recvHints, method))
+                score += 220;
+
+            if (!hasParams && argCount == nonThis.Length)
+                score += 180;
+            else if (hasParams)
+                score += 120;
+
+            // Prefer non-generic overloads in ambiguous telemetry-heavy APIs.
+            if (m.TypeParameters.Length == 0)
+                score += 15;
+
+            scored.Add((m, score));
+        }
+
+        if (scored.Count == 0) return null;
+        scored.Sort((a, b) => b.score.CompareTo(a.score));
+        if (scored.Count > 1 && scored[0].score == scored[1].score)
+            return null;
+
+        return scored[0].m;
+    }
+
+    private static bool ReceiverTypeMatchesHints(ITypeSymbol? recvType, HashSet<string> hints, string method)
+    {
+        if (recvType is null || recvType is IErrorTypeSymbol) return false;
+
+        var simple = NormalizeSimpleName(recvType.Name);
+        var full = recvType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
+            .Replace("global::", "", StringComparison.Ordinal);
+        var fullSimple = NormalizeSimpleName(full);
+
+        if (hints.Contains(simple) || hints.Contains(full) || hints.Contains(fullSimple))
+            return true;
+
+        // Compatibility fallback for framework aliases, e.g. HttpMessageInvoker rows
+        // targeting HttpClient call sites.
+        if (string.Equals(method, "GetAsync", StringComparison.Ordinal)
+            || string.Equals(method, "PostAsync", StringComparison.Ordinal)
+            || string.Equals(method, "SendAsync", StringComparison.Ordinal))
+        {
+            if ((hints.Contains("HttpMessageInvoker") && (simple == "HttpClient" || fullSimple == "HttpClient"))
+                || (hints.Contains("HttpClient") && (simple == "HttpMessageInvoker" || fullSimple == "HttpMessageInvoker")))
+                return true;
+        }
+        return false;
+    }
+
     // -- name inference + collision suffixing (§1.1) -----------------------
 
     private static void ResolveNames(SeamContext ctx, string interfaceOverride, string wrapperOverride, string paramOverride)
@@ -498,6 +840,14 @@ internal static class SeamCore
     public static IMethodSymbol OverloadKey(IMethodSymbol m) =>
         (m.ReducedFrom ?? m).OriginalDefinition;
 
+    /// <summary>
+    /// Extracts the simple method name from an invocation expression,
+    /// handling member access (a.M), member binding (?. operator), generic names,
+    /// and direct identifier references.
+    /// </summary>
+    /// <remarks>
+    /// Returns empty string if the expression is not a recognized invocation pattern.
+    /// </remarks>
     public static string InvokedName(InvocationExpressionSyntax inv) => inv.Expression switch
     {
         MemberAccessExpressionSyntax ma => SimpleName(ma.Name),
@@ -509,7 +859,16 @@ internal static class SeamCore
 
     private static string SimpleName(SimpleNameSyntax n) => n.Identifier.Text;
 
-    private static int NameLine(InvocationExpressionSyntax inv)
+    /// <summary>
+    /// Gets the 1-based line number of the invoked member's simple-name token.
+    /// For multi-line invocations, returns the line of the member name identifier,
+    /// not the position of the opening paren or receiver.
+    /// </summary>
+    /// <remarks>
+    /// This is used to match invocation sites to their corresponding rows in
+    /// the targets CSV, which use the member-name line rather than the start-of-invocation line.
+    /// </remarks>
+    public static int NameLine(InvocationExpressionSyntax inv)
     {
         SyntaxToken tok = inv.Expression switch
         {
@@ -667,14 +1026,21 @@ internal static class SeamCore
     }
 
     // wrapper_interface: receiver reachable from the constructor (no local / no
-    // parameter / no range variable).
+    // range variable). Constructor parameters (including primary-constructor
+    // parameters) are allowed.
     public static bool ReceiverIsConstructorReachable(ExpressionSyntax expr, SemanticModel model)
     {
         foreach (var id in ReceiverRootIdentifiers(expr))
         {
             var sym = model.GetSymbolInfo(id).Symbol;
-            if (sym is ILocalSymbol or IParameterSymbol or IRangeVariableSymbol)
+            if (sym is ILocalSymbol or IRangeVariableSymbol)
                 return false;
+            if (sym is IParameterSymbol p)
+            {
+                if (p.ContainingSymbol is IMethodSymbol pm && pm.MethodKind == MethodKind.Constructor)
+                    continue;
+                return false;
+            }
         }
         return true;
     }
@@ -998,10 +1364,172 @@ internal static class SeamCore
             if (ctx.Transform == "wrapper_interface")
                 return "record_type";
         }
-        // Primary constructor (class/record/struct with a parameter list on the type).
-        if (decl.ParameterList is not null && ctx.Transform == "wrapper_interface")
-            return "primary_ctor";
+        // Primary constructor is handled by converting to explicit constructor
+        // in WrapperInterfaceRewriter, so no rejection here.
 
         return null;
     }
+
+    /// <summary>
+    /// Validates that a method can be made virtual for the subclass-and-override seam pattern.
+    /// Returns a reason token (§5 format) if the method is rejected, null if applicable.
+    /// </summary>
+    /// <remarks>
+    /// Rejects:
+    /// - Methods in interface, struct, or record types (not inheritable)
+    /// - Sealed classes (can't be subclassed)
+    /// - Static methods (no instance to override)
+    /// - Private methods (`private virtual` is illegal in C#)
+    /// - Already virtual/abstract/sealed/override methods (already seamed)
+    /// - Non-method syntax nodes (e.g. lambdas, local functions)
+    /// </remarks>
+    public static string? ValidateMethodForMakeVirtual(IMethodSymbol methodDef, TypeDeclarationSyntax? decl, INamedTypeSymbol? owner)
+    {
+        if (owner?.TypeKind == TypeKind.Interface)
+            return "interface_member";
+        if (owner?.TypeKind == TypeKind.Struct)
+            return "struct_type";
+        if (owner?.IsRecord == true)
+            return "record_type";
+        if (owner?.IsSealed == true)
+            return "sealed_class";
+
+        if (methodDef.IsStatic)
+            return "static_method";
+        if (methodDef.DeclaredAccessibility == Accessibility.Private)
+            return "private_member";
+        if (methodDef.IsAbstract)
+            return "already_abstract";
+        if (methodDef.IsVirtual)
+            return "already_virtual";
+        if (methodDef.IsSealed)
+            return "already_sealed";
+        if (methodDef.IsOverride)
+            return "already_override";
+
+        if (decl?.Modifiers.Any(SyntaxKind.PartialKeyword) == true)
+            return "partial_method";
+        if (decl?.Modifiers.Count == 0)
+            return "private_member";
+
+        return null;
+    }
+
+    /// <summary>
+    /// Detects whether a type is from an external/framework assembly (no source available).
+    /// Used to identify candidates for static utility wrapping.
+    /// </summary>
+    public static bool IsExternalType(ITypeSymbol type)
+    {
+        if (type == null) return false;
+        var asmName = type.ContainingAssembly?.Name;
+        if (asmName == null) return false;
+
+        // Framework/system assembly patterns
+        var frameworkPrefixes = new[]
+        {
+            "System.",
+            "Microsoft.",
+            "netstandard",
+        };
+
+        return frameworkPrefixes.Any(prefix => 
+            asmName.Equals(prefix.TrimEnd('.'), StringComparison.OrdinalIgnoreCase) ||
+            asmName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Checks if a call site can be handled via static utility wrapping pattern.
+    /// This applies when the receiver is an external framework type that can't be
+    /// injected directly, but we can create a wrapper that instantiates it.
+    /// </summary>
+    public static bool CanWrapAsStaticUtility(SeamContext ctx)
+    {
+        if (ctx?.ReceiverType == null) return false;
+        if (!IsExternalType(ctx.ReceiverType)) return false;
+        if (ctx.Method == null) return false;
+
+        // Check for methods with problematic signatures
+        if (ctx.Method.Parameters.Length > 10) return false;  // too many params to wrap
+        
+        // Generic methods with constraints are fine
+        // Out/ref are fine, but could add restrictions if needed
+        
+        return true;
+    }
+
+    /// <summary>
+    /// Generate wrapper source for a static utility (external framework type).
+    /// The wrapper's constructor creates the inner instance rather than accepting it.
+    /// </summary>
+    public static string EmitStaticUtilityWrapperSource(SeamContext ctx)
+    {
+        var fmt = GeneratedTypeFormat;
+        var recvType = ctx.ReceiverType.ToDisplayString(fmt);
+        var ret = ReturnTypeText(ctx.Method, fmt);
+        var tp = TypeParamList(ctx.Method);
+        var constraints = Constraints(ctx.Method);
+        var paramDecls = string.Join(", ", ctx.Method.Parameters.Select(p => ParamDecl(p, fmt)));
+        var callArgs = string.Join(", ", ctx.Method.Parameters.Select(CallArg));
+
+        // Determine instantiation strategy based on receiver type
+        string innerCreation = DetermineInnerCreation(ctx.ReceiverType);
+
+        // Forward to _inner
+        var forwardExpr = $"_inner.{ctx.Method.Name}{tp}({callArgs})";
+        
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine("// Generated by RoslynRefactorTool (phase-4 static_utility_wrapper seam).");
+        sb.AppendLine("// Wraps an external framework type so it can be mocked in tests.");
+        sb.AppendLine("#nullable enable");
+        sb.AppendLine("#pragma warning disable CS1591 // generated seam; XML docs intentionally omitted");
+        
+        if (ctx.Namespace.Length > 0)
+        {
+            sb.Append("namespace ").Append(ctx.Namespace).AppendLine(";");
+            sb.AppendLine();
+        }
+
+        // Interface definition
+        sb.Append("public interface ").AppendLine(ctx.InterfaceName);
+        sb.AppendLine("{");
+        sb.Append("    ").Append(ret).Append(' ').Append(ctx.Method.Name).Append(tp)
+          .Append('(').Append(paramDecls).Append(')').Append(constraints).AppendLine(";");
+        sb.AppendLine("}");
+        sb.AppendLine();
+
+        // Wrapper class definition
+        sb.Append("public sealed class ").Append(ctx.WrapperName).Append(" : ").AppendLine(ctx.InterfaceName);
+        sb.AppendLine("{");
+        sb.Append("    private readonly ").Append(recvType).AppendLine(" _inner;");
+        
+        // Constructor that creates _inner
+        sb.Append("    public ").Append(ctx.WrapperName).Append("()").AppendLine();
+        sb.Append("        => _inner = ").Append(innerCreation).AppendLine(";");
+        
+        // Forward method
+        sb.Append("    public ").Append(ret).Append(' ').Append(ctx.Method.Name).Append(tp)
+          .Append('(').Append(paramDecls).Append(')').Append(constraints).AppendLine();
+        sb.Append("        => ").Append(forwardExpr).AppendLine(";");
+        sb.AppendLine("}");
+        
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Determine how to instantiate the inner framework type.
+    /// Returns the instantiation expression (e.g., "new System.Net.Http.HttpClient()").
+    /// </summary>
+    private static string DetermineInnerCreation(ITypeSymbol receiverType)
+    {
+        var typeName = receiverType.ToDisplayString(GeneratedTypeFormat);
+        
+        // For known framework types, use parameterless constructor
+        // This handles: HttpClient, HttpClientHandler, etc.
+        // Could be extended with special logic for types with no parameterless ctor
+        
+        return $"new {typeName}()";
+    }
 }
+

@@ -27,6 +27,10 @@ on:
         description: "Optional cap on cells per repo (for shakedown). Empty = no cap."
         required: false
         default: ""
+      target_ids:
+        description: "Optional comma-separated target_id whitelist (exact-cell backfill)."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -192,11 +196,15 @@ jobs:
           REPO: ${{ matrix.repo }}
           RUN_INDEX: ${{ matrix.run_index }}
           LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
+          TARGET_IDS: ${{ inputs.target_ids }}
         run: |
           set -euo pipefail
           extra=()
           if [[ -n "${LIMIT_PER_REPO}" ]]; then
             extra+=(--limit "${LIMIT_PER_REPO}")
+          fi
+          if [[ -n "${TARGET_IDS}" ]]; then
+            extra+=(--target-ids "${TARGET_IDS}")
           fi
           python3 tools/generation/agentic_runner.py \
             --phase "${PHASE}" \

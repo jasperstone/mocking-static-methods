@@ -16,12 +16,15 @@ non-OpenAI models. Run distributions across runs_per_model are reported, not
 single-run numbers.
 """
 from __future__ import annotations
+import email.utils
 import json
 import os
+import random
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -62,13 +65,44 @@ def _load_env() -> dict[str, str]:
             k, v = line.split("=", 1)
             env[k.strip()] = v.strip()
     # Allow process env to override file
-    for k in ("FOUNDRY_ENDPOINT", "FOUNDRY_API_KEY",
-              "FOUNDRY_PANEL_OPENAI_CHAT", "FOUNDRY_PANEL_OPENAI_RESPONSES",
-              "FOUNDRY_PANEL_INFERENCE"):
+    for k in (
+        "FOUNDRY_ENDPOINT",
+        "FOUNDRY_API_KEY",
+        "FOUNDRY_PANEL_OPENAI_CHAT",
+        "FOUNDRY_PANEL_OPENAI_RESPONSES",
+        "FOUNDRY_PANEL_INFERENCE",
+        "FOUNDRY_RETRY_MAX_RETRIES",
+        "FOUNDRY_RETRY_BUDGET_S",
+        "FOUNDRY_RETRY_BASE_DELAY_S",
+        "FOUNDRY_RETRY_MAX_DELAY_S",
+        "FOUNDRY_RETRY_JITTER_RATIO",
+    ):
         if os.environ.get(k):
             env[k] = os.environ[k]
     _ENV_CACHE = env
     return env
+
+
+def _env_int(env: dict[str, str], key: str, default: int, min_value: int = 0) -> int:
+    raw = env.get(key)
+    if raw is None:
+        return default
+    try:
+        val = int(raw)
+    except ValueError:
+        return default
+    return max(min_value, val)
+
+
+def _env_float(env: dict[str, str], key: str, default: float, min_value: float = 0.0) -> float:
+    raw = env.get(key)
+    if raw is None:
+        return default
+    try:
+        val = float(raw)
+    except ValueError:
+        return default
+    return max(min_value, val)
 
 
 def _surface(model_id: str) -> str:
@@ -96,9 +130,58 @@ def list_panel() -> list[str]:
     return out
 
 
-def _request(url: str, body: dict, key: str, timeout_s: int) -> tuple[dict, int]:
+def _retry_after_seconds(headers) -> float | None:
+    if not headers:
+        return None
+    value = headers.get("Retry-After")
+    if not value:
+        return None
+    v = str(value).strip()
+    if not v:
+        return None
+    if v.isdigit():
+        return float(max(0, int(v)))
+    try:
+        dt = email.utils.parsedate_to_datetime(v)
+    except (TypeError, ValueError):
+        return None
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta = (dt - datetime.now(timezone.utc)).total_seconds()
+    return max(0.0, delta)
+
+
+def _looks_rate_limited(body_txt: str) -> bool:
+    text = body_txt.lower()
+    needles = (
+        "rate_limit_exceeded",
+        "rate limit exceeded",
+        "too_many_requests",
+        "too many requests",
+        "ratelimit",
+    )
+    return any(n in text for n in needles)
+
+
+def _is_retriable_http(code: int, body_txt: str) -> bool:
+    return code in (429, 503) or _looks_rate_limited(body_txt)
+
+
+def _request(
+    url: str,
+    body: dict,
+    key: str,
+    timeout_s: int,
+    *,
+    retry_max_retries: int,
+    retry_budget_s: float,
+    retry_base_delay_s: float,
+    retry_max_delay_s: float,
+    retry_jitter_ratio: float,
+) -> tuple[dict, int]:
     req_data = json.dumps(body).encode("utf-8")
-    backoffs = [2, 5, 12, 25]  # 4 retries on 429/503; total wait <= 44s
     attempt = 0
     t0 = time.monotonic()
     while True:
@@ -114,11 +197,18 @@ def _request(url: str, body: dict, key: str, timeout_s: int) -> tuple[dict, int]
             return payload, int((time.monotonic() - t0) * 1000)
         except urllib.error.HTTPError as e:
             body_txt = e.read().decode("utf-8", "replace")[:512]
-            if e.code in (429, 503) and attempt < len(backoffs):
-                # Honor Retry-After if present, else use backoff schedule.
-                ra = e.headers.get("Retry-After") if hasattr(e, "headers") else None
-                wait = int(ra) if ra and ra.isdigit() else backoffs[attempt]
-                time.sleep(wait)
+            if _is_retriable_http(e.code, body_txt) and attempt < retry_max_retries:
+                retry_after_s = _retry_after_seconds(getattr(e, "headers", None))
+                if retry_after_s is not None:
+                    wait_s = min(retry_after_s, retry_max_delay_s)
+                else:
+                    exp_s = min(retry_max_delay_s, retry_base_delay_s * (2 ** attempt))
+                    jitter = random.uniform(0.0, exp_s * retry_jitter_ratio)
+                    wait_s = exp_s + jitter
+                elapsed = time.monotonic() - t0
+                if elapsed + wait_s > retry_budget_s:
+                    break
+                time.sleep(wait_s)
                 attempt += 1
                 continue
             raise FoundryError(f"HTTP {e.code}: {body_txt}")
@@ -126,6 +216,9 @@ def _request(url: str, body: dict, key: str, timeout_s: int) -> tuple[dict, int]
             raise FoundryError(f"network error: {e.reason}")
         except (TimeoutError, ConnectionError) as e:
             raise FoundryError(f"timeout/conn after {int((time.monotonic()-t0)*1000)}ms: {e}")
+    raise FoundryError(
+        f"retry budget exhausted after {attempt + 1} attempts over {int((time.monotonic() - t0) * 1000)}ms"
+    )
 
 
 def _parse_chat(payload: dict, default_model: str, latency_ms: int) -> GenerationResult:
@@ -205,12 +298,28 @@ def generate(
     seed: int = 42,
     max_output_tokens: int = 4096,
     timeout_s: int = 180,
+    retry_max_retries: int | None = None,
+    retry_budget_s: float | None = None,
+    retry_base_delay_s: float | None = None,
+    retry_max_delay_s: float | None = None,
+    retry_jitter_ratio: float | None = None,
 ) -> GenerationResult:
     env = _load_env()
     endpoint = env.get("FOUNDRY_ENDPOINT")
     key = env.get("FOUNDRY_API_KEY")
     if not endpoint or not key:
         raise FoundryError("FOUNDRY_ENDPOINT and FOUNDRY_API_KEY must be set (in .env.foundry or env vars)")
+
+    if retry_max_retries is None:
+        retry_max_retries = _env_int(env, "FOUNDRY_RETRY_MAX_RETRIES", default=8, min_value=0)
+    if retry_budget_s is None:
+        retry_budget_s = _env_float(env, "FOUNDRY_RETRY_BUDGET_S", default=180.0, min_value=0.0)
+    if retry_base_delay_s is None:
+        retry_base_delay_s = _env_float(env, "FOUNDRY_RETRY_BASE_DELAY_S", default=1.0, min_value=0.0)
+    if retry_max_delay_s is None:
+        retry_max_delay_s = _env_float(env, "FOUNDRY_RETRY_MAX_DELAY_S", default=30.0, min_value=0.1)
+    if retry_jitter_ratio is None:
+        retry_jitter_ratio = _env_float(env, "FOUNDRY_RETRY_JITTER_RATIO", default=0.25, min_value=0.0)
 
     surface = _surface(model_id)
 
@@ -226,7 +335,17 @@ def generate(
             "max_tokens": max_output_tokens,
             "seed": seed,
         }
-        payload, dt = _request(url, body, key, timeout_s)
+        payload, dt = _request(
+            url,
+            body,
+            key,
+            timeout_s,
+            retry_max_retries=retry_max_retries,
+            retry_budget_s=retry_budget_s,
+            retry_base_delay_s=retry_base_delay_s,
+            retry_max_delay_s=retry_max_delay_s,
+            retry_jitter_ratio=retry_jitter_ratio,
+        )
         return _parse_chat(payload, model_id, dt)
 
     if surface == "openai_responses":
@@ -244,7 +363,17 @@ def generate(
             ],
             "max_output_tokens": budget,
         }
-        payload, dt = _request(url, body, key, timeout_s)
+        payload, dt = _request(
+            url,
+            body,
+            key,
+            timeout_s,
+            retry_max_retries=retry_max_retries,
+            retry_budget_s=retry_budget_s,
+            retry_base_delay_s=retry_base_delay_s,
+            retry_max_delay_s=retry_max_delay_s,
+            retry_jitter_ratio=retry_jitter_ratio,
+        )
         return _parse_responses(payload, model_id, dt)
 
     # inference surface (model name in body)
@@ -259,5 +388,15 @@ def generate(
         "top_p": top_p,
         "max_tokens": max_output_tokens,
     }
-    payload, dt = _request(url, body, key, timeout_s)
+    payload, dt = _request(
+        url,
+        body,
+        key,
+        timeout_s,
+        retry_max_retries=retry_max_retries,
+        retry_budget_s=retry_budget_s,
+        retry_base_delay_s=retry_base_delay_s,
+        retry_max_delay_s=retry_max_delay_s,
+        retry_jitter_ratio=retry_jitter_ratio,
+    )
     return _parse_chat(payload, model_id, dt)

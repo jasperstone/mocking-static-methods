@@ -245,7 +245,8 @@ jobs:
       # Run as root inside the container so apt-get works without sudo.
     strategy:
       fail-fast: false
-      max-parallel: 12
+      # Keep shard fan-out below Foundry burst limits to avoid 429-driven dropouts.
+      max-parallel: 6
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
@@ -253,6 +254,13 @@ jobs:
       FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
       FOUNDRY_PANEL_OPENAI_RESPONSES: ""
       FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
+      # Foundry adapter retry tuning (env-read by tools/generation/adapters/foundry.py).
+      # Goal: absorb transient/provider-side throttling instead of treating 429s as hard shard failures.
+      FOUNDRY_RETRY_MAX_RETRIES: "40"
+      FOUNDRY_RETRY_BUDGET_S: "1800"
+      FOUNDRY_RETRY_BASE_DELAY_S: "1"
+      FOUNDRY_RETRY_MAX_DELAY_S: "60"
+      FOUNDRY_RETRY_JITTER_RATIO: "0.25"
       # Make sure compile_only.py picks up the SDK on $PATH (not the home-dir copy).
       DOTNET: "dotnet"
       DOTNET_NOLOGO: "1"

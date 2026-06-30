@@ -49,9 +49,9 @@ on:
         required: false
         default: "all"
       limit_per_repo:
-        description: "Per-repo cap on cells (foundry-mode shakedown). Default 1 = single-cell shakedown. Empty = no cap."
+        description: "Per-repo cap on cells (foundry-mode shakedown). Empty = no cap (full target set)."
         required: false
-        default: "1"
+        default: ""
       max_compile_attempts:
         description: "Max submit_test → check cycles per cell (1 = phase 2 behavior; 4 = full fix-up loop). Each cycle compiles AND runs the candidate."
         required: false

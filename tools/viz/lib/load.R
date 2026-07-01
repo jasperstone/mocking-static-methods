@@ -61,7 +61,7 @@ load_per_model_phase <- function() {
 
 load_baseline_coverage <- function() {
   path <- file.path(repo_root(), "baseline_coverage.csv")
-  read_csv(path, show_col_types = FALSE) |>
+  cov <- read_csv(path, show_col_types = FALSE) |>
     rename(
       repo            = Repo,
       lines_total     = `Lines (total)`,
@@ -73,4 +73,44 @@ load_baseline_coverage <- function() {
       static_sites    = `Static call sites`,
       classes_static  = `Classes with static calls`
     )
+
+  # Some snapshots have a placeholder baseline_coverage.csv with all-zero
+  # coverage values. Fall back to the canonical phase-1 unified table when
+  # this happens so visuals stay truthful without manual file surgery.
+  if (sum(cov$lines_total, na.rm = TRUE) > 0) {
+    return(cov)
+  }
+
+  fallback <- file.path(repo_root(), "phases", "phase1-baseline", "reports", "unified_table.csv")
+  if (!file.exists(fallback)) {
+    return(cov)
+  }
+
+  unified <- read_csv(fallback, show_col_types = FALSE) |>
+    transmute(
+      repo = repo,
+      lines_total = as.numeric(lines_valid),
+      lines_covered = as.numeric(lines_covered),
+      line_pct = as.numeric(line_coverage_pct),
+      branches_total = NA_real_,
+      branches_covered = NA_real_,
+      branch_pct = NA_real_,
+      static_sites = as.numeric(mode1_total),
+      classes_static = NA_real_
+    )
+
+  total <- unified |>
+    summarise(
+      repo = "TOTAL",
+      lines_total = sum(lines_total, na.rm = TRUE),
+      lines_covered = sum(lines_covered, na.rm = TRUE),
+      line_pct = ifelse(lines_total > 0, 100 * lines_covered / lines_total, 0),
+      branches_total = NA_real_,
+      branches_covered = NA_real_,
+      branch_pct = NA_real_,
+      static_sites = sum(static_sites, na.rm = TRUE),
+      classes_static = NA_real_
+    )
+
+  bind_rows(unified, total)
 }

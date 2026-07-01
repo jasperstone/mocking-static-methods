@@ -49,9 +49,9 @@ on:
         required: false
         default: "all"
       limit_per_repo:
-        description: "Per-repo cap on cells (foundry-mode shakedown). Empty = no cap (full target set)."
+        description: "Per-repo cap on cells (foundry-mode shakedown). Use 'none' for no cap (full target set)."
         required: false
-        default: ""
+        default: "none"
       max_compile_attempts:
         description: "Max submit_test → check cycles per cell (1 = phase 2 behavior; 4 = full fix-up loop). Each cycle compiles AND runs the candidate."
         required: false
@@ -86,12 +86,12 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "10.0.x"
 
@@ -368,7 +368,7 @@ jobs:
         run: |
           set -euo pipefail
           extra=()
-          if [[ -n "${LIMIT_PER_REPO}" ]]; then
+          if [[ -n "${LIMIT_PER_REPO}" && "${LIMIT_PER_REPO}" != "none" ]]; then
             extra+=(--limit "${LIMIT_PER_REPO}")
           fi
           python3 tools/generation/agentic_refactor_runner.py \

@@ -87,15 +87,24 @@ def main() -> int:
     n_targets = sum(1 for _ in csv.DictReader(targets_csv.open())) if targets_csv.exists() else 0
 
     # Aggregate attempts: per model, count distinct (target_id, run_index) pairs that
-    # produced a candidate (proxy for "agent emitted code").
+    # produced a candidate (proxy for "agent emitted code"). Also retain per-cell
+    # final compile/run outcomes for phases that do not emit evaluation.jsonl.
     attempts_per_model = defaultdict(set)
+    attempt_outcomes = defaultdict(lambda: {"total": 0, "compile_ok": 0, "run_ok": 0})
     turns_per_model = defaultdict(list)
     for model, run_idx, rec in load_attempts(phase_dir):
         tid = rec.get("target_id")
         if tid:
             attempts_per_model[model].add((tid, run_idx))
+            attempt_outcomes[model]["total"] += 1
+            if rec.get("final_compile_ok"):
+                attempt_outcomes[model]["compile_ok"] += 1
+            if rec.get("final_run_ok"):
+                attempt_outcomes[model]["run_ok"] += 1
         if "turns" in rec and isinstance(rec["turns"], int):
             turns_per_model[model].append(rec["turns"])
+        elif "turns_used" in rec and isinstance(rec["turns_used"], int):
+            turns_per_model[model].append(rec["turns_used"])
 
     # Aggregate evals: per model, compile_ok / run_ok counts over (target_id, run_index).
     evals_per_model = defaultdict(lambda: {"total": 0, "compile_ok": 0, "run_ok": 0})
@@ -123,6 +132,8 @@ def main() -> int:
     for m in all_models:
         a = len(attempts_per_model.get(m, set()))
         e = evals_per_model.get(m, {"total": 0, "compile_ok": 0, "run_ok": 0})
+        if e["total"] == 0:
+            e = attempt_outcomes.get(m, e)
         comp_pct = (100.0 * e["compile_ok"] / e["total"]) if e["total"] else 0.0
         run_pct = (100.0 * e["run_ok"] / e["total"]) if e["total"] else 0.0
         turns = turns_per_model.get(m, [])
@@ -133,9 +144,9 @@ def main() -> int:
     lines.append("")
     lines.append("Definitions:")
     lines.append("- *Cells attempted*: distinct `(target_id, run_index)` pairs the model emitted code for.")
-    lines.append("- *Eval rows*: rows in `evaluation.jsonl` (one per generated `test.cs` after evaluator scan).")
-    lines.append("- *Compile OK*: evaluator built the test against the cloned repo successfully.")
-    lines.append("- *Run OK*: `dotnet test` exited 0 on the produced test.")
+    lines.append("- *Eval rows*: rows in `evaluation.jsonl` when present; otherwise attempt rows used as the fallback outcome source.")
+    lines.append("- *Compile OK*: evaluator `compile_ok` when available, else attempt-level `final_compile_ok`.")
+    lines.append("- *Run OK*: evaluator `run_ok` when available, else attempt-level `final_run_ok`.")
     lines.append("")
 
     headline_path = phase_dir / "HEADLINE.md"

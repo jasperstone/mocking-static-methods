@@ -748,6 +748,8 @@ def main() -> int:
                 turns_log=str(tpath.relative_to(out_dir)),
                 refactors_log=str(rpath.relative_to(out_dir)),
                 error=None if loop.submitted else loop.halt_reason,
+                error_type=None if loop.submitted else _classify_error(loop.halt_reason),
+                final_error_type=None if loop.submitted else _classify_error(loop.halt_reason),
             )
             print(
                 f"{target_id:<30} {args.model:<22} "
@@ -788,6 +790,29 @@ def _record(out, target_id: str, args, sys_sha: str, tmpl_sha: str, **fields) ->
     rec.update(fields)
     out.write(json.dumps(rec) + "\n")
     out.flush()
+
+
+def _classify_error(error: str | None) -> str | None:
+    if not error:
+        return None
+    e = error.lower()
+    if "http 429" in e or "ratelimit" in e or "rate limit" in e:
+        return "adapter_rate_limited"
+    if "timeout/conn" in e or "timed out" in e:
+        return "adapter_timeout"
+    if "adapter error" in e:
+        return "adapter_error"
+    if "baseline_compile_failed" in e:
+        return "baseline_compile_failed"
+    if "baseline_build_timeout" in e:
+        return "baseline_build_timeout"
+    if "max_turns_exhausted" in e:
+        return "max_turns_exhausted"
+    if "submitted_compile_failed" in e:
+        return "submitted_compile_failed"
+    if "submitted_run_failed" in e:
+        return "submitted_run_failed"
+    return "other"
 
 
 if __name__ == "__main__":

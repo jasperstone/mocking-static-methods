@@ -43,11 +43,14 @@ def main() -> int:
     all_repos = sorted({r["repo"] for r in csv.DictReader(open(f"targets/{ts}/targets.csv"))})
     repos = all_repos if want_repos == "all" else [r.strip() for r in want_repos.split(",") if r.strip()]
 
+    # Interleave shards by repo/run first, then model. This avoids launching
+    # many same-model shards back-to-back at high parallelism, which can trip
+    # model-specific provider rate limits (notably on inference-surface models).
     include = [
         {"model": m, "repo": r, "run_index": i}
-        for m in models
         for r in repos
         for i in range(start, start + runs)
+        for m in models
     ]
     json.dump({"include": include}, sys.stdout)
     return 0

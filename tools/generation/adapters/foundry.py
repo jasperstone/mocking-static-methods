@@ -166,7 +166,22 @@ def _looks_rate_limited(body_txt: str) -> bool:
 
 
 def _is_retriable_http(code: int, body_txt: str) -> bool:
-    return code in (429, 503) or _looks_rate_limited(body_txt)
+    return code in (408, 429, 500, 502, 503, 504) or _looks_rate_limited(body_txt)
+
+
+def _compute_backoff_s(
+    *,
+    attempt: int,
+    retry_base_delay_s: float,
+    retry_max_delay_s: float,
+    retry_jitter_ratio: float,
+    retry_after_s: float | None = None,
+) -> float:
+    if retry_after_s is not None:
+        return min(retry_after_s, retry_max_delay_s)
+    exp_s = min(retry_max_delay_s, retry_base_delay_s * (2 ** attempt))
+    jitter = random.uniform(0.0, exp_s * retry_jitter_ratio)
+    return exp_s + jitter
 
 
 def _request(
@@ -199,12 +214,13 @@ def _request(
             body_txt = e.read().decode("utf-8", "replace")[:512]
             if _is_retriable_http(e.code, body_txt) and attempt < retry_max_retries:
                 retry_after_s = _retry_after_seconds(getattr(e, "headers", None))
-                if retry_after_s is not None:
-                    wait_s = min(retry_after_s, retry_max_delay_s)
-                else:
-                    exp_s = min(retry_max_delay_s, retry_base_delay_s * (2 ** attempt))
-                    jitter = random.uniform(0.0, exp_s * retry_jitter_ratio)
-                    wait_s = exp_s + jitter
+                wait_s = _compute_backoff_s(
+                    attempt=attempt,
+                    retry_base_delay_s=retry_base_delay_s,
+                    retry_max_delay_s=retry_max_delay_s,
+                    retry_jitter_ratio=retry_jitter_ratio,
+                    retry_after_s=retry_after_s,
+                )
                 elapsed = time.monotonic() - t0
                 if elapsed + wait_s > retry_budget_s:
                     break
@@ -213,8 +229,36 @@ def _request(
                 continue
             raise FoundryError(f"HTTP {e.code}: {body_txt}")
         except urllib.error.URLError as e:
+            # Foundry endpoints intermittently emit transient connection/read
+            # failures under load. Treat URLError as retriable within budget.
+            if attempt < retry_max_retries:
+                wait_s = _compute_backoff_s(
+                    attempt=attempt,
+                    retry_base_delay_s=retry_base_delay_s,
+                    retry_max_delay_s=retry_max_delay_s,
+                    retry_jitter_ratio=retry_jitter_ratio,
+                )
+                elapsed = time.monotonic() - t0
+                if elapsed + wait_s <= retry_budget_s:
+                    time.sleep(wait_s)
+                    attempt += 1
+                    continue
             raise FoundryError(f"network error: {e.reason}")
         except (TimeoutError, ConnectionError) as e:
+            # Retry read/connect timeouts instead of hard-failing a cell on
+            # first transient timeout.
+            if attempt < retry_max_retries:
+                wait_s = _compute_backoff_s(
+                    attempt=attempt,
+                    retry_base_delay_s=retry_base_delay_s,
+                    retry_max_delay_s=retry_max_delay_s,
+                    retry_jitter_ratio=retry_jitter_ratio,
+                )
+                elapsed = time.monotonic() - t0
+                if elapsed + wait_s <= retry_budget_s:
+                    time.sleep(wait_s)
+                    attempt += 1
+                    continue
             raise FoundryError(f"timeout/conn after {int((time.monotonic()-t0)*1000)}ms: {e}")
     raise FoundryError(
         f"retry budget exhausted after {attempt + 1} attempts over {int((time.monotonic() - t0) * 1000)}ms"

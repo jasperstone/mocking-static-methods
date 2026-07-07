@@ -246,7 +246,7 @@ jobs:
     strategy:
       fail-fast: false
       # Keep shard fan-out below Foundry burst limits to avoid 429-driven dropouts.
-      max-parallel: 6
+      max-parallel: 3
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}

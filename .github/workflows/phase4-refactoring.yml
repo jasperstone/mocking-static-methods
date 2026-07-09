@@ -48,6 +48,14 @@ on:
         description: "Comma-separated repo names; or 'all' for every repo in the target set (foundry mode)."
         required: false
         default: "all"
+      target_ids:
+        description: "Optional exact comma-separated target_ids to run. When set, only those targets are evaluated; chunk_size can further split them per repo."
+        required: false
+        default: ""
+      chunk_size:
+        description: "Optional per-repo target_ids per shard. Empty/none preserves one shard per repo; set this to split slow repos into smaller exact-target chunks."
+        required: false
+        default: "none"
       limit_per_repo:
         description: "Per-repo cap on cells (foundry-mode shakedown). Use 'none' for no cap (full target set)."
         required: false
@@ -70,7 +78,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}"
+  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}-${{ github.event.inputs.target_ids }}-${{ github.event.inputs.chunk_size }}"
   cancel-in-progress: false
 
 env:
@@ -196,7 +204,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | runs/cell: ${{ github.event.inputs.runs_per_cell }} | run_index_start: ${{ github.event.inputs.run_index_start }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }}"
+          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | target_ids: ${{ github.event.inputs.target_ids || 'all-selected' }} | chunk_size: ${{ github.event.inputs.chunk_size }} | runs/cell: ${{ github.event.inputs.runs_per_cell }} | run_index_start: ${{ github.event.inputs.run_index_start }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }}"
 
   plan:
     name: "Plan shards"
@@ -218,11 +226,13 @@ jobs:
           RUN_INDEX_START: ${{ inputs.run_index_start }}
           MODELS: ${{ inputs.models }}
           REPOS: ${{ inputs.repos }}
+          TARGET_IDS: ${{ inputs.target_ids }}
+          CHUNK_SIZE: ${{ inputs.chunk_size }}
         run: |
           set -euo pipefail
           python3 .github/scripts/plan_matrix.py > matrix.json
           n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
-          echo "::notice::Planned $n shards (target_set=$TARGET_SET, runs_per_cell=$RUNS_PER_CELL, run_index_start=$RUN_INDEX_START)"
+          echo "::notice::Planned $n shards (target_set=$TARGET_SET, runs_per_cell=$RUNS_PER_CELL, run_index_start=$RUN_INDEX_START, target_ids=${TARGET_IDS:-all}, chunk_size=${CHUNK_SIZE:-none})"
           {
             echo "matrix<<__EOF__"
             cat matrix.json
@@ -234,7 +244,7 @@ jobs:
           echo "target_sha256=$sha" >> "$GITHUB_OUTPUT"
 
   generate:
-    name: "gen ${{ matrix.model }} ${{ matrix.repo }} run${{ matrix.run_index }}"
+    name: "gen ${{ matrix.model }} ${{ matrix.repo }} run${{ matrix.run_index }}${{ matrix.job_label_suffix }}"
     needs: plan
     if: ${{ github.event.inputs.mode == 'foundry' }}
     runs-on: ubuntu-24.04
@@ -362,12 +372,16 @@ jobs:
           MODEL: ${{ matrix.model }}
           REPO: ${{ matrix.repo }}
           RUN_INDEX: ${{ matrix.run_index }}
+          TARGET_IDS: ${{ matrix.target_ids }}
           LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
           MAX_COMPILE_ATTEMPTS: ${{ inputs.max_compile_attempts }}
           RUN_TIMEOUT_S: ${{ inputs.run_timeout_s }}
         run: |
           set -euo pipefail
           extra=()
+          if [[ -n "${TARGET_IDS:-}" ]]; then
+            extra+=(--target-ids "${TARGET_IDS}")
+          fi
           if [[ -n "${LIMIT_PER_REPO}" && "${LIMIT_PER_REPO}" != "none" ]]; then
             extra+=(--limit "${LIMIT_PER_REPO}")
           fi
@@ -409,7 +423,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
+          name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}${{ matrix.artifact_suffix }}
           path: phases/${{ env.PHASE }}/results/
           if-no-files-found: warn
           retention-days: 14

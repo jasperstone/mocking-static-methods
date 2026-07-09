@@ -32,14 +32,10 @@ on:
         description: "Targets version (must exist under targets/; foundry mode)."
         required: false
         default: "v2"
-      runs_per_cell:
-        description: "How many independent runs per (model, target) cell (foundry mode). Frozen design = 3, dispatched as run_1 → go/no-go → runs 2+3."
+      run_window:
+        description: "Run window as start:count. Default '1:3' preserves the frozen design; use '2:2' for a follow-up sweep that reuses run_1 and dispatches only runs 2+3."
         required: false
-        default: "3"
-      run_index_start:
-        description: "First run_index (default 1). Set to 2 for a follow-up sweep that reuses run_1 from a calibration dispatch."
-        required: false
-        default: "1"
+        default: "1:3"
       models:
         description: "Comma-separated model ids; or 'all' for the full 6-model panel (foundry mode)."
         required: false
@@ -48,12 +44,8 @@ on:
         description: "Comma-separated repo names; or 'all' for every repo in the target set (foundry mode)."
         required: false
         default: "all"
-      target_ids:
-        description: "Optional exact comma-separated target_ids to run. When set, only those targets are evaluated; chunk_size can further split them per repo."
-        required: false
-        default: ""
-      chunk_size:
-        description: "Optional per-repo target_ids per shard. Empty/none preserves one shard per repo; set this to split slow repos into smaller exact-target chunks."
+      shard_spec:
+        description: "Optional shard selector. Use 'chunk_size=10' to split per repo, 'target_ids=id1,id2' for exact targets, or 'target_ids=id1,id2;chunk_size=10' for both. Empty/none preserves legacy one-shard-per-repo behavior."
         required: false
         default: "none"
       limit_per_repo:
@@ -78,7 +70,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}-${{ github.event.inputs.target_ids }}-${{ github.event.inputs.chunk_size }}"
+  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}-${{ github.event.inputs.shard_spec }}"
   cancel-in-progress: false
 
 env:
@@ -204,7 +196,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | target_ids: ${{ github.event.inputs.target_ids || 'all-selected' }} | chunk_size: ${{ github.event.inputs.chunk_size }} | runs/cell: ${{ github.event.inputs.runs_per_cell }} | run_index_start: ${{ github.event.inputs.run_index_start }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }}"
+          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | shard_spec: ${{ github.event.inputs.shard_spec || 'none' }} | run_window: ${{ github.event.inputs.run_window }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }}"
 
   plan:
     name: "Plan shards"
@@ -222,17 +214,15 @@ jobs:
         shell: bash
         env:
           TARGET_SET: ${{ inputs.target_set }}
-          RUNS_PER_CELL: ${{ inputs.runs_per_cell }}
-          RUN_INDEX_START: ${{ inputs.run_index_start }}
+          RUN_WINDOW: ${{ inputs.run_window }}
           MODELS: ${{ inputs.models }}
           REPOS: ${{ inputs.repos }}
-          TARGET_IDS: ${{ inputs.target_ids }}
-          CHUNK_SIZE: ${{ inputs.chunk_size }}
+          SHARD_SPEC: ${{ inputs.shard_spec }}
         run: |
           set -euo pipefail
           python3 .github/scripts/plan_matrix.py > matrix.json
           n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
-          echo "::notice::Planned $n shards (target_set=$TARGET_SET, runs_per_cell=$RUNS_PER_CELL, run_index_start=$RUN_INDEX_START, target_ids=${TARGET_IDS:-all}, chunk_size=${CHUNK_SIZE:-none})"
+          echo "::notice::Planned $n shards (target_set=$TARGET_SET, run_window=$RUN_WINDOW, shard_spec=${SHARD_SPEC:-none})"
           {
             echo "matrix<<__EOF__"
             cat matrix.json

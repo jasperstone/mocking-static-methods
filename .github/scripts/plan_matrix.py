@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
-"""Plan the (model x repo x run_index) shard matrix for phase2-generate.yml.
+"""Plan the shard matrix for phase generation workflows.
 
 Reads from env:
   TARGET_SET     - e.g. "v2"
-  RUNS_PER_CELL  - integer string, e.g. "3"
+    RUN_WINDOW     - optional compact run selector, formatted as start:count.
+                                     Example: 1:3 (default), 2:2 (rerun runs 2 and 3 only)
+    RUNS_PER_CELL  - legacy integer string, e.g. "3"
+    RUN_INDEX_START - legacy first run index, e.g. "1"
   MODELS         - "all" or comma-separated model ids
   REPOS          - "all" or comma-separated repo names
+    SHARD_SPEC     - optional compact shard selector string.
+                                     Supported clauses:
+                                         target_ids=id1,id2
+                                         chunk_size=10
+                                     Combine with ';', e.g. target_ids=id1,id2;chunk_size=10
+    TARGET_IDS     - legacy optional comma-separated exact target_ids to include
+    CHUNK_SIZE     - legacy optional positive integer; splits each repo's target_ids
+                                     into stable slices of this size
 
-Writes a single-line JSON object to stdout: {"include": [ {model, repo, run_index}, ... ]}
+Writes a single-line JSON object to stdout. Default output preserves the legacy
+shape: {"include": [{model, repo, run_index}, ...]}. When SHARD_SPEC and/or the
+legacy TARGET_IDS/CHUNK_SIZE inputs are provided, rows gain additive chunk fields.
 """
 
 from __future__ import annotations
@@ -16,6 +29,7 @@ import csv
 import json
 import os
 import sys
+from collections import defaultdict
 
 FULL_PANEL = [
     # gpt-5-codex removed after phase 2: 82% of spend, 17.8% submission rate.
@@ -29,29 +43,171 @@ FULL_PANEL = [
 ]
 
 
+def _parse_csv_env(name: str, default: str = "") -> list[str]:
+    raw = os.environ.get(name, default).strip()
+    if not raw or raw.lower() == "none":
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _parse_optional_positive_int(name: str) -> int | None:
+    raw = os.environ.get(name, "").strip()
+    if not raw or raw.lower() == "none":
+        return None
+    value = _parse_positive_int(raw, name)
+
+    return value
+
+
+def _parse_positive_int(raw: str, name: str) -> int:
+    value = int(raw)
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer; got {raw!r}")
+    return value
+
+
+def _parse_shard_spec(raw: str) -> tuple[list[str], int | None]:
+    target_ids: list[str] = []
+    chunk_size: int | None = None
+
+    for clause in raw.replace("\n", ";").split(";"):
+        clause = clause.strip()
+        if not clause:
+            continue
+        if "=" not in clause:
+            raise ValueError(
+                "SHARD_SPEC clauses must use key=value syntax; "
+                f"got {clause!r}"
+            )
+
+        key, value = clause.split("=", 1)
+        key = key.strip().lower()
+        value = value.strip()
+
+        if key == "target_ids":
+            target_ids = [item.strip() for item in value.split(",") if item.strip()]
+        elif key == "chunk_size":
+            if not value or value.lower() == "none":
+                chunk_size = None
+            else:
+                chunk_size = _parse_positive_int(value, "SHARD_SPEC chunk_size")
+        else:
+            raise ValueError(
+                "SHARD_SPEC only supports 'target_ids' and 'chunk_size' clauses; "
+                f"got {key!r}"
+            )
+
+    return target_ids, chunk_size
+
+
+def _parse_run_window(raw: str) -> tuple[int, int]:
+    text = raw.strip()
+    if not text or text.lower() == "none":
+        return 1, 1
+    if ":" not in text:
+        raise ValueError(
+            "RUN_WINDOW must use start:count syntax; "
+            f"got {raw!r}"
+        )
+    start_raw, runs_raw = text.split(":", 1)
+    start = _parse_positive_int(start_raw.strip(), "RUN_WINDOW start")
+    runs = _parse_positive_int(runs_raw.strip(), "RUN_WINDOW count")
+    return start, runs
+
+
+def _chunked(values: list[str], size: int | None) -> list[list[str]]:
+    if not values:
+        return []
+    if size is None:
+        return [values]
+    return [values[index:index + size] for index in range(0, len(values), size)]
+
+
 def main() -> int:
     ts = os.environ["TARGET_SET"]
-    runs = int(os.environ.get("RUNS_PER_CELL", "1"))
-    # Optional: shift the run_index window so a follow-up sweep can produce
-    # only run_2/run_3 without redoing run_1. Default 1 keeps prior behavior.
-    start = int(os.environ.get("RUN_INDEX_START", "1"))
+    run_window = os.environ.get("RUN_WINDOW", "").strip()
+    if run_window and run_window.lower() != "none":
+        start, runs = _parse_run_window(run_window)
+    else:
+        runs = int(os.environ.get("RUNS_PER_CELL", "1"))
+        # Optional: shift the run_index window so a follow-up sweep can produce
+        # only run_2/run_3 without redoing run_1. Default 1 keeps prior behavior.
+        start = int(os.environ.get("RUN_INDEX_START", "1"))
 
     want_models = os.environ.get("MODELS", "all").strip()
     models = FULL_PANEL if want_models == "all" else [m.strip() for m in want_models.split(",") if m.strip()]
 
     want_repos = os.environ.get("REPOS", "all").strip()
-    all_repos = sorted({r["repo"] for r in csv.DictReader(open(f"targets/{ts}/targets.csv"))})
-    repos = all_repos if want_repos == "all" else [r.strip() for r in want_repos.split(",") if r.strip()]
+    shard_spec = os.environ.get("SHARD_SPEC", "").strip()
+    if shard_spec and shard_spec.lower() != "none":
+        target_ids, chunk_size = _parse_shard_spec(shard_spec)
+    else:
+        target_ids = _parse_csv_env("TARGET_IDS")
+        chunk_size = _parse_optional_positive_int("CHUNK_SIZE")
+
+    with open(f"targets/{ts}/targets.csv", newline="") as fh:
+        rows = list(csv.DictReader(fh))
+
+    all_repos = sorted({row["repo"] for row in rows})
+    if want_repos == "all":
+        wanted_repos = None
+    else:
+        wanted_repos = {r.strip() for r in want_repos.split(",") if r.strip()}
+
+    target_whitelist = set(target_ids) if target_ids else None
+    if target_whitelist:
+        known_target_ids = {row["target_id"] for row in rows}
+        unknown = sorted(target_whitelist - known_target_ids)
+        if unknown:
+            raise ValueError(f"unknown target_ids requested: {', '.join(unknown[:10])}")
+
+    grouped_target_ids: dict[str, list[str]] = defaultdict(list)
+    for row in rows:
+        repo = row["repo"]
+        if wanted_repos is not None and repo not in wanted_repos:
+            continue
+        if target_whitelist is not None and row["target_id"] not in target_whitelist:
+            continue
+        grouped_target_ids[repo].append(row["target_id"])
+
+    if wanted_repos is None:
+        repos = sorted(grouped_target_ids) if target_whitelist else all_repos
+    else:
+        missing_repos = sorted(wanted_repos - set(all_repos))
+        if missing_repos:
+            raise ValueError(f"unknown repos requested: {', '.join(missing_repos)}")
+        repos = [repo for repo in all_repos if repo in wanted_repos]
+
+    if target_whitelist is not None:
+        repos = [repo for repo in repos if grouped_target_ids.get(repo)]
 
     # Interleave shards by repo/run first, then model. This avoids launching
     # many same-model shards back-to-back at high parallelism, which can trip
     # model-specific provider rate limits (notably on inference-surface models).
-    include = [
-        {"model": m, "repo": r, "run_index": i}
-        for r in repos
-        for i in range(start, start + runs)
-        for m in models
-    ]
+    include = []
+    for repo in repos:
+        repo_target_ids = grouped_target_ids.get(repo, [])
+        repo_chunks = _chunked(repo_target_ids, chunk_size)
+        if target_whitelist is not None and not repo_chunks:
+            continue
+        if target_whitelist is None and chunk_size is None:
+            repo_chunks = [[]]
+
+        chunk_count = len(repo_chunks) if repo_chunks else 1
+        for run_index in range(start, start + runs):
+            for model in models:
+                for chunk_index, chunk in enumerate(repo_chunks, start=1):
+                    shard = {"model": model, "repo": repo, "run_index": run_index}
+                    if chunk:
+                        shard["target_ids"] = ",".join(chunk)
+                    if chunk_size is not None:
+                        shard["chunk_index"] = chunk_index
+                        shard["chunk_count"] = chunk_count
+                        shard["target_count"] = len(chunk)
+                        shard["artifact_suffix"] = f"-chunk{chunk_index}of{chunk_count}"
+                        shard["job_label_suffix"] = f" chunk {chunk_index}/{chunk_count}"
+                    include.append(shard)
+
     json.dump({"include": include}, sys.stdout)
     return 0
 

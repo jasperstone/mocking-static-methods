@@ -181,7 +181,7 @@ jobs:
           echo "slug=$slug" >> "$GITHUB_OUTPUT"
 
       - name: Upload cell artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: "gen-${{ steps.sanitize.outputs.slug }}-run${{ matrix.run_index }}"
           path: "phases/phase2-singleshot/results/"
@@ -197,7 +197,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Download all cell artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: phases/phase2-singleshot/results/
           pattern: "gen-*"
@@ -216,7 +216,7 @@ jobs:
           fi
 
       - name: Upload combined results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: "phase2-singleshot-results-pre-coverage"
           path: "phases/phase2-singleshot/results/"

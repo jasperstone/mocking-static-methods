@@ -45,9 +45,9 @@ on:
         required: false
         default: "all"
       shard_spec:
-        description: "Optional shard selector. Use 'chunk_size=10' to split per repo, 'target_ids=id1,id2' for exact targets, or 'target_ids=id1,id2;chunk_size=10' for both. Empty/none preserves legacy one-shard-per-repo behavior."
+        description: "Optional shard selector. Default is 'chunk_size=3' for foundry dispatches. Use 'chunk_size=10' to split per repo, 'target_ids=id1,id2' for exact targets, or 'target_ids=id1,id2;chunk_size=10' for both. Empty/none preserves legacy one-shard-per-repo behavior."
         required: false
-        default: "none"
+        default: "chunk_size=3"
       limit_per_repo:
         description: "Per-repo cap on cells (foundry-mode shakedown). Use 'none' for no cap (full target set)."
         required: false
@@ -70,7 +70,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}-${{ github.event.inputs.shard_spec }}"
+  group: "phase4-generate-${{ github.event.inputs.mode }}-${{ github.event.inputs.target_set }}-${{ github.event.inputs.models }}-${{ github.event.inputs.repos }}-${{ github.event.inputs.run_window }}-${{ github.event.inputs.shard_spec }}"
   cancel-in-progress: false
 
 env:
@@ -246,7 +246,7 @@ jobs:
     strategy:
       fail-fast: false
       # Keep shard fan-out below Foundry burst limits to avoid 429-driven dropouts.
-      max-parallel: 3
+      max-parallel: 8
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
@@ -413,7 +413,7 @@ jobs:
 
       - name: Upload shard artifact
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}${{ matrix.artifact_suffix }}
           path: phases/${{ env.PHASE }}/results/

@@ -103,7 +103,7 @@ jobs:
 
       - name: Download generate artifact for this shard
         if: ${{ inputs.generate_run_id != '' }}
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           name: gen-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
           path: phases/${{ env.PHASE }}/results/
@@ -205,7 +205,7 @@ jobs:
 
       - name: Upload eval artifact
         if: always() && env.no_work != 'true'
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: eval-${{ matrix.model }}-${{ matrix.repo }}-run${{ matrix.run_index }}
           path: phases/${{ env.PHASE }}/results/

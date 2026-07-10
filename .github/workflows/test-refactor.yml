@@ -105,7 +105,7 @@ jobs:
 
     - name: Upload matrix test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: test-results-${{ matrix.label }}-${{ github.run_number }}
         path: test_results_local/
@@ -113,7 +113,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: test-results-${{ github.run_number }}
         path: test_results_local/

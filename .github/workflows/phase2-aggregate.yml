@@ -52,7 +52,7 @@ jobs:
           python3 -m pip install pyyaml
 
       - name: Download all generate artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: gen-*
           path: artifacts/generate
@@ -61,7 +61,7 @@ jobs:
           run-id: ${{ inputs.generate_run_id }}
 
       - name: Download all evaluate artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: eval-*
           path: artifacts/evaluate

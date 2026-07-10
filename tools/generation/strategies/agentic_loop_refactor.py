@@ -39,7 +39,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from tools.generation.strategies.agentic_loop import (
     TOOL_RE,
@@ -161,6 +161,7 @@ def run(
     top_p: float = 1.0,
     seed: int = 42,
     timeout_s: int = 180,
+    progress_cb: Callable[..., None] | None = None,
 ) -> RefactorLoopResult:
     """Drive the phase-4 loop: compile+run feedback plus the apply_refactor tool.
 
@@ -177,7 +178,23 @@ def run(
     attempts_used = 0
     refactors_used = 0
 
+    def _emit(stage: str, **fields: Any) -> None:
+        if progress_cb is None:
+            return
+        try:
+            progress_cb(stage=stage, **fields)
+        except Exception:
+            # Telemetry callbacks must never change loop behavior.
+            pass
+
     for turn_i in range(1, max_turns + 1):
+        _emit(
+            "turn_start",
+            turn_index=turn_i,
+            reads_done=result.reads_done,
+            attempts_used=attempts_used,
+            refactors_used=refactors_used,
+        )
         composed_user = "\n\n".join(conversation)
         try:
             r = generate(
@@ -196,6 +213,7 @@ def run(
                 text=f"<adapter-error: {e}>", finish_reason="adapter_error",
             ))
             result.halt_reason = f"adapter error on turn {turn_i}: {e}"
+            _emit("halt", reason=result.halt_reason, turn_index=turn_i)
             return result
 
         assistant_turn = Turn(
@@ -267,6 +285,13 @@ def run(
                 )
             result.refactor_attempts.append(res.to_dict())
             assistant_turn.tool_ok = bool(res.applied)
+            _emit(
+                "refactor_result",
+                turn_index=turn_i,
+                transform=res.transform,
+                applied=bool(res.applied),
+                refactors_used=refactors_used,
+            )
             conversation.append(
                 f"<tool-result turn={turn_i} tool=apply_refactor "
                 f"transform={res.transform} applied={str(res.applied).lower()}>"
@@ -336,6 +361,14 @@ def run(
                 return result
 
             attempts_left = max_attempts - attempts_used
+            _emit(
+                "submit_result",
+                turn_index=turn_i,
+                attempt_index=attempts_used,
+                compile_ok=compile_ok,
+                run_ok=run_ok,
+                attempts_left=attempts_left,
+            )
             if attempts_left <= 0:
                 assistant_turn.tool_ok = False
                 result.final_compile_ok = compile_ok
@@ -384,6 +417,13 @@ def run(
                 tool_out = _tool_read_file(repo_root, tool_arg)
                 result.reads_done += 1
                 assistant_turn.tool_ok = not tool_out.startswith("ERROR:")
+            _emit(
+                "tool_result",
+                turn_index=turn_i,
+                tool_name="read_file",
+                tool_ok=bool(assistant_turn.tool_ok),
+                reads_done=result.reads_done,
+            )
             conversation.append(
                 f"<tool-result turn={turn_i} tool=read_file path={tool_arg!r}>\n{tool_out}\n</tool-result>"
             )
@@ -392,6 +432,13 @@ def run(
         if tool_name == "list_dir":
             tool_out = _tool_list_dir(repo_root, tool_arg)
             assistant_turn.tool_ok = not tool_out.startswith("ERROR:")
+            _emit(
+                "tool_result",
+                turn_index=turn_i,
+                tool_name="list_dir",
+                tool_ok=bool(assistant_turn.tool_ok),
+                reads_done=result.reads_done,
+            )
             conversation.append(
                 f"<tool-result turn={turn_i} tool=list_dir path={tool_arg!r}>\n{tool_out}\n</tool-result>"
             )
@@ -405,4 +452,5 @@ def run(
             result.halt_reason = "submitted_compile_failed"
     else:
         result.halt_reason = f"max_turns_exhausted after {max_turns}"
+    _emit("halt", reason=result.halt_reason)
     return result

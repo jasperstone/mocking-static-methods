@@ -366,6 +366,7 @@ jobs:
           LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
           MAX_COMPILE_ATTEMPTS: ${{ inputs.max_compile_attempts }}
           RUN_TIMEOUT_S: ${{ inputs.run_timeout_s }}
+          PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail
           extra=()
@@ -375,7 +376,7 @@ jobs:
           if [[ -n "${LIMIT_PER_REPO}" && "${LIMIT_PER_REPO}" != "none" ]]; then
             extra+=(--limit "${LIMIT_PER_REPO}")
           fi
-          python3 tools/generation/agentic_refactor_runner.py \
+          python3 -u tools/generation/agentic_refactor_runner.py \
             --phase "${PHASE}" \
             --model "${MODEL}" \
             --run-index "${RUN_INDEX}" \
@@ -390,6 +391,7 @@ jobs:
             --compile-timeout-s 240 \
             --run-timeout-s "${RUN_TIMEOUT_S}" \
             --refactor-build-timeout-s 240 \
+            --heartbeat-s 240 \
             --i-understand-this-will-spend-money \
             "${extra[@]}"
 

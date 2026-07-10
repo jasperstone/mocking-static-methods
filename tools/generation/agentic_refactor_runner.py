@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import csv
 import dataclasses
+import datetime as dt
 import hashlib
 import json
 import os
@@ -59,6 +60,26 @@ from tools.generation.apply_refactor import RefactorEngine  # noqa: E402
 from tools.evaluation import compile_only as _compile_only  # noqa: E402
 
 DEFAULT_PHASE = "phase4-refactoring"
+
+
+def _kv(value) -> str:
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    s = str(value)
+    # Keep single-line parse-friendly logs stable.
+    return s.replace(" ", "_")
+
+
+def _telemetry(event: str, **fields) -> None:
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = [f"ts={_kv(stamp)}", f"event={_kv(event)}"]
+    for k, v in fields.items():
+        payload.append(f"{k}={_kv(v)}")
+    print("telemetry " + " ".join(payload), flush=True)
 
 
 # ---------------------------------------------------------------------------
@@ -360,6 +381,12 @@ def main() -> int:
     # Output dir override (smoke test)
     ap.add_argument("--out-dir", default=None,
                     help="Override phases/<phase>/results/... output location.")
+    ap.add_argument(
+        "--heartbeat-s",
+        type=int,
+        default=240,
+        help="Seconds between periodic aggregate heartbeat lines.",
+    )
     args = ap.parse_args()
 
     phase_dir = REPO_ROOT / "phases" / args.phase
@@ -456,12 +483,86 @@ def main() -> int:
     if not target_whitelist and args.limit:
         rows = rows[: args.limit]
 
+    run_t0 = time.monotonic()
+    last_heartbeat = run_t0
+
+    processed = 0
+    submitted = 0
+    failures = 0
+    skips = 0
+    total_targets = len(rows)
+    current_repo = "none"
+    current_target = "none"
+    current_idx = 0
+
+    def elapsed_s() -> int:
+        return int(time.monotonic() - run_t0)
+
+    def emit_heartbeat(stage: str, **extra) -> None:
+        nonlocal last_heartbeat
+        now = time.monotonic()
+        if now - last_heartbeat < args.heartbeat_s:
+            return
+        _telemetry(
+            "aggregate_progress",
+            stage=stage,
+            model=args.model,
+            run_index=args.run_index,
+            target_set=args.target_set,
+            repo=current_repo,
+            target_id=current_target,
+            target_index=current_idx,
+            total_targets=total_targets,
+            processed=processed,
+            submitted=submitted,
+            failures=failures,
+            skips=skips,
+            compile_ok=n_compile_ok,
+            run_ok=n_run_ok,
+            elapsed_s=elapsed_s(),
+            **extra,
+        )
+        last_heartbeat = now
+
+    _telemetry(
+        "chunk_start",
+        model=args.model,
+        run_index=args.run_index,
+        target_set=args.target_set,
+        repo_filter=args.repo_filter or "all",
+        total_targets=total_targets,
+        heartbeat_s=args.heartbeat_s,
+        max_turns=args.max_turns,
+        max_attempts=args.max_attempts,
+        max_refactors=args.max_refactors,
+    )
+
     n_ok = n_fail = n_compile_ok = n_run_ok = 0
     n_refactor_applied = n_refactor_rejected = 0
     with attempts_path.open("w") as out:
-        for row in rows:
+        for idx, row in enumerate(rows, start=1):
             target_id = row["target_id"]
             repo_dir = cloned_root / row["repo"]
+            current_repo = row["repo"]
+            current_target = target_id
+            current_idx = idx
+
+            _telemetry(
+                "target_start",
+                model=args.model,
+                run_index=args.run_index,
+                target_set=args.target_set,
+                repo=current_repo,
+                target_id=current_target,
+                target_index=current_idx,
+                total_targets=total_targets,
+                processed=processed,
+                submitted=submitted,
+                failures=failures,
+                skips=skips,
+                elapsed_s=elapsed_s(),
+            )
+            emit_heartbeat("target_start")
 
             baseline_compile_ok = None
             baseline_build_ms = None
@@ -562,12 +663,37 @@ def main() -> int:
                         error=baseline_halt,
                     )
                     n_fail += 1
+                    processed += 1
+                    failures += 1
+                    skips += 1
                     print(
                         f"{target_id:<30} {args.model:<22} "
                         f"submitted=False compile_ok=False run_ok=False "
                         f"halt={baseline_halt} baseline={baseline_csproj or 'n/a'} "
-                        f"wall={baseline_build_ms or 0}ms"
+                        f"wall={baseline_build_ms or 0}ms",
+                        flush=True,
                     )
+                    _telemetry(
+                        "target_finish",
+                        repo=current_repo,
+                        target_id=current_target,
+                        target_index=current_idx,
+                        total_targets=total_targets,
+                        status="skipped_precheck",
+                        submitted=False,
+                        compile_ok=False,
+                        run_ok=False,
+                        halt=baseline_halt,
+                        attempts=0,
+                        refactors=0,
+                        wall_ms=baseline_build_ms or 0,
+                        processed=processed,
+                        submitted_count=submitted,
+                        failures=failures,
+                        skips=skips,
+                        elapsed_s=elapsed_s(),
+                    )
+                    emit_heartbeat("target_finish", status="skipped_precheck")
                     continue
 
             if user_msg_override is not None:
@@ -611,6 +737,13 @@ def main() -> int:
                     top_p=args.top_p,
                     seed=args.seed,
                     timeout_s=args.timeout_s,
+                    progress_cb=lambda **progress: emit_heartbeat(
+                        "loop",
+                        loop_stage=progress.get("stage", "unknown"),
+                        loop_turn=progress.get("turn_index", 0),
+                        loop_attempts=progress.get("attempts_used", 0),
+                        loop_refactors=progress.get("refactors_used", 0),
+                    ),
                 )
             finally:
                 # CRITICAL: revert all production edits so the next cell starts
@@ -678,12 +811,16 @@ def main() -> int:
                 fp.write_text(loop.final_code, encoding="utf-8")
                 test_path = str(fp.relative_to(out_dir))
                 n_ok += 1
+                submitted += 1
                 if loop.final_compile_ok:
                     n_compile_ok += 1
                 if loop.final_run_ok:
                     n_run_ok += 1
             else:
                 n_fail += 1
+                failures += 1
+
+            processed += 1
 
             model_snap = None
             for turn in reversed(loop.turns):
@@ -757,13 +894,53 @@ def main() -> int:
                 f"refactors={len(loop.refactor_attempts)} "
                 f"submitted={loop.submitted} compile_ok={loop.final_compile_ok} "
                 f"run_ok={loop.final_run_ok} attempts={len(loop.attempts)} "
-                f"halt={loop.halt_reason} wall={wall_ms}ms"
+                f"halt={loop.halt_reason} wall={wall_ms}ms",
+                flush=True,
             )
+            _telemetry(
+                "target_finish",
+                repo=current_repo,
+                target_id=current_target,
+                target_index=current_idx,
+                total_targets=total_targets,
+                status="submitted" if loop.submitted else "failed",
+                submitted=loop.submitted,
+                compile_ok=loop.final_compile_ok,
+                run_ok=loop.final_run_ok,
+                halt=loop.halt_reason,
+                attempts=len(loop.attempts),
+                refactors=len(loop.refactor_attempts),
+                wall_ms=wall_ms,
+                processed=processed,
+                submitted_count=submitted,
+                failures=failures,
+                skips=skips,
+                elapsed_s=elapsed_s(),
+            )
+            emit_heartbeat("target_finish", status="submitted" if loop.submitted else "failed")
+
+    _telemetry(
+        "chunk_complete",
+        model=args.model,
+        run_index=args.run_index,
+        target_set=args.target_set,
+        total_targets=total_targets,
+        processed=processed,
+        submitted=submitted,
+        failures=failures,
+        skips=skips,
+        compile_ok=n_compile_ok,
+        run_ok=n_run_ok,
+        refactor_applied=n_refactor_applied,
+        refactor_rejected=n_refactor_rejected,
+        elapsed_s=elapsed_s(),
+    )
 
     print(
         f"\ndone: {n_ok} submitted ({n_compile_ok} compile_ok, {n_run_ok} run_ok), "
         f"{n_fail} failures, refactors[applied={n_refactor_applied} "
-        f"rejected={n_refactor_rejected}], attempts.jsonl at {attempts_path}"
+        f"rejected={n_refactor_rejected}], attempts.jsonl at {attempts_path}",
+        flush=True,
     )
     return 0
 

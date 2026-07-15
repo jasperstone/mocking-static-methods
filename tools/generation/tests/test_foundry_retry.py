@@ -67,6 +67,38 @@ def test_request_retries_429_until_success(monkeypatch):
     assert sleep_calls == [1.0, 1.0]
 
 
+def test_request_honors_retry_after_without_capping(monkeypatch):
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(foundry.time, "sleep", lambda s: sleep_calls.append(float(s)))
+    monkeypatch.setattr(foundry.random, "uniform", lambda _a, _b: 0.0)
+
+    calls = {"n": 0}
+
+    def fake_urlopen(_req, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(429, '{"error":{"code":"rate_limit_exceeded"}}', retry_after="120")
+        return _FakeResponse({"ok": True})
+
+    monkeypatch.setattr(foundry.urllib.request, "urlopen", fake_urlopen)
+
+    payload, _ = foundry._request(
+        "https://example.invalid",
+        {"hello": "world"},
+        "secret",
+        timeout_s=5,
+        retry_max_retries=3,
+        retry_budget_s=300,
+        retry_base_delay_s=1,
+        retry_max_delay_s=10,
+        retry_jitter_ratio=0.25,
+    )
+
+    assert payload == {"ok": True}
+    assert calls["n"] == 2
+    assert sleep_calls == [120.0]
+
+
 def test_request_retries_rate_limit_marker_even_with_non_429(monkeypatch):
     monkeypatch.setattr(foundry.time, "sleep", lambda _s: None)
     monkeypatch.setattr(foundry.random, "uniform", lambda _a, _b: 0.0)

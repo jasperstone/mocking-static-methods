@@ -178,7 +178,9 @@ def _compute_backoff_s(
     retry_after_s: float | None = None,
 ) -> float:
     if retry_after_s is not None:
-        return min(retry_after_s, retry_max_delay_s)
+        # Honor provider-directed cooldown windows as-is. Clamping Retry-After
+        # downward can create retry storms that keep triggering 429.
+        return max(0.0, retry_after_s)
     exp_s = min(retry_max_delay_s, retry_base_delay_s * (2 ** attempt))
     jitter = random.uniform(0.0, exp_s * retry_jitter_ratio)
     return exp_s + jitter

@@ -68,6 +68,7 @@ def _load_env() -> dict[str, str]:
     for k in (
         "FOUNDRY_ENDPOINT",
         "FOUNDRY_API_KEY",
+        "FOUNDRY_MODEL_ALIASES",
         "FOUNDRY_PANEL_OPENAI_CHAT",
         "FOUNDRY_PANEL_OPENAI_RESPONSES",
         "FOUNDRY_PANEL_INFERENCE",
@@ -81,6 +82,24 @@ def _load_env() -> dict[str, str]:
             env[k] = os.environ[k]
     _ENV_CACHE = env
     return env
+
+
+def _resolve_model_alias(env: dict[str, str], model_id: str) -> str:
+    raw = env.get("FOUNDRY_MODEL_ALIASES", "").strip()
+    if not raw:
+        return model_id
+    for item in raw.split(","):
+        pair = item.strip()
+        if not pair or ":" not in pair:
+            continue
+        src, dst = pair.split(":", 1)
+        if model_id == src.strip() and dst.strip():
+            return dst.strip()
+    return model_id
+
+
+def _is_project_endpoint(endpoint: str) -> bool:
+    return "/api/projects/" in endpoint
 
 
 def _env_int(env: dict[str, str], key: str, default: int, min_value: int = 0) -> int:
@@ -423,9 +442,15 @@ def generate(
         return _parse_responses(payload, model_id, dt)
 
     # inference surface (model name in body)
-    url = f"{endpoint}models/chat/completions?api-version={INFERENCE_API}"
+    resolved_model = _resolve_model_alias(env, model_id)
+    if _is_project_endpoint(endpoint):
+        # Project-scoped services.ai endpoints use the v1 path without
+        # api-version query parameter.
+        url = f"{endpoint}openai/v1/chat/completions"
+    else:
+        url = f"{endpoint}models/chat/completions?api-version={INFERENCE_API}"
     body = {
-        "model": model_id,
+        "model": resolved_model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},

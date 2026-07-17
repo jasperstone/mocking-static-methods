@@ -253,8 +253,14 @@ jobs:
       max-parallel: ${{ fromJSON(inputs.max_parallel) }}
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
-      FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
-      FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+      # Default credentials (backward compatible).
+      FOUNDRY_ENDPOINT_DEFAULT: ${{ secrets.FOUNDRY_ENDPOINT }}
+      FOUNDRY_API_KEY_DEFAULT: ${{ secrets.FOUNDRY_API_KEY }}
+      # Optional model-specific credentials so grok/llama can target different projects.
+      FOUNDRY_ENDPOINT_GROK: ${{ secrets.FOUNDRY_ENDPOINT_GROK }}
+      FOUNDRY_API_KEY_GROK: ${{ secrets.FOUNDRY_API_KEY_GROK }}
+      FOUNDRY_ENDPOINT_LLAMA: ${{ secrets.FOUNDRY_ENDPOINT_LLAMA }}
+      FOUNDRY_API_KEY_LLAMA: ${{ secrets.FOUNDRY_API_KEY_LLAMA }}
       FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
       FOUNDRY_PANEL_OPENAI_RESPONSES: ""
       FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
@@ -282,6 +288,38 @@ jobs:
 
       - uses: actions/checkout@v5
 
+      - name: Select Foundry credentials for requested model set
+        shell: bash
+        run: |
+          set -euo pipefail
+          models='${{ inputs.models }}'
+
+          # Guard against mixed-model runs when model-specific endpoints differ.
+          if [[ "$models" == "all" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_ENDPOINT_LLAMA:-}" ]] && [[ "${FOUNDRY_ENDPOINT_GROK}" != "${FOUNDRY_ENDPOINT_LLAMA}" ]]; then
+            echo "::error::models=all is ambiguous with split endpoints. Run per model (e.g., grok-only or llama-only) or align endpoint secrets."
+            exit 1
+          fi
+
+          endpoint="${FOUNDRY_ENDPOINT_DEFAULT:-}"
+          key="${FOUNDRY_API_KEY_DEFAULT:-}"
+          source="default"
+
+          if [[ "$models" == "grok-4-1-fast" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_API_KEY_GROK:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_GROK}"
+            key="${FOUNDRY_API_KEY_GROK}"
+            source="grok"
+          elif [[ "$models" == "llama-3.3-70b-instruct" ]] && [[ -n "${FOUNDRY_ENDPOINT_LLAMA:-}" ]] && [[ -n "${FOUNDRY_API_KEY_LLAMA:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_LLAMA}"
+            key="${FOUNDRY_API_KEY_LLAMA}"
+            source="llama"
+          fi
+
+          {
+            echo "FOUNDRY_ENDPOINT=${endpoint}"
+            echo "FOUNDRY_API_KEY=${key}"
+            echo "FOUNDRY_CREDENTIAL_SOURCE=${source}"
+          } >> "$GITHUB_ENV"
+
       - name: Verify Foundry secrets present
         shell: bash
         run: |
@@ -290,6 +328,7 @@ jobs:
             echo "::error::FOUNDRY_ENDPOINT or FOUNDRY_API_KEY missing from repo secrets"
             exit 1
           fi
+          echo "credential source: ${FOUNDRY_CREDENTIAL_SOURCE:-unknown}"
           echo "endpoint length: ${#FOUNDRY_ENDPOINT}, key length: ${#FOUNDRY_API_KEY}"
 
       - name: Verify target set integrity

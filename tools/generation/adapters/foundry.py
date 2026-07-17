@@ -102,6 +102,13 @@ def _is_project_endpoint(endpoint: str) -> bool:
     return "/api/projects/" in endpoint
 
 
+def _normalize_endpoint(endpoint: str) -> str:
+    endpoint = endpoint.strip()
+    if not endpoint.endswith("/"):
+        endpoint += "/"
+    return endpoint
+
+
 def _env_int(env: dict[str, str], key: str, default: int, min_value: int = 0) -> int:
     raw = env.get(key)
     if raw is None:
@@ -374,6 +381,7 @@ def generate(
     key = env.get("FOUNDRY_API_KEY")
     if not endpoint or not key:
         raise FoundryError("FOUNDRY_ENDPOINT and FOUNDRY_API_KEY must be set (in .env.foundry or env vars)")
+    endpoint = _normalize_endpoint(endpoint)
 
     if retry_max_retries is None:
         retry_max_retries = _env_int(env, "FOUNDRY_RETRY_MAX_RETRIES", default=8, min_value=0)

@@ -315,6 +315,10 @@ jobs:
             source="llama"
           fi
 
+          # Defensively strip CR/LF to avoid invalid header/path values from secrets.
+          endpoint="$(printf '%s' "$endpoint" | tr -d '\r\n')"
+          key="$(printf '%s' "$key" | tr -d '\r\n')"
+
           {
             echo "FOUNDRY_ENDPOINT=${endpoint}"
             echo "FOUNDRY_API_KEY=${key}"

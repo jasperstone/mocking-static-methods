@@ -60,10 +60,6 @@ on:
         description: "Per-submission `dotnet test` timeout in seconds (default 60). Hung tests are reported back to the model as run_ok=false."
         required: false
         default: "60"
-      max_parallel:
-        description: "Max concurrent shard jobs (1-4). Default 3 to improve throughput while staying below aggressive burst levels."
-        required: false
-        default: "3"
       confirm_spend:
         description: "Foundry-mode safety gate. Type EXACTLY 'yes-after-2026-06-08-freeze' to (a) acknowledge that 'foundry' mode WILL spend Azure tokens (tracked by phase4-tripwire-250) AND (b) confirm the date is on/after the 2026-06-08 freeze end. Any other value blocks the run."
         required: false
@@ -200,7 +196,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | shard_spec: ${{ github.event.inputs.shard_spec || 'none' }} | run_window: ${{ github.event.inputs.run_window }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }} | max_parallel: ${{ github.event.inputs.max_parallel }}"
+          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | shard_spec: ${{ github.event.inputs.shard_spec || 'none' }} | run_window: ${{ github.event.inputs.run_window }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }} | max_parallel: 3"
 
   plan:
     name: "Plan shards"
@@ -223,7 +219,7 @@ jobs:
           MODELS: ${{ github.event.inputs.models }}
           REPOS: ${{ github.event.inputs.repos }}
           SHARD_SPEC: ${{ github.event.inputs.shard_spec }}
-          MAX_PARALLEL: ${{ github.event.inputs.max_parallel }}
+          MAX_PARALLEL: "3"
         run: |
           set -euo pipefail
 

@@ -21,24 +21,26 @@ df <- df |>
 
 # Canonical phase ordering when present; unknown phases sort after these.
 phase_levels <- intersect(
-  c("phase2-singleshot", "phase2-agentic", "phase3-agentic-loop"),
+  c("phase2-singleshot", "phase2-agentic", "phase3-agentic-loop", "phase4-refactoring"),
   unique(df$phase)
 )
 phase_levels <- c(phase_levels, setdiff(unique(df$phase), phase_levels))
 df <- df |>
   mutate(
     phase = factor(phase, levels = phase_levels),
-    # Keep zero-submission models visible at 0% so phase endpoints show all models.
-    run_ok_pct = ifelse(submitted > 0, 100 * run_ok / submitted, 0)
+    # Tooling-only failures can yield submitted=0; treat as non-evaluable.
+    run_ok_pct = ifelse(submitted > 0, 100 * run_ok / submitted, NA_real_)
   )
 
 # Highlight the biggest mover by run-OK percentage.
 movers <- df |>
   group_by(model) |>
-  filter(n() >= 2) |>
+  filter(sum(!is.na(run_ok_pct)) >= 2) |>
   summarise(
-    delta = run_ok_pct[phase == tail(phase_levels, 1)][1] -
-            run_ok_pct[phase == head(phase_levels, 1)][1],
+    delta = {
+      vals <- run_ok_pct[!is.na(run_ok_pct)]
+      vals[length(vals)] - vals[1]
+    },
     .groups = "drop"
   ) |>
   arrange(desc(abs(delta)))
@@ -78,9 +80,9 @@ p <- ggplot(df, aes(x = phase, y = run_ok_pct, group = model, colour = highlight
   labs(
     title    = "Successful test progression across phases",
     subtitle = sprintf(
-      "Run-OK percentage (run_ok/submitted) per model. Highlighted: %s (biggest %s).",
+      "Run-OK percentage (run_ok/submitted) per model; non-evaluable phases (submitted=0) are omitted. Highlighted: %s (biggest %s).",
       if (is.na(top_mover)) "(none)" else top_mover,
-      "movement between first and last phase"
+      "movement between first and last evaluable phase"
     ),
     x = NULL, y = "run_ok / submitted"
   ) +

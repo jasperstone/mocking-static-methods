@@ -20,6 +20,7 @@ import email.utils
 import json
 import os
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -33,6 +34,7 @@ ENV_FILE = REPO_ROOT / ".env.foundry"
 OPENAI_CHAT_API = "2024-10-21"
 OPENAI_RESPONSES_API = "2025-04-01-preview"
 INFERENCE_API = "2024-05-01-preview"
+INFERENCE_FALLBACK_APIS = ("2024-05-01-preview", "2024-02-15-preview")
 
 
 @dataclass
@@ -68,6 +70,7 @@ def _load_env() -> dict[str, str]:
     for k in (
         "FOUNDRY_ENDPOINT",
         "FOUNDRY_API_KEY",
+        "FOUNDRY_MODEL_ALIASES",
         "FOUNDRY_PANEL_OPENAI_CHAT",
         "FOUNDRY_PANEL_OPENAI_RESPONSES",
         "FOUNDRY_PANEL_INFERENCE",
@@ -79,8 +82,38 @@ def _load_env() -> dict[str, str]:
     ):
         if os.environ.get(k):
             env[k] = os.environ[k]
+    # Optional per-model/project credentials for split Foundry setups.
+    # Examples: FOUNDRY_ENDPOINT_PHI + FOUNDRY_API_KEY_PHI.
+    for key, value in os.environ.items():
+        if value and (key.startswith("FOUNDRY_ENDPOINT_") or key.startswith("FOUNDRY_API_KEY_")):
+            env[key] = value
     _ENV_CACHE = env
     return env
+
+
+def _resolve_model_alias(env: dict[str, str], model_id: str) -> str:
+    raw = env.get("FOUNDRY_MODEL_ALIASES", "").strip()
+    if not raw:
+        return model_id
+    for item in raw.split(","):
+        pair = item.strip()
+        if not pair or ":" not in pair:
+            continue
+        src, dst = pair.split(":", 1)
+        if model_id == src.strip() and dst.strip():
+            return dst.strip()
+    return model_id
+
+
+def _is_project_endpoint(endpoint: str) -> bool:
+    return "/api/projects/" in endpoint
+
+
+def _normalize_endpoint(endpoint: str) -> str:
+    endpoint = endpoint.strip()
+    if not endpoint.endswith("/"):
+        endpoint += "/"
+    return endpoint
 
 
 def _env_int(env: dict[str, str], key: str, default: int, min_value: int = 0) -> int:
@@ -120,6 +153,57 @@ def _surface(model_id: str) -> str:
         f"model '{model_id}' is not in any FOUNDRY_PANEL_* list "
         f"(chat={sorted(chat)} resp={sorted(resp)} inf={sorted(inf)})"
     )
+
+
+def _model_credential_suffixes(model_id: str) -> list[str]:
+    """Return candidate suffixes for model-scoped credentials.
+
+    Preference order is exact model-id first (normalized), then family aliases.
+    Example: phi-4 -> PHI_4, PHI
+    """
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", model_id).strip("_").upper()
+    out: list[str] = [normalized] if normalized else []
+    if model_id.startswith("phi-"):
+        out.append("PHI")
+    elif model_id.startswith("grok-"):
+        out.append("GROK")
+    elif model_id.startswith("llama-"):
+        out.append("LLAMA")
+    elif model_id.startswith("codestral-"):
+        out.append("CODESTRAL")
+
+    # Keep order stable and remove duplicates.
+    deduped: list[str] = []
+    for suffix in out:
+        if suffix and suffix not in deduped:
+            deduped.append(suffix)
+    return deduped
+
+
+def _resolve_credentials(env: dict[str, str], model_id: str) -> tuple[str, str]:
+    """Resolve endpoint/key with optional model-scoped override.
+
+    If either endpoint or key exists for a model suffix, require both so we do
+    not silently fall back to the wrong project in split deployments.
+    """
+    for suffix in _model_credential_suffixes(model_id):
+        endpoint_key = f"FOUNDRY_ENDPOINT_{suffix}"
+        api_key_key = f"FOUNDRY_API_KEY_{suffix}"
+        endpoint = env.get(endpoint_key, "")
+        api_key = env.get(api_key_key, "")
+        if endpoint or api_key:
+            if not endpoint or not api_key:
+                raise FoundryError(
+                    f"incomplete model credentials for '{model_id}': "
+                    f"expected both {endpoint_key} and {api_key_key}"
+                )
+            return endpoint, api_key
+
+    endpoint = env.get("FOUNDRY_ENDPOINT", "")
+    api_key = env.get("FOUNDRY_API_KEY", "")
+    if not endpoint or not api_key:
+        raise FoundryError("FOUNDRY_ENDPOINT and FOUNDRY_API_KEY must be set (in .env.foundry or env vars)")
+    return endpoint, api_key
 
 
 def list_panel() -> list[str]:
@@ -169,6 +253,18 @@ def _is_retriable_http(code: int, body_txt: str) -> bool:
     return code in (408, 429, 500, 502, 503, 504) or _looks_rate_limited(body_txt)
 
 
+def _looks_api_version_unsupported(body_txt: str) -> bool:
+    txt = body_txt.lower()
+    needles = (
+        "api version not supported",
+        "unsupported api version",
+        "unsupported api-version",
+        "invalid api version",
+        "api-version not supported",
+    )
+    return any(n in txt for n in needles)
+
+
 def _compute_backoff_s(
     *,
     attempt: int,
@@ -178,7 +274,9 @@ def _compute_backoff_s(
     retry_after_s: float | None = None,
 ) -> float:
     if retry_after_s is not None:
-        return min(retry_after_s, retry_max_delay_s)
+        # Honor provider-directed cooldown windows as-is. Clamping Retry-After
+        # downward can create retry storms that keep triggering 429.
+        return max(0.0, retry_after_s)
     exp_s = min(retry_max_delay_s, retry_base_delay_s * (2 ** attempt))
     jitter = random.uniform(0.0, exp_s * retry_jitter_ratio)
     return exp_s + jitter
@@ -349,10 +447,8 @@ def generate(
     retry_jitter_ratio: float | None = None,
 ) -> GenerationResult:
     env = _load_env()
-    endpoint = env.get("FOUNDRY_ENDPOINT")
-    key = env.get("FOUNDRY_API_KEY")
-    if not endpoint or not key:
-        raise FoundryError("FOUNDRY_ENDPOINT and FOUNDRY_API_KEY must be set (in .env.foundry or env vars)")
+    endpoint, key = _resolve_credentials(env, model_id)
+    endpoint = _normalize_endpoint(endpoint)
 
     if retry_max_retries is None:
         retry_max_retries = _env_int(env, "FOUNDRY_RETRY_MAX_RETRIES", default=8, min_value=0)
@@ -368,17 +464,33 @@ def generate(
     surface = _surface(model_id)
 
     if surface == "openai_chat":
-        url = f"{endpoint}openai/deployments/{model_id}/chat/completions?api-version={OPENAI_CHAT_API}"
-        body = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature,
-            "top_p": top_p,
-            "max_tokens": max_output_tokens,
-            "seed": seed,
-        }
+        resolved_model = _resolve_model_alias(env, model_id)
+        if _is_project_endpoint(endpoint):
+            # Project-scoped services.ai endpoints use the v1 path without
+            # api-version query parameter.
+            url = f"{endpoint}openai/v1/chat/completions"
+            body = {
+                "model": resolved_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_output_tokens,
+            }
+        else:
+            url = f"{endpoint}openai/deployments/{resolved_model}/chat/completions?api-version={OPENAI_CHAT_API}"
+            body = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_output_tokens,
+                "seed": seed,
+            }
         payload, dt = _request(
             url,
             body,
@@ -421,9 +533,36 @@ def generate(
         return _parse_responses(payload, model_id, dt)
 
     # inference surface (model name in body)
-    url = f"{endpoint}models/chat/completions?api-version={INFERENCE_API}"
+    resolved_model = _resolve_model_alias(env, model_id)
+    if _is_project_endpoint(endpoint):
+        # Project-scoped services.ai endpoints use the v1 path without
+        # api-version query parameter.
+        url = f"{endpoint}openai/v1/chat/completions"
+        body = {
+            "model": resolved_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_output_tokens,
+        }
+        payload, dt = _request(
+            url,
+            body,
+            key,
+            timeout_s,
+            retry_max_retries=retry_max_retries,
+            retry_budget_s=retry_budget_s,
+            retry_base_delay_s=retry_base_delay_s,
+            retry_max_delay_s=retry_max_delay_s,
+            retry_jitter_ratio=retry_jitter_ratio,
+        )
+        return _parse_chat(payload, model_id, dt)
+
     body = {
-        "model": model_id,
+        "model": resolved_model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -432,15 +571,28 @@ def generate(
         "top_p": top_p,
         "max_tokens": max_output_tokens,
     }
-    payload, dt = _request(
-        url,
-        body,
-        key,
-        timeout_s,
-        retry_max_retries=retry_max_retries,
-        retry_budget_s=retry_budget_s,
-        retry_base_delay_s=retry_base_delay_s,
-        retry_max_delay_s=retry_max_delay_s,
-        retry_jitter_ratio=retry_jitter_ratio,
-    )
-    return _parse_chat(payload, model_id, dt)
+    last_err: FoundryError | None = None
+    for idx, api_version in enumerate(INFERENCE_FALLBACK_APIS):
+        url = f"{endpoint}models/chat/completions?api-version={api_version}"
+        try:
+            payload, dt = _request(
+                url,
+                body,
+                key,
+                timeout_s,
+                retry_max_retries=retry_max_retries,
+                retry_budget_s=retry_budget_s,
+                retry_base_delay_s=retry_base_delay_s,
+                retry_max_delay_s=retry_max_delay_s,
+                retry_jitter_ratio=retry_jitter_ratio,
+            )
+            return _parse_chat(payload, model_id, dt)
+        except FoundryError as e:
+            msg = str(e)
+            if idx + 1 < len(INFERENCE_FALLBACK_APIS) and _looks_api_version_unsupported(msg):
+                last_err = e
+                continue
+            raise
+    if last_err is not None:
+        raise last_err
+    raise FoundryError("inference API call failed without a recoverable fallback path")

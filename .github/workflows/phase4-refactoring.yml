@@ -56,6 +56,10 @@ on:
         description: "Max submit_test → check cycles per cell (1 = phase 2 behavior; 4 = full fix-up loop). Each cycle compiles AND runs the candidate."
         required: false
         default: "4"
+      max_parallel:
+        description: "Max concurrent generator jobs. Use a lower value (e.g., 1-2) for heavily throttled models like grok/llama."
+        required: false
+        default: "1"
       run_timeout_s:
         description: "Per-submission `dotnet test` timeout in seconds (default 60). Hung tests are reported back to the model as run_ok=false."
         required: false
@@ -196,7 +200,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | shard_spec: ${{ github.event.inputs.shard_spec || 'none' }} | run_window: ${{ github.event.inputs.run_window }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }}"
+          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | shard_spec: ${{ github.event.inputs.shard_spec || 'none' }} | run_window: ${{ github.event.inputs.run_window }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }} | max_parallel: ${{ github.event.inputs.max_parallel }}"
 
   plan:
     name: "Plan shards"
@@ -213,11 +217,11 @@ jobs:
         id: plan
         shell: bash
         env:
-          TARGET_SET: ${{ inputs.target_set }}
-          RUN_WINDOW: ${{ inputs.run_window }}
-          MODELS: ${{ inputs.models }}
-          REPOS: ${{ inputs.repos }}
-          SHARD_SPEC: ${{ inputs.shard_spec }}
+          TARGET_SET: ${{ github.event.inputs.target_set }}
+          RUN_WINDOW: ${{ github.event.inputs.run_window }}
+          MODELS: ${{ github.event.inputs.models }}
+          REPOS: ${{ github.event.inputs.repos }}
+          SHARD_SPEC: ${{ github.event.inputs.shard_spec }}
         run: |
           set -euo pipefail
           python3 .github/scripts/plan_matrix.py > matrix.json
@@ -246,21 +250,30 @@ jobs:
     strategy:
       fail-fast: false
       # Keep shard fan-out below Foundry burst limits to avoid 429-driven dropouts.
-      max-parallel: 8
+      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel) }}
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
-      FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
-      FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+      # Default credentials (backward compatible).
+      FOUNDRY_ENDPOINT_DEFAULT: ${{ secrets.FOUNDRY_ENDPOINT }}
+      FOUNDRY_API_KEY_DEFAULT: ${{ secrets.FOUNDRY_API_KEY }}
+      # Optional model-specific credentials so grok/llama can target different projects.
+      FOUNDRY_ENDPOINT_PHI: ${{ secrets.FOUNDRY_ENDPOINT_PHI }}
+      FOUNDRY_API_KEY_PHI: ${{ secrets.FOUNDRY_API_KEY_PHI }}
+      FOUNDRY_ENDPOINT_GROK: ${{ secrets.FOUNDRY_ENDPOINT_GROK }}
+      FOUNDRY_API_KEY_GROK: ${{ secrets.FOUNDRY_API_KEY_GROK }}
+      FOUNDRY_ENDPOINT_LLAMA: ${{ secrets.FOUNDRY_ENDPOINT_LLAMA }}
+      FOUNDRY_API_KEY_LLAMA: ${{ secrets.FOUNDRY_API_KEY_LLAMA }}
       FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
       FOUNDRY_PANEL_OPENAI_RESPONSES: ""
       FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
+      FOUNDRY_MODEL_ALIASES: "grok-4-1-fast:grok-4-1-fast-non-reasoning"
       # Foundry adapter retry tuning (env-read by tools/generation/adapters/foundry.py).
       # Goal: absorb transient/provider-side throttling instead of treating 429s as hard shard failures.
-      FOUNDRY_RETRY_MAX_RETRIES: "40"
-      FOUNDRY_RETRY_BUDGET_S: "1800"
+      FOUNDRY_RETRY_MAX_RETRIES: "200"
+      FOUNDRY_RETRY_BUDGET_S: "21600"
       FOUNDRY_RETRY_BASE_DELAY_S: "1"
-      FOUNDRY_RETRY_MAX_DELAY_S: "60"
-      FOUNDRY_RETRY_JITTER_RATIO: "0.25"
+      FOUNDRY_RETRY_MAX_DELAY_S: "600"
+      FOUNDRY_RETRY_JITTER_RATIO: "0.5"
       # Make sure compile_only.py picks up the SDK on $PATH (not the home-dir copy).
       DOTNET: "dotnet"
       DOTNET_NOLOGO: "1"
@@ -278,6 +291,42 @@ jobs:
 
       - uses: actions/checkout@v5
 
+      - name: Select Foundry credentials for requested model set
+        shell: bash
+        run: |
+          set -euo pipefail
+          model='${{ matrix.model }}'
+
+          endpoint="${FOUNDRY_ENDPOINT_DEFAULT:-}"
+          key="${FOUNDRY_API_KEY_DEFAULT:-}"
+          source="default"
+
+          # Route credentials per shard model, not top-level inputs.models.
+          # This keeps mixed-model dispatches (models=all) correct for phi/grok/llama.
+          if [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI:-}" ]] && [[ -n "${FOUNDRY_API_KEY_PHI:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_PHI}"
+            key="${FOUNDRY_API_KEY_PHI}"
+            source="phi"
+          elif [[ "$model" == "grok-4-1-fast" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_API_KEY_GROK:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_GROK}"
+            key="${FOUNDRY_API_KEY_GROK}"
+            source="grok"
+          elif [[ "$model" == "llama-3.3-70b-instruct" ]] && [[ -n "${FOUNDRY_ENDPOINT_LLAMA:-}" ]] && [[ -n "${FOUNDRY_API_KEY_LLAMA:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_LLAMA}"
+            key="${FOUNDRY_API_KEY_LLAMA}"
+            source="llama"
+          fi
+
+          # Defensively strip CR/LF to avoid invalid header/path values from secrets.
+          endpoint="$(printf '%s' "$endpoint" | tr -d '\r\n')"
+          key="$(printf '%s' "$key" | tr -d '\r\n')"
+
+          {
+            echo "FOUNDRY_ENDPOINT=${endpoint}"
+            echo "FOUNDRY_API_KEY=${key}"
+            echo "FOUNDRY_CREDENTIAL_SOURCE=${source}"
+          } >> "$GITHUB_ENV"
+
       - name: Verify Foundry secrets present
         shell: bash
         run: |
@@ -286,13 +335,14 @@ jobs:
             echo "::error::FOUNDRY_ENDPOINT or FOUNDRY_API_KEY missing from repo secrets"
             exit 1
           fi
+          echo "credential source: ${FOUNDRY_CREDENTIAL_SOURCE:-unknown}"
           echo "endpoint length: ${#FOUNDRY_ENDPOINT}, key length: ${#FOUNDRY_API_KEY}"
 
       - name: Verify target set integrity
         shell: bash
         run: |
           set -euo pipefail
-          have=$(sha256sum "targets/${{ inputs.target_set }}/targets.csv" | awk '{print $1}')
+          have=$(sha256sum "targets/${{ github.event.inputs.target_set }}/targets.csv" | awk '{print $1}')
           want="${{ needs.plan.outputs.target_sha256 }}"
           if [[ "$want" != "$have" ]]; then
             echo "::error::target_sha256 drift: want=$want have=$have"
@@ -358,14 +408,14 @@ jobs:
       - name: Run agentic refactor generator (writer + apply_refactor tool)
         shell: bash
         env:
-          TARGET_SET: ${{ inputs.target_set }}
+          TARGET_SET: ${{ github.event.inputs.target_set }}
           MODEL: ${{ matrix.model }}
           REPO: ${{ matrix.repo }}
           RUN_INDEX: ${{ matrix.run_index }}
           TARGET_IDS: ${{ matrix.target_ids }}
-          LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
-          MAX_COMPILE_ATTEMPTS: ${{ inputs.max_compile_attempts }}
-          RUN_TIMEOUT_S: ${{ inputs.run_timeout_s }}
+          LIMIT_PER_REPO: ${{ github.event.inputs.limit_per_repo }}
+          MAX_COMPILE_ATTEMPTS: ${{ github.event.inputs.max_compile_attempts }}
+          RUN_TIMEOUT_S: ${{ github.event.inputs.run_timeout_s }}
           PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail

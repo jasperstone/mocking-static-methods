@@ -50,6 +50,11 @@ Test/coverage agent. Owns `tools/test_counts/`, `tools/test_discovery/`, `tools/
 ### 2026-05-16 — tools/viz restructure (commit pending)
 Split `render_phase3.R` into `tools/viz/plots/*.R` + `tools/viz/lib/{load,theme}.R`. Added `aggregate_phase_results.py` → derived `tools/viz/data/per_model_phase.csv`. Four new plot families: `successful_tests_progression`, `coverage_baseline`, `cost_efficiency`, `cost_per_passing_test`. Phase2 totals reconcile to COSTS.md. Decision: `2026-05-16: tools/viz restructure`.
 
+### 2026-07-22 — phase-4 chart refresh
+- `tools/viz/aggregate_phase_results.py` already reads restored `phase4-refactoring/results/<model>/run_*/attempts.jsonl`; the missing phase-4 charts on this branch were caused by a stale committed `tools/viz/data/per_model_phase.csv`, not a broken phase-4 source walk.
+- `tools/viz/plots/cost_efficiency.R` was silently excluding phase 4 because `scale_shape_manual()` only declared shapes through phase 3. Fix: build the present phase levels dynamically and add a dedicated phase-4 shape (`18`) so fresh aggregate rows render instead of dropping.
+- Later-phase coverage should not be added to `coverage-baseline.png` yet: the repo currently exposes only phase-1 coverage inputs (`baseline_coverage.csv` / `phases/phase1-baseline/reports/unified_table.csv`). No committed phase-2/3/4 coverage aggregate exists to extend that chart truthfully.
+
 ### 2026-05-09 — Cobertura dedup fix (see Learnings above for details)
 Per-csproj cobertura inflation root-caused and fixed in `build_unified_table.py`. TOTAL 33.04→58.23%.
 

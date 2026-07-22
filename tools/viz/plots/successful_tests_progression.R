@@ -47,8 +47,19 @@ movers <- df |>
 
 top_mover <- if (nrow(movers) > 0) movers$model[[1]] else NA_character_
 
-df <- df |>
-  mutate(highlight = ifelse(model == top_mover, "top mover", "other"))
+model_levels <- unique(df$model)
+model_palette <- setNames(scales::hue_pal()(length(model_levels)), model_levels)
+wrapped_subtitle <- paste(
+  strwrap(
+    sprintf(
+      "Run-OK percentage (run_ok/submitted) per model; non-evaluable phases (submitted=0) are omitted. Highlighted: %s (biggest %s).",
+      if (is.na(top_mover)) "(none)" else top_mover,
+      "movement between first and last evaluable phase"
+    ),
+    width = 96
+  ),
+  collapse = "\n"
+)
 
 last_phase <- tail(phase_levels, 1)
 first_phase <- head(phase_levels, 1)
@@ -60,34 +71,49 @@ first_phase <- head(phase_levels, 1)
     slice_max(as.integer(phase), n = 1, with_ties = FALSE) |>
     ungroup()
 
-p <- ggplot(df, aes(x = phase, y = run_ok_pct, group = model, colour = highlight)) +
+endpoint <- endpoint |>
+  mutate(
+    label_group = ifelse(row_number() %% 2 == 0, "high", "low"),
+    label_y = run_ok_pct + ifelse(label_group == "high", 3.0, -3.0)
+  )
+
+start_labels <- df |>
+  filter(phase == first_phase) |>
+  mutate(
+    label_group = ifelse(row_number() %% 2 == 0, "high", "low"),
+    label_y = run_ok_pct + ifelse(label_group == "high", 2.0, -2.0)
+  )
+
+p <- ggplot(df, aes(x = phase, y = run_ok_pct, group = model, colour = model)) +
   geom_line(linewidth = 1.1, alpha = 0.85) +
   geom_point(size = 2.5) +
   geom_text(
     data = endpoint,
-    aes(label = model),
-    hjust = 0, nudge_x = 0.05, vjust = -0.6, size = 3.2
+    aes(y = label_y, label = model, colour = model),
+    hjust = 0, nudge_x = 0.10, size = 3.0, fontface = "bold",
+    check_overlap = TRUE
   ) +
   geom_text(
-    data = df |> filter(phase == first_phase),
-    aes(label = sprintf("%.1f%%", run_ok_pct)),
-    hjust = 1, nudge_x = -0.05, size = 3, colour = "grey30"
+    data = start_labels,
+    aes(y = label_y, label = sprintf("%.1f%%", run_ok_pct), colour = model),
+    hjust = 1, nudge_x = -0.10, size = 2.9,
+    check_overlap = TRUE
   ) +
-  scale_colour_manual(values = c("top mover" = "#c44e52", "other" = "grey55"),
+  scale_colour_manual(values = model_palette,
                       guide = "none") +
   scale_y_continuous(labels = label_percent(scale = 1)) +
-  scale_x_discrete(expand = expansion(mult = c(0.10, 0.30))) +
+  scale_x_discrete(expand = expansion(mult = c(0.18, 0.42))) +
   labs(
     title    = "Successful test progression across phases",
-    subtitle = sprintf(
-      "Run-OK percentage (run_ok/submitted) per model; non-evaluable phases (submitted=0) are omitted. Highlighted: %s (biggest %s).",
-      if (is.na(top_mover)) "(none)" else top_mover,
-      "movement between first and last evaluable phase"
-    ),
+    subtitle = wrapped_subtitle,
     x = NULL, y = "run_ok / submitted"
   ) +
   theme_paper() +
-  theme(panel.grid.major.x = element_blank())
+  theme(
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(14, 28, 12, 28),
+    plot.subtitle = element_text(lineheight = 1.05)
+  )
 
 out <- file.path(figures_dir(), "progression-runok.png")
 ggsave(out, p, width = 9, height = 6, dpi = 150, bg = "white")

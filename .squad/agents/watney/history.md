@@ -58,3 +58,13 @@ Build/infra agent. `.devcontainer/` exists. Each repo in `cloned_repos/` has its
 	- New failure classification: restore failures now emit `errors[0].code = RESTORE_FAIL` (with parsed compile-style details appended when available), so verify-build rejections can be split from pure compile failures without changing revert semantics.
 	- Behavior preserved: any verify-build failure still auto-reverts the edit and returns `reason=refactor_rejected` with attached `errors`.
 	- Validation passed: `pytest -q tools/generation/tests/test_roslyn_tool.py` => **38 passed**; `pytest -q tools/generation/tests/test_refactor_smoke.py -k "refactor_smoke or wrapper_interface_via_seam_legit"` => **11 passed**.
+
+- **2026-07-21** — Phase-4 latest-run report sync (`COSTS_AUTOGEN.md`, `HEADLINE.md`, viz CSVs):
+	- Latest successful runs for incremental refresh were model-specific: `grok-4-1-fast` from run `29612308097` and `llama-3.3-70b-instruct` from run `29612257530` (both full run_1..run_3 chunked shards).
+	- Older run artifacts for some models were expired on GitHub (`gh run download` returned "no valid artifacts"); local `backfill-*` cache had to be used for baseline restoration.
+	- `tools/analysis/consolidate_phase4_artifacts.py` currently skips chunk-suffixed artifact names (`-chunkXofY`), so chunk-heavy runs must be applied via `tools/analysis/patch_phase4_reruns.py` to avoid data loss.
+	- Docker-based R rendering was blocked on this host (`/usr/bin/docker: Input/output error`) and no local `Rscript` was available, so figure re-render could not be completed in this session.
+
+### 2026-07-21 — Cross-agent consolidation
+- Beck's mismatch check and Vogel's estimator-semantic fix were accepted by Lewis lead gate; phase4 headline/cost data is now canonical in ledger.
+- Remaining blocker after this merge pass is render-environment availability only (Docker/R runtime), not report-data coherence.

@@ -1,0 +1,67 @@
+{
+  "repo": "jasperstone/mocking-static-methods",
+  "branch": "vogel/phase4-workflow-runwindow-chunk3-parallel8",
+  "timestamp_utc": "2026-07-21T18:12:44.994028+00:00",
+  "success_dispatches": [],
+  "failures_or_skips": [
+    {
+      "wave": "A",
+      "workflow": "phase3-generate.yml",
+      "scope": "phase3 grok-4-1-fast runs2+3",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    },
+    {
+      "wave": "A",
+      "workflow": "phase3-generate.yml",
+      "scope": "phase3 llama-3.3-70b-instruct run1",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    },
+    {
+      "wave": "A",
+      "workflow": "phase3-generate.yml",
+      "scope": "phase3 llama-3.3-70b-instruct run3",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    },
+    {
+      "wave": "A",
+      "workflow": "phase3-generate.yml",
+      "scope": "phase3 phi-4 run2",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    },
+    {
+      "wave": "B",
+      "workflow": "phase2-generate.yml",
+      "scope": "phase2 gpt-4.1-mini runs1..3",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    },
+    {
+      "wave": "B",
+      "workflow": "phase2-generate.yml",
+      "scope": "phase2 gpt-4.1-nano runs1..3",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    },
+    {
+      "wave": "B",
+      "workflow": "phase2-generate.yml",
+      "scope": "phase2 grok-4-1-fast runs1..3",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    },
+    {
+      "wave": "B",
+      "workflow": "phase2-generate.yml",
+      "scope": "phase2 llama-3.3-70b-instruct runs1..3",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    },
+    {
+      "wave": "B",
+      "workflow": "phase2-generate.yml",
+      "scope": "phase2 gpt-5-codex runs1..3",
+      "reason": "Dispatched but run ID not resolved within polling window"
+    }
+  ],
+  "monitor_commands": [
+    "gh run list --workflow phase3-generate.yml --branch vogel/phase4-workflow-runwindow-chunk3-parallel8 --event workflow_dispatch --limit 20",
+    "gh run list --workflow phase2-generate.yml --branch vogel/phase4-workflow-runwindow-chunk3-parallel8 --event workflow_dispatch --limit 20",
+    "gh run watch <run_id> --exit-status"
+  ]
+}

@@ -58,6 +58,21 @@ dependency can now be parameterized or wrapped. The `no_fact_methods` bucket is
 explicitly **not** a phase-4 target — that structural problem is what phase 5
 (reviewer) addresses.
 
+## Reliability classification policy
+
+Model failures are counted only for evaluative attempts where the model had a real
+chance to generate and submit a candidate. Infra/tooling failures (auth,
+rate-limit, timeout, 5xx/service unavailable, network/provider incidents) are
+classified as rerun-required reliability events and excluded from model failure
+rates.
+
+## Operational checklist for publishable runs
+
+1. Detect infra-heavy buckets per model/run (auth/rate-limit/timeout/5xx/network).
+2. Rerun only targeted affected IDs or affected model-run shards.
+3. Re-aggregate all phase outputs after reruns land.
+4. Publish only the re-aggregated report; mark interim outputs provisional.
+
 ## What this report will contain post-dispatch
 
 1. **Per-model success table** (same shape as phase 3 HEADLINE, plus a

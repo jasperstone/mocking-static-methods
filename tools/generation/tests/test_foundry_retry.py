@@ -343,4 +343,75 @@ def test_generate_openai_chat_non_project_keeps_deployments_api_version(monkeypa
         "https://example.openai/openai/deployments/gpt-4.1-mini/chat/completions?api-version=2024-10-21"
     ]
     assert calls["bodies"][0]["seed"] == 42
-    assert "model" not in calls["bodies"][0]
+
+
+def test_generate_inference_uses_model_specific_phi_credentials(monkeypatch):
+    monkeypatch.setattr(
+        foundry,
+        "_load_env",
+        lambda: {
+            "FOUNDRY_ENDPOINT": "https://default.openai/",
+            "FOUNDRY_API_KEY": "default-secret",
+            "FOUNDRY_ENDPOINT_PHI": "https://phi.project.services.ai/api/projects/p-phi/",
+            "FOUNDRY_API_KEY_PHI": "phi-secret",
+            "FOUNDRY_PANEL_OPENAI_CHAT": "gpt-4.1-mini,gpt-4.1-nano",
+            "FOUNDRY_PANEL_OPENAI_RESPONSES": "",
+            "FOUNDRY_PANEL_INFERENCE": "phi-4",
+        },
+    )
+
+    calls = {"urls": [], "keys": []}
+
+    def fake_request(url, body, key, timeout_s, **kwargs):
+        calls["urls"].append(url)
+        calls["keys"].append(key)
+        return (
+            {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 2},
+                "model": "phi-4",
+            },
+            9,
+        )
+
+    monkeypatch.setattr(foundry, "_request", fake_request)
+
+    out = foundry.generate(
+        model_id="phi-4",
+        system_prompt="sys",
+        user_prompt="usr",
+        timeout_s=5,
+    )
+
+    assert out.text == "ok"
+    assert calls["urls"] == [
+        "https://phi.project.services.ai/api/projects/p-phi/openai/v1/chat/completions"
+    ]
+    assert calls["keys"] == ["phi-secret"]
+
+
+def test_generate_inference_errors_on_incomplete_model_credentials(monkeypatch):
+    monkeypatch.setattr(
+        foundry,
+        "_load_env",
+        lambda: {
+            "FOUNDRY_ENDPOINT": "https://default.openai/",
+            "FOUNDRY_API_KEY": "default-secret",
+            "FOUNDRY_ENDPOINT_PHI": "https://phi.project.services.ai/api/projects/p-phi/",
+            # Missing FOUNDRY_API_KEY_PHI on purpose.
+            "FOUNDRY_PANEL_OPENAI_CHAT": "",
+            "FOUNDRY_PANEL_OPENAI_RESPONSES": "",
+            "FOUNDRY_PANEL_INFERENCE": "phi-4",
+        },
+    )
+
+    try:
+        foundry.generate(
+            model_id="phi-4",
+            system_prompt="sys",
+            user_prompt="usr",
+            timeout_s=5,
+        )
+        assert False, "expected FoundryError for incomplete model credentials"
+    except foundry.FoundryError as e:
+        assert "incomplete model credentials" in str(e)

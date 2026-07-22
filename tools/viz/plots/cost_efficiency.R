@@ -41,7 +41,9 @@ if (nrow(df) == 0) {
     scale_shape_manual(values = c(
       "phase2-singleshot"   = 15,
       "phase2-agentic"      = 16,
-      "phase3-agentic-loop" = 17
+      "phase3-agentic-loop" = 17,
+      "phase4-refactoring"  = 18,
+      "phase5-multiagent"   = 8
     ), name = "phase") +
     labs(
       title    = "Cost efficiency \u2014 dollars spent vs tests that actually pass",

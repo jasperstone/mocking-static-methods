@@ -83,3 +83,16 @@ Pre-2026-05-08 entries (Phase 1 baseline, test-discovery workflow, Orleans BVT d
 - RESTORE markers observed in `reason_token`: none (wrapper and parameterize).
 - `tools/generation/results/applicability_all.csv` checksum unchanged: `fcdbec3c7cce73e3a5e8d05c6fea69912d2367a3093cf7d7309c8405e055ba63`.
 2026-06-17T01:56:21Z | Ran baselinefix wrapper+parameterize recheck sweeps; both completed, CSVs refreshed, summaries captured.
+
+### 2026-07-21 — phase4 latest-run coherence verification (post-refresh)
+- Verified `phases/phase4-refactoring/results/{model}/run_1..run_3` exists for all six canonical models: `codestral-2501`, `gpt-4.1-mini`, `gpt-4.1-nano`, `grok-4-1-fast`, `llama-3.3-70b-instruct`, `phi-4`.
+- Confirmed `tools/viz/data/per_model_phase.csv` has six `phase4-refactoring` rows and all key metrics are populated (`attempts`, `submitted`, `compile_ok`, `run_ok`, `tooling_excluded`, `prompt_tokens`, `completion_tokens`, `cost_usd`).
+- `phases/phase4-refactoring/HEADLINE.md` is coherent with the CSV (matches `submitted`, `compile_ok`, `run_ok`, `tooling_excluded` per model).
+- Mismatch detected in `phases/phase4-refactoring/COSTS_AUTOGEN.md`: rows for `llama-3.3-70b-instruct` and `phi-4` do not match CSV-derived phase4 values (`calls` and token-list cost differ), while other four models match. Treat COSTS_AUTOGEN as stale/inconsistent for those two rows until regenerated coherently from the refreshed data.
+
+### 2026-07-21 — Cross-agent consolidation
+- Vogel aligned estimator aggregation with tooling-excluded semantics and regenerated artifacts; mismatch is now resolved for `llama-3.3-70b-instruct` and `phi-4`.
+- Lewis lead review approved the refreshed phase4 headline/cost state; remaining risk is limited to figure rerender environment availability.
+
+### 2026-07-21 — phi-4 phase4 underperformance forensic note
+- Reconfirmed with raw `attempts.jsonl` + evaluator-join logic from `tools/viz/aggregate_phase_results.py`: phase4 `phi-4` has 900 raw rows, 604 tooling-excluded non-submissions (mostly adapter timeout/connection), leaving 296 evaluable attempts with 92 submitted; submitted outcomes are 91 compile-fail, 1 compile-pass/run-fail, 0 run-pass. This supports framing phase4 decline as a two-layer effect: provider/reliability gating first, then low downstream compile quality on surviving submissions.

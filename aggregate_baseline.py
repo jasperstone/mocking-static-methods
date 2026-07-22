@@ -20,6 +20,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -52,6 +53,7 @@ PINNED_SHAS = {
 # (e.g. when one run had to be re-attempted for a subset of repos).
 RUN_IDS = ["25495265941"]
 REPORT_DATE = "2026-05-07"
+LEGACY_BASELINE_REPORT = REPO_ROOT / "phases" / "phase1-baseline" / "REPORT_PHASE1_LEGACY_7REPO.md"
 
 
 def _git(*args: str) -> str:
@@ -143,6 +145,62 @@ def parse_cobertura_repo(repo: str) -> dict:
     }
 
 
+def parse_legacy_baseline_report() -> dict[str, dict]:
+    """Parse coverage + static totals from the committed legacy phase-1 report.
+
+    This is used as a non-cosmetic fallback when local coverage artifacts are
+    unavailable, so we don't silently overwrite baseline_coverage.csv with zeros.
+    """
+    if not LEGACY_BASELINE_REPORT.is_file():
+        return {}
+
+    rows: dict[str, dict] = {}
+    in_table = False
+    with LEGACY_BASELINE_REPORT.open() as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                if in_table:
+                    break
+                continue
+            if line.startswith("| Repo | Lines (total)"):
+                in_table = True
+                continue
+            if not in_table:
+                continue
+            if line.startswith("|------"):
+                continue
+            if not line.startswith("|"):
+                continue
+
+            cols = [c.strip() for c in line.strip("|").split("|")]
+            if len(cols) < 9:
+                continue
+
+            repo = cols[0]
+            repo_norm = repo.replace("**", "")
+            if repo_norm == "TOTAL":
+                continue
+
+            def parse_int(s: str) -> int:
+                return int(re.sub(r"[^0-9]", "", s) or "0")
+
+            def parse_pct(s: str) -> float:
+                return float(s.replace("%", "").strip())
+
+            rows[repo_norm] = {
+                "lines_total": parse_int(cols[1]),
+                "lines_covered": parse_int(cols[2]),
+                "line_pct": parse_pct(cols[3]),
+                "branches_total": parse_int(cols[4]),
+                "branches_covered": parse_int(cols[5]),
+                "branch_pct": parse_pct(cols[6]),
+                "static_call_sites": parse_int(cols[7]),
+                "classes_with_static_calls": parse_int(cols[8]),
+            }
+    return rows
+
+
 def run_static_analyzer(repo: str) -> list[dict]:
     """Invoke StaticCallAnalyzer against cloned_repos/<repo>/. Returns parsed JSON list."""
     repo_path = CLONED_DIR / repo
@@ -222,6 +280,25 @@ def aggregate_static(repo: str, rows: list[dict]) -> dict:
     }
 
 
+def load_static_from_json(repo: str) -> dict | None:
+    """Load precomputed static counts if analyzer cannot run locally."""
+    p = ARTIFACTS_DIR / repo / "static_call_classes.json"
+    if not p.is_file():
+        return None
+    try:
+        rows = json.loads(p.read_text())
+    except json.JSONDecodeError:
+        return None
+    total = 0
+    for r in rows:
+        total += int(r.get("static_call_count", 0) or 0)
+    return {
+        "static_call_sites": total,
+        "classes_with_static_calls": len(rows),
+        "per_class_json": str(p.relative_to(REPO_ROOT)),
+    }
+
+
 def fmt_pct(p: float) -> str:
     return f"{p:.2f}%"
 
@@ -230,10 +307,28 @@ def main() -> int:
     if not ANALYZER_WRAPPER.exists():
         print(f"Analyzer wrapper not found: {ANALYZER_WRAPPER}", file=sys.stderr)
         return 1
-    if shutil.which("docker") is None:
-        print("`docker` is required on PATH to run StaticCallAnalyzer.", file=sys.stderr)
-        print("Install Docker, or build & run the analyzer manually with .NET 8 SDK.", file=sys.stderr)
-        return 1
+
+    has_docker = shutil.which("docker") is not None
+    if not has_docker:
+        print("! docker not found; static counts will use existing baseline_artifacts/*/static_call_classes.json when available", file=sys.stderr)
+
+    # Coverage guardrail + fallback source.
+    # If no cobertura XML exists locally, use committed phase1 baseline report
+    # instead of writing an all-zero baseline file.
+    total_xml = 0
+    for repo in REPOS:
+        total_xml += len(list((ARTIFACTS_DIR / repo).rglob("coverage.cobertura.xml")))
+    legacy_cov = parse_legacy_baseline_report() if total_xml == 0 else {}
+    if total_xml == 0 and not legacy_cov:
+        print(
+            "No cobertura XML found under baseline_artifacts/ and legacy fallback ",
+            f"report missing: {LEGACY_BASELINE_REPORT}",
+            file=sys.stderr,
+        )
+        print("Refusing to overwrite baseline_coverage.csv with zero coverage.", file=sys.stderr)
+        return 2
+    if total_xml == 0:
+        print("! no local cobertura XML found; using coverage values from phase1 legacy report fallback", file=sys.stderr)
 
     rows_for_csv = []
     rows_for_md = []
@@ -246,14 +341,39 @@ def main() -> int:
 
     for repo in REPOS:
         print(f"=== {repo} ===")
-        cov = parse_cobertura_repo(repo)
+        if legacy_cov and repo in legacy_cov:
+            c = legacy_cov[repo]
+            cov = {
+                "files_seen": 0,
+                "lines_total": c["lines_total"],
+                "lines_covered": c["lines_covered"],
+                "line_pct": c["line_pct"],
+                "branches_total": c["branches_total"],
+                "branches_covered": c["branches_covered"],
+                "branch_pct": c["branch_pct"],
+                "has_branch_data": True,
+            }
+        else:
+            cov = parse_cobertura_repo(repo)
         print(f"  cobertura files: {cov['files_seen']}  lines: {cov['lines_covered']}/{cov['lines_total']}  branches: {cov['branches_covered']}/{cov['branches_total']}")
 
-        analyzer_rows = run_static_analyzer(repo)
-        stat = aggregate_static(repo, analyzer_rows)
+        stat = None
+        if has_docker:
+            analyzer_rows = run_static_analyzer(repo)
+            stat = aggregate_static(repo, analyzer_rows)
+        if stat is None or (stat["static_call_sites"] == 0 and stat["classes_with_static_calls"] == 0):
+            cached_stat = load_static_from_json(repo)
+            if cached_stat is not None:
+                stat = cached_stat
+        if stat is None:
+            stat = {
+                "static_call_sites": 0,
+                "classes_with_static_calls": 0,
+                "per_class_json": str((ARTIFACTS_DIR / repo / "static_call_classes.json").relative_to(REPO_ROOT)),
+            }
         print(f"  static call sites: {stat['static_call_sites']}  classes: {stat['classes_with_static_calls']}")
 
-        if cov["files_seen"] == 0:
+        if cov["files_seen"] == 0 and not legacy_cov:
             notes.append(f"- **{repo}**: no cobertura XML found.")
         elif cov["lines_total"] == 0:
             notes.append(f"- **{repo}**: cobertura XML present but `lines-valid=0` — the run produced empty coverage data (no instrumented assemblies were exercised).")

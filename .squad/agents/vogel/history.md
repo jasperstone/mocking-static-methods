@@ -56,6 +56,9 @@ CI/CD agent. Owns `.github/workflows/` (coverage-orchestrator, test-discovery), 
 
 ## Recent Updates
 
+### 2026-07-21 — Phase-4 cost/report coherence fix (llama + phi mismatch root cause)
+Root cause of Beck's mismatch report: `phases/phase4-refactoring/COSTS_AUTOGEN.md` was being generated from `tools/cost/estimate.py` output that counted every `attempts.jsonl` row, while `tools/viz/data/per_model_phase.csv` excludes non-submitted tooling failures (`401/403/429/timeout/network/...`). This inflated estimator `Calls` and token-list cost for failure-heavy models (especially `phi-4`) versus the canonical phase4 CSV/headline metrics. Fix: added the same tooling-failure exclusion logic to `tools/cost/estimate.py::aggregate_phase()` and regenerated via `estimate.py --phase phase4-refactoring --md` + `.github/scripts/build_report.py` + `tools/viz/aggregate_phase_results.py`. Post-fix coherence: `COSTS_AUTOGEN` Calls now match phase4 CSV `attempts` for all six models (llama `897`, phi `296`) and token-list values align to CSV cost rounding (llama `$29.03` vs `29.0282`; phi `$0.20` vs `0.2023`).
+
 ### 2026-06-11 — PR #28 squash-merged → rebased phase4-refactoring → opened PR #30
 PR #28 (scaffold branch `jasper/phase4-scaffold`, commit `4dbc35e9`) was **SQUASH-merged** into
 `origin/main` as squash commit `8d9b0ada`, NOT a regular merge — so `4dbc35e9` is NOT reachable
@@ -169,3 +172,33 @@ full to `history-archive.md`. Canonical decisions remain in `.squad/decisions.md
 - 2026-05-07 — Coverage orchestrator expanded 7→14 repos (Avalonia, duplicati, eShop, garnet, jellyfin, maui, server) + round-1/round-2 fix passes
 
 Full text of all entries above is in `history-archive.md`.
+
+### 2026-07-21 — Cross-agent consolidation
+- Applied estimator-semantic alignment to phase4 so call/token totals exclude tooling-failure rows consistently with viz/headline aggregation.
+- Beck verification and Lewis lead gate confirmed phase4 cost/headline coherence across all six canonical models after regeneration.
+
+### 2026-07-21 — Phase-4 rerun diagnostics companion (non-metric)
+- Added `tools/analysis/phase4_failure_categorization.py` to classify non-submitted `attempts.jsonl` rows into stable buckets: timeout/connection, auth/access, rate-limit, server-5xx, baseline_compile_failed, baseline_no_owning_csproj, other.
+- Script emits machine-readable outputs under `tools/viz/data/` with counts by `(phase, model, run)` and phase totals, plus rerun signals based on infra-failure thresholds. Human-readable report now generated at `phases/phase4-refactoring/FAILURE_DIAGNOSTICS.md`.
+- Added `tools/viz/plots/phase4_failure_buckets.R` and loader support so this can render through the existing `tools/viz/render_all.R` pipeline when R runtime is available.
+- Environment lesson: host lacked `Rscript`, and Docker fallback failed (`/usr/bin/docker: Input/output error`), so data-first CSV/markdown diagnostics are now sufficient as quick rerun-needed checks even when figure render is temporarily unavailable.
+
+### 2026-07-21 — All-phase failure categorization rollup (phase2/3/4)
+- Extended `tools/analysis/phase4_failure_categorization.py` to accept `--phases` and emit consolidated outputs with prefix `all_phases` while preserving legacy single-phase defaults and taxonomy logic.
+- New generated artifacts: `tools/viz/data/all_phases_failure_categories_{by_model_run,totals,summary}.csv/json` and `tools/viz/data/all_phases_failure_rerun_signal_by_model_run.csv`; markdown report at `docs/reports/ALL_PHASES_FAILURE_DIAGNOSTICS.md`.
+- Aggregate non-submitted distribution across requested phases is dominated by infra buckets in phase2/3 (rate-limit-heavy) and baseline compile failures in phase4; this split explains why phase-level rerun risk differs materially even with one shared category taxonomy.
+
+### 2026-07-21 — Phase-4 phi endpoint compatibility hardening (workflow + adapter)
+- Diagnosed phi-4 Phase-4 rerun breakage as inference-surface compatibility drift: adapter inference calls used a fixed `models/chat/completions?api-version=2024-05-01-preview`, while some phi endpoints reject that version with 400 "API version not supported".
+- Added workflow credential routing parity for phi (`FOUNDRY_ENDPOINT_PHI`/`FOUNDRY_API_KEY_PHI`) with backward-compatible fallback to default endpoint/key when phi-specific secrets are not set; existing grok/llama routing behavior unchanged.
+- Added adapter-side inference API fallback: on explicit API-version-not-supported errors only, retry inference once using `2024-02-15-preview`; project-scoped `.../api/projects/...` endpoints keep their existing `openai/v1/chat/completions` path untouched.
+- Validation: `python -m pytest tools/generation/tests/test_foundry_retry.py -q` in a temp virtualenv passed (`5 passed`).
+
+### 2026-07-21 — Added all-phases failure-category comparison plot
+- Added `tools/viz/plots/all_phases_failure_categories.R` as a single consolidated figure over `tools/viz/data/all_phases_failure_categories_totals.csv` and integrated it into the existing `render_all.R` pipeline by filename discovery (no pipeline logic changes).
+- Design choice: stacked shares by phase (`share_of_non_submitted`) because it preserves one-glance composition comparison across phases; infra (`timeout/connection`, `auth/access`, `rate-limit`, `server-5xx`) and baseline (`baseline_compile_failed`, `baseline_no_owning_csproj`) are intentionally split into separate color families for immediate visual distinction.
+
+### 2026-07-21 — Phase-3 gpt-4.1 API-version compatibility fix
+- Diagnosed phase3 gpt-4.1-mini/nano 400 failures as endpoint-shape mismatch on project-scoped Foundry endpoints: OpenAI-chat models were always routed to deployment-path + api-version, which some project endpoints reject.
+- Implemented minimal adapter fix: for OpenAI chat surface, project endpoints now use `openai/v1/chat/completions` with `model` in body (no api-version); non-project endpoints preserve existing deployment-path + `api-version=2024-10-21` behavior.
+- Added focused regression tests for both branches and validated with targeted pytest (`7 passed`).

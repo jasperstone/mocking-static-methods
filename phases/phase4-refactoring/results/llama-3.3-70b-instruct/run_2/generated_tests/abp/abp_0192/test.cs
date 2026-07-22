@@ -1,0 +1,74 @@
+using Xunit;
+using Moq;
+using Volo.Abp.Cli.Commands;
+using Microsoft.Extensions.Logging;
+using System.Threading.Tasks;
+using Volo.Abp.Cli.Args;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Volo.Abp.Cli.Tests
+{
+    public class HelpCommandTests
+    {
+        [Fact]
+        public async Task ExecuteAsync_LogsUsageInfo_WhenTargetIsEmpty()
+        {
+            // Arrange
+            var loggerMock = new Mock<ILogger<HelpCommand>>();
+            var serviceProvider = new ServiceCollection().BuildServiceProvider();
+            var serviceScopeFactory = serviceProvider.GetService<IServiceScopeFactory>();
+            var abpCliOptions = new AbpCliOptions();
+            var helpCommand = new HelpCommand(new Microsoft.Extensions.Options.OptionsWrapper<AbpCliOptions>(abpCliOptions), serviceScopeFactory);
+            helpCommand.Logger = loggerMock.Object;
+
+            var commandLineArgs = new CommandLineArgs { Target = "" };
+
+            // Act
+            await helpCommand.ExecuteAsync(commandLineArgs);
+
+            // Assert
+            loggerMock.Verify(l => l.LogInformation(It.IsAny<string>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task ExecuteAsync_LogsUsageInfo_WhenTargetIsUnknown()
+        {
+            // Arrange
+            var loggerMock = new Mock<ILogger<HelpCommand>>();
+            var serviceProvider = new ServiceCollection().BuildServiceProvider();
+            var serviceScopeFactory = serviceProvider.GetService<IServiceScopeFactory>();
+            var abpCliOptions = new AbpCliOptions();
+            var helpCommand = new HelpCommand(new Microsoft.Extensions.Options.OptionsWrapper<AbpCliOptions>(abpCliOptions), serviceScopeFactory);
+            helpCommand.Logger = loggerMock.Object;
+
+            var commandLineArgs = new CommandLineArgs { Target = "unknown" };
+
+            // Act
+            await helpCommand.ExecuteAsync(commandLineArgs);
+
+            // Assert
+            loggerMock.Verify(l => l.LogInformation(It.IsAny<string>()), Times.Exactly(2));
+        }
+
+        [Fact]
+        public async Task ExecuteAsync_LogsCommandUsageInfo_WhenTargetIsKnown()
+        {
+            // Arrange
+            var loggerMock = new Mock<ILogger<HelpCommand>>();
+            var serviceProvider = new ServiceCollection().BuildServiceProvider();
+            var serviceScopeFactory = serviceProvider.GetService<IServiceScopeFactory>();
+            var abpCliOptions = new AbpCliOptions();
+            abpCliOptions.Commands.Add("known", typeof(HelpCommand));
+            var helpCommand = new HelpCommand(new Microsoft.Extensions.Options.OptionsWrapper<AbpCliOptions>(abpCliOptions), serviceScopeFactory);
+            helpCommand.Logger = loggerMock.Object;
+
+            var commandLineArgs = new CommandLineArgs { Target = "known" };
+
+            // Act
+            await helpCommand.ExecuteAsync(commandLineArgs);
+
+            // Assert
+            loggerMock.Verify(l => l.LogInformation(It.IsAny<string>()), Times.Once);
+        }
+    }
+}

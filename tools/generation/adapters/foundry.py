@@ -20,6 +20,7 @@ import email.utils
 import json
 import os
 import random
+import re
 import time
 import urllib.error
 import urllib.request
@@ -81,6 +82,11 @@ def _load_env() -> dict[str, str]:
     ):
         if os.environ.get(k):
             env[k] = os.environ[k]
+    # Optional per-model/project credentials for split Foundry setups.
+    # Examples: FOUNDRY_ENDPOINT_PHI + FOUNDRY_API_KEY_PHI.
+    for key, value in os.environ.items():
+        if value and (key.startswith("FOUNDRY_ENDPOINT_") or key.startswith("FOUNDRY_API_KEY_")):
+            env[key] = value
     _ENV_CACHE = env
     return env
 
@@ -147,6 +153,57 @@ def _surface(model_id: str) -> str:
         f"model '{model_id}' is not in any FOUNDRY_PANEL_* list "
         f"(chat={sorted(chat)} resp={sorted(resp)} inf={sorted(inf)})"
     )
+
+
+def _model_credential_suffixes(model_id: str) -> list[str]:
+    """Return candidate suffixes for model-scoped credentials.
+
+    Preference order is exact model-id first (normalized), then family aliases.
+    Example: phi-4 -> PHI_4, PHI
+    """
+    normalized = re.sub(r"[^A-Za-z0-9]+", "_", model_id).strip("_").upper()
+    out: list[str] = [normalized] if normalized else []
+    if model_id.startswith("phi-"):
+        out.append("PHI")
+    elif model_id.startswith("grok-"):
+        out.append("GROK")
+    elif model_id.startswith("llama-"):
+        out.append("LLAMA")
+    elif model_id.startswith("codestral-"):
+        out.append("CODESTRAL")
+
+    # Keep order stable and remove duplicates.
+    deduped: list[str] = []
+    for suffix in out:
+        if suffix and suffix not in deduped:
+            deduped.append(suffix)
+    return deduped
+
+
+def _resolve_credentials(env: dict[str, str], model_id: str) -> tuple[str, str]:
+    """Resolve endpoint/key with optional model-scoped override.
+
+    If either endpoint or key exists for a model suffix, require both so we do
+    not silently fall back to the wrong project in split deployments.
+    """
+    for suffix in _model_credential_suffixes(model_id):
+        endpoint_key = f"FOUNDRY_ENDPOINT_{suffix}"
+        api_key_key = f"FOUNDRY_API_KEY_{suffix}"
+        endpoint = env.get(endpoint_key, "")
+        api_key = env.get(api_key_key, "")
+        if endpoint or api_key:
+            if not endpoint or not api_key:
+                raise FoundryError(
+                    f"incomplete model credentials for '{model_id}': "
+                    f"expected both {endpoint_key} and {api_key_key}"
+                )
+            return endpoint, api_key
+
+    endpoint = env.get("FOUNDRY_ENDPOINT", "")
+    api_key = env.get("FOUNDRY_API_KEY", "")
+    if not endpoint or not api_key:
+        raise FoundryError("FOUNDRY_ENDPOINT and FOUNDRY_API_KEY must be set (in .env.foundry or env vars)")
+    return endpoint, api_key
 
 
 def list_panel() -> list[str]:
@@ -390,10 +447,7 @@ def generate(
     retry_jitter_ratio: float | None = None,
 ) -> GenerationResult:
     env = _load_env()
-    endpoint = env.get("FOUNDRY_ENDPOINT")
-    key = env.get("FOUNDRY_API_KEY")
-    if not endpoint or not key:
-        raise FoundryError("FOUNDRY_ENDPOINT and FOUNDRY_API_KEY must be set (in .env.foundry or env vars)")
+    endpoint, key = _resolve_credentials(env, model_id)
     endpoint = _normalize_endpoint(endpoint)
 
     if retry_max_retries is None:

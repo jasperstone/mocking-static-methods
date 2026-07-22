@@ -80,3 +80,25 @@ Jasper refined the single-variable rule. The earlier pass had stripped the `appl
 **Held constant vs phase 3 = the TASK FRAMING, not the tool inventory.** `user-template.md` left byte-for-byte phase-3's (untouched). PLAN.md "Prompts held identical" section + REPLICATION.md single-variable blockquote reworded: tool documentation (capability + calling contract) is consistent with how phase 3 documents submit_test and the compile/run loop; the sole manipulated variable is still tool *availability*; the agent must DISCOVER the tool helps and which transform fits.
 
 **Methodological refinement worth keeping:** "hold the prompt constant" really means **hold the task framing constant** — documenting a new capability's interface is part of giving the agent the tool, not a confound. The confound is *strategy/situation coaching*, not *interface documentation*. Code parses the tool by regex (`APPLY_REFACTOR_RE`), never the prose, so enriching the description cannot change parsing. Smoke test green: 1 passed in 0.09s. Did NOT commit (coordinator commits this round); did NOT touch phase-3 files.
+
+### 2026-07-21 — Lead review gate: phase4 latest-run refresh approved
+- Verified latest successful complete run IDs used for the refreshed models: grok-4-1-fast -> 29612308097, llama-3.3-70b-instruct -> 29612257530.
+- Verified refreshed reporting artifacts are regenerated from current in-repo phase4 results: HEADLINE, COSTS_AUTOGEN, per_model_phase, per_model_repo.
+- Confirmed Beck-flagged cross-file mismatch is resolved by Vogel: COSTS_AUTOGEN calls/token-list rows now match per_model_phase for all six models (including llama and phi-4).
+- Residual risk narrowed to figure rerender environment/tooling availability only; no remaining data coherence blocker in phase4 headline/cost tables.
+
+### 2026-07-21 — Cross-agent consolidation
+- Approval disposition and evidence were merged into canonical decisions with Watney source-map, Beck verification, and Vogel semantic-fix chain preserved.
+- Remaining blocker after gate remains operational rendering environment readiness (Docker/R), not data correctness.
+
+### 2026-07-21 — Durable failure-counting directive captured
+- Model failure metrics now exclude infra/tooling incidents unless the model had a real chance to generate and submit a candidate.
+- Auth/rate-limit/timeout/5xx/network/provider failures are rerun-required reliability incidents, tracked separately and resolved via targeted reruns before publish.
+
+### 2026-07-21 — Rerun remediation sequencing plan authored from diagnostics
+- Authored `docs/reports/RERUN_REMEDIATION_PLAN.md` with a concrete three-wave execution order tied to current flags: Wave 1 phase4 `phi-4` blockers (+ low-count llama cleanup), Wave 2 phase3 high-infra reds, Wave 3 phase2 backlog reds.
+- Locked stop/go checks to diagnostics artifacts (`ALL_PHASES_FAILURE_DIAGNOSTICS.md` + `all_phases_failure_rerun_signal_by_model_run.csv`) and encoded exact `gh workflow run` templates per phase workflow so reruns are directly dispatchable.
+
+### 2026-07-21 — Active remediation wave recorded with live run IDs
+- Updated `docs/reports/RERUN_REMEDIATION_PLAN.md` with the currently launched run IDs for phase4 (phi-4 + llama cleanup) and phase3 (gpt-4.1-mini + gpt-4.1-nano), plus an immediate `gh run watch`/`gh run view` checklist.
+- Added concise post-completion regeneration commands for diagnostics and visualization refresh so rerun closure can flow directly into updated reporting artifacts.

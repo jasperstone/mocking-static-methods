@@ -866,3 +866,40 @@ Contract complete and prescriptive. Watney builds the tool + wires the subproces
 **Reason-token deltas (before -> after):** unchanged for both transforms; no RESTORE_FAIL markers observed in this pass.
 
 **Decision:** Accept the refreshed baselinefix recheck artifacts as canonical for this batch; deterministic schema/distribution remained stable.
+
+### 2026-07-21: Phase-4 latest-run source map for report regeneration
+
+**By:** Watney (requested by Jasper)
+
+**What:** For phase4 report refresh, use model-specific latest completed runs rather than a single workflow run. Selected latest full run sets: `grok-4-1-fast` -> `29612308097`, `llama-3.3-70b-instruct` -> `29612257530`. Restore remaining model baselines from cached `backfill-28522182860` before applying those reruns.
+
+**Why:** Recent runs are model-sharded/chunked and not every workflow run contains all six canonical models. Some older GitHub artifacts are retention-expired, so local cached backfills are required for reproducible regeneration.
+
+### 2026-07-21: Phase4 refresh verification found COSTS_AUTOGEN row mismatch
+
+**By:** Jasper (via Copilot/Beck)
+
+**What:** Post-refresh verification confirmed phase4 run directories and `tools/viz/data/per_model_phase.csv` and `phases/phase4-refactoring/HEADLINE.md` coherence across all six canonical models, but `phases/phase4-refactoring/COSTS_AUTOGEN.md` was inconsistent for `llama-3.3-70b-instruct` and `phi-4` (calls/token-list values differed from CSV).
+
+**Why:** Avoid publishing mixed-state reporting; cost table must be regenerated from the same refreshed source snapshot as phase4 CSV/headline.
+
+### 2026-07-21: Phase-4 cost/report coherence uses tooling-excluded aggregation
+
+**By:** Vogel (requested by Jasper)
+
+**What:** Standardized phase4 cost/report aggregation semantics so `tools/cost/estimate.py --phase phase4-refactoring` excludes non-submitted tooling failures (auth/rate-limit/timeout/network/service signatures), matching `tools/viz/aggregate_phase_results.py` and `HEADLINE.md` logic. Regenerated `phases/phase4-refactoring/COSTS_AUTOGEN.md`, `phases/phase4-refactoring/HEADLINE.md`, `tools/viz/data/per_model_phase.csv`, and `tools/viz/data/per_model_repo.csv` from the same canonical in-repo phase4 results.
+
+**Why:** Prevent model-row drift (notably `llama-3.3-70b-instruct` and `phi-4`) where estimator call/token totals previously included tooling-failure rows that evaluator/viz rows intentionally exclude from quality metrics.
+
+### 2026-07-21: Lead gate approval for phase4 latest-run report refresh
+
+**By:** Lewis (requested by Jasper)
+
+**Decision:** APPROVE
+
+**What was verified:**
+1. Latest successful complete run sets used for refreshed models: `grok-4-1-fast` run `29612308097` and `llama-3.3-70b-instruct` run `29612257530`; canonical retained inputs were used for the other panel models when newer full shards were unavailable.
+2. Report artifacts were regenerated from current in-repo phase4 results (`phases/phase4-refactoring/HEADLINE.md`, `phases/phase4-refactoring/COSTS_AUTOGEN.md`, `tools/viz/data/per_model_phase.csv`, `tools/viz/data/per_model_repo.csv`).
+3. Beck's mismatch finding was resolved by Vogel: `COSTS_AUTOGEN` calls/token-list align with `per_model_phase.csv` for all six phase4 models.
+
+**Residual risk:** Data coherence blocker is closed for headline/cost tables. Remaining risk is local figure re-render environment variability (Docker/R runtime availability), not report-data correctness.

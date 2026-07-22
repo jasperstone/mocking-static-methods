@@ -39,6 +39,7 @@ Usage:
 from __future__ import annotations
 import argparse
 import json
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -214,6 +215,24 @@ P4R_REFACTOR_CALLS_PER_CELL = 1.2
 P4R_DEFAULT_RUNS = 1
 
 
+TOOLING_FAILURE_RE = re.compile(
+    r"(\b401\b|\b403\b|\b408\b|\b429\b|\b500\b|\b502\b|\b503\b|\b504\b|"
+    r"timeout|timed out|rate.?limit|access denied|invalid subscription key|"
+    r"network error|connection)",
+    re.IGNORECASE,
+)
+
+
+def is_tooling_failure(rec: dict) -> bool:
+    if rec.get("submitted"):
+        return False
+    text = " ".join(
+        str(rec.get(k, ""))
+        for k in ("error", "halt_reason", "error_type", "final_error_type")
+    )
+    return bool(TOOLING_FAILURE_RE.search(text))
+
+
 def _bucket(model: str) -> str:
     return BILLING.get(model, "credit")
 
@@ -232,6 +251,8 @@ def aggregate_phase(phase_dir: Path):
     for path in sorted(phase_dir.glob("results*/**/attempts.jsonl")):
         for line in path.open():
             r = json.loads(line)
+            if is_tooling_failure(r):
+                continue
             m = r.get("model_id", "?")
             t = totals[m]
             t["p"] += r.get("total_prompt_tokens", 0)

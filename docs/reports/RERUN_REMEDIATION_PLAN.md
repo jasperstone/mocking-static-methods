@@ -171,7 +171,7 @@ python3 tools/analysis/phase4_failure_categorization.py \
 python3 aggregate_baseline.py
 
 # refresh all report plots from current data snapshots
-python3 tools/viz/generate_all_plots.py
+Rscript tools/viz/render_all.R
 ```
 
 ### Phase 2 workflow (`.github/workflows/phase2-generate.yml`)

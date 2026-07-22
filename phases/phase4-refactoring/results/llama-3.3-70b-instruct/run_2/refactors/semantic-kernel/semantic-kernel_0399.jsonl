@@ -1,0 +1,1 @@
+{"transform": "make_public", "applied": false, "reverted": false, "reason": "unknown transform 'make_public'. Choose one of: make_virtual, wrapper_interface, parameterize_dependency, static_field_injection.", "files_changed": [], "build_ok": null, "errors": [], "seam": {}}

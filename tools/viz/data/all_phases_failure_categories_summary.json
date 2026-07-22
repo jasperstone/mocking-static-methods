@@ -1,0 +1,729 @@
+{
+  "phases": [
+    "phase2-agentic",
+    "phase3-agentic-loop",
+    "phase4-refactoring"
+  ],
+  "output_prefix": "all_phases",
+  "bucket_order": [
+    "timeout/connection",
+    "auth/access",
+    "rate-limit",
+    "server-5xx",
+    "api-version-unsupported",
+    "baseline_compile_failed",
+    "baseline_no_owning_csproj",
+    "other"
+  ],
+  "infra_buckets": [
+    "api-version-unsupported",
+    "auth/access",
+    "rate-limit",
+    "server-5xx",
+    "timeout/connection"
+  ],
+  "thresholds": {
+    "red": {
+      "infra_non_submitted_min": 10,
+      "infra_share_of_attempts_min": 0.03,
+      "infra_share_of_non_submitted_min": 0.2
+    },
+    "yellow": {
+      "infra_non_submitted_min": 3,
+      "infra_share_of_attempts_min": 0.01,
+      "infra_share_of_non_submitted_min": 0.1
+    }
+  },
+  "grand_totals": {
+    "attempts_total": 16938,
+    "non_submitted_total": 9424,
+    "categories": {
+      "timeout/connection": 1,
+      "auth/access": 0,
+      "rate-limit": 416,
+      "server-5xx": 325,
+      "api-version-unsupported": 5659,
+      "baseline_compile_failed": 2343,
+      "baseline_no_owning_csproj": 123,
+      "other": 557
+    },
+    "by_phase": {
+      "phase2-agentic": {
+        "attempts_total": 6300,
+        "non_submitted_total": 4284,
+        "categories": {
+          "timeout/connection": 0,
+          "auth/access": 0,
+          "rate-limit": 411,
+          "server-5xx": 325,
+          "api-version-unsupported": 2616,
+          "baseline_compile_failed": 456,
+          "baseline_no_owning_csproj": 36,
+          "other": 440
+        }
+      },
+      "phase3-agentic-loop": {
+        "attempts_total": 5400,
+        "non_submitted_total": 3165,
+        "categories": {
+          "timeout/connection": 1,
+          "auth/access": 0,
+          "rate-limit": 2,
+          "server-5xx": 0,
+          "api-version-unsupported": 2347,
+          "baseline_compile_failed": 717,
+          "baseline_no_owning_csproj": 33,
+          "other": 65
+        }
+      },
+      "phase4-refactoring": {
+        "attempts_total": 5238,
+        "non_submitted_total": 1975,
+        "categories": {
+          "timeout/connection": 0,
+          "auth/access": 0,
+          "rate-limit": 3,
+          "server-5xx": 0,
+          "api-version-unsupported": 696,
+          "baseline_compile_failed": 1170,
+          "baseline_no_owning_csproj": 54,
+          "other": 52
+        }
+      }
+    }
+  },
+  "signals_by_model_run": [
+    {
+      "phase": "phase2-agentic",
+      "model": "codestral-2501",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 58,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "codestral-2501",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 64,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "codestral-2501",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 65,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-4.1-mini",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 265,
+      "infra_non_submitted": 224,
+      "infra_share_of_attempts": "0.7467",
+      "infra_share_of_non_submitted": "0.8453",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-4.1-mini",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 268,
+      "infra_non_submitted": 227,
+      "infra_share_of_attempts": "0.7567",
+      "infra_share_of_non_submitted": "0.8470",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-4.1-mini",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 271,
+      "infra_non_submitted": 230,
+      "infra_share_of_attempts": "0.7667",
+      "infra_share_of_non_submitted": "0.8487",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-4.1-nano",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 279,
+      "infra_non_submitted": 226,
+      "infra_share_of_attempts": "0.7533",
+      "infra_share_of_non_submitted": "0.8100",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-4.1-nano",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 281,
+      "infra_non_submitted": 223,
+      "infra_share_of_attempts": "0.7433",
+      "infra_share_of_non_submitted": "0.7936",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-4.1-nano",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 278,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.8345",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-5-codex",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 245,
+      "infra_non_submitted": 190,
+      "infra_share_of_attempts": "0.6333",
+      "infra_share_of_non_submitted": "0.7755",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-5-codex",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 249,
+      "infra_non_submitted": 193,
+      "infra_share_of_attempts": "0.6433",
+      "infra_share_of_non_submitted": "0.7751",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "gpt-5-codex",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 245,
+      "infra_non_submitted": 190,
+      "infra_share_of_attempts": "0.6333",
+      "infra_share_of_non_submitted": "0.7755",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "grok-4-1-fast",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 295,
+      "infra_non_submitted": 254,
+      "infra_share_of_attempts": "0.8467",
+      "infra_share_of_non_submitted": "0.8610",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "grok-4-1-fast",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 293,
+      "infra_non_submitted": 252,
+      "infra_share_of_attempts": "0.8400",
+      "infra_share_of_non_submitted": "0.8601",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "grok-4-1-fast",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 289,
+      "infra_non_submitted": 248,
+      "infra_share_of_attempts": "0.8267",
+      "infra_share_of_non_submitted": "0.8581",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "llama-3.3-70b-instruct",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 264,
+      "infra_non_submitted": 223,
+      "infra_share_of_attempts": "0.7433",
+      "infra_share_of_non_submitted": "0.8447",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "llama-3.3-70b-instruct",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 260,
+      "infra_non_submitted": 219,
+      "infra_share_of_attempts": "0.7300",
+      "infra_share_of_non_submitted": "0.8423",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "llama-3.3-70b-instruct",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 262,
+      "infra_non_submitted": 221,
+      "infra_share_of_attempts": "0.7367",
+      "infra_share_of_non_submitted": "0.8435",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "phi-4",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 17,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "phi-4",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 19,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase2-agentic",
+      "model": "phi-4",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 17,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "codestral-2501",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 15,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "codestral-2501",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 13,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "codestral-2501",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 17,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-mini",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-mini",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-mini",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-nano",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-nano",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-nano",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "grok-4-1-fast",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 1,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "grok-4-1-fast",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 260,
+      "infra_non_submitted": 192,
+      "infra_share_of_attempts": "0.6400",
+      "infra_share_of_non_submitted": "0.7385",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "grok-4-1-fast",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 259,
+      "infra_non_submitted": 191,
+      "infra_share_of_attempts": "0.6367",
+      "infra_share_of_non_submitted": "0.7375",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "llama-3.3-70b-instruct",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 260,
+      "infra_non_submitted": 192,
+      "infra_share_of_attempts": "0.6400",
+      "infra_share_of_non_submitted": "0.7385",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "llama-3.3-70b-instruct",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 2,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "llama-3.3-70b-instruct",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 259,
+      "infra_non_submitted": 191,
+      "infra_share_of_attempts": "0.6367",
+      "infra_share_of_non_submitted": "0.7375",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "phi-4",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 5,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "phi-4",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 259,
+      "infra_non_submitted": 191,
+      "infra_share_of_attempts": "0.6367",
+      "infra_share_of_non_submitted": "0.7375",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "phi-4",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 15,
+      "infra_non_submitted": 1,
+      "infra_share_of_attempts": "0.0033",
+      "infra_share_of_non_submitted": "0.0667",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "codestral-2501",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 73,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "codestral-2501",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 71,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "codestral-2501",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 73,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-mini",
+      "run": 1,
+      "attempts_total": 277,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-mini",
+      "run": 2,
+      "attempts_total": 286,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-mini",
+      "run": 3,
+      "attempts_total": 283,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-nano",
+      "run": 1,
+      "attempts_total": 268,
+      "non_submitted_total": 80,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-nano",
+      "run": 2,
+      "attempts_total": 266,
+      "non_submitted_total": 76,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-nano",
+      "run": 3,
+      "attempts_total": 258,
+      "non_submitted_total": 83,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "grok-4-1-fast",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 69,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "grok-4-1-fast",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 69,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "grok-4-1-fast",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 70,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "llama-3.3-70b-instruct",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 69,
+      "infra_non_submitted": 1,
+      "infra_share_of_attempts": "0.0033",
+      "infra_share_of_non_submitted": "0.0145",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "llama-3.3-70b-instruct",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 70,
+      "infra_non_submitted": 2,
+      "infra_share_of_attempts": "0.0067",
+      "infra_share_of_non_submitted": "0.0286",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "llama-3.3-70b-instruct",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "phi-4",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "phi-4",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "phi-4",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 300,
+      "infra_non_submitted": 232,
+      "infra_share_of_attempts": "0.7733",
+      "infra_share_of_non_submitted": "0.7733",
+      "rerun_signal": "red"
+    }
+  ],
+  "outputs": {
+    "by_model_run_csv": "tools/viz/data/all_phases_failure_categories_by_model_run.csv",
+    "totals_csv": "tools/viz/data/all_phases_failure_categories_totals.csv",
+    "signals_csv": "tools/viz/data/all_phases_failure_rerun_signal_by_model_run.csv"
+  }
+}

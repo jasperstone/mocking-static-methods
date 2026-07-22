@@ -1,0 +1,104 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Threading;
+using System.Threading.Tasks;
+using Jellyfin.Api.Helpers;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
+using Moq;
+using Moq.Protected;
+using Xunit;
+using ContentRangeHeaderValue = System.Net.Http.Headers.ContentRangeHeaderValue;
+using MediaTypeHeaderValue = System.Net.Http.Headers.MediaTypeHeaderValue;
+
+namespace Jellyfin.Api.Tests.Helpers
+{
+    // Minimal stub for StreamState to allow testing
+    public class StreamStateStub
+    {
+        public string MediaPath { get; set; } = string.Empty;
+        public Dictionary<string, string> RemoteHttpHeaders { get; set; } = new Dictionary<string, string>();
+    }
+
+    public class FileStreamResponseHelpersTests
+    {
+        [Fact]
+        public async Task GetStaticRemoteStreamResult_UsesHttpClientSendAsync_AndSetsResponseHeaders()
+        {
+            // Arrange
+            var mediaPath = "http://example.com/file";
+            var userAgentValue = "TestUserAgent";
+            var rangeHeaderValue = "bytes=0-99";
+
+            var remoteHeaders = new Dictionary<string, string>
+            {
+                { HeaderNames.UserAgent, userAgentValue }
+            };
+
+            var state = new StreamStateStub
+            {
+                MediaPath = mediaPath,
+                RemoteHttpHeaders = remoteHeaders
+            };
+
+            var httpContext = new DefaultHttpContext();
+            httpContext.Request.Headers[HeaderNames.Range] = rangeHeaderValue;
+
+            var expectedContent = new MemoryStream(new byte[] { 1, 2, 3, 4, 5 });
+
+            var responseMessage = new HttpResponseMessage(HttpStatusCode.PartialContent)
+            {
+                Content = new StreamContent(expectedContent)
+            };
+            responseMessage.Headers.Add(HeaderNames.AcceptRanges, "bytes");
+            responseMessage.Content.Headers.ContentRange = new ContentRangeHeaderValue(0, 99, 200);
+            responseMessage.Content.Headers.ContentLength = 100;
+            responseMessage.Content.Headers.ContentType = new MediaTypeHeaderValue("video/mp4");
+
+            var handlerMock = new Mock<HttpMessageHandler>(MockBehavior.Strict);
+            handlerMock
+               .Protected()
+               .Setup<Task<HttpResponseMessage>>(
+                   "SendAsync",
+                   ItExpr.Is<HttpRequestMessage>(req =>
+                       req.Method == HttpMethod.Get &&
+                       req.RequestUri == new Uri(mediaPath) &&
+                       req.Headers.UserAgent.ToString().Contains(userAgentValue) &&
+                       req.Headers.Range != null &&
+                       req.Headers.Range.Ranges.Count == 1 &&
+                       req.Headers.Range.Ranges.First().From == 0 &&
+                       req.Headers.Range.Ranges.First().To == 99),
+                   ItExpr.IsAny<CancellationToken>())
+               .ReturnsAsync(responseMessage)
+               .Verifiable();
+
+            var httpClient = new HttpClient(handlerMock.Object);
+
+            // Act
+            // Cast state to dynamic to bypass type mismatch
+            var result = await FileStreamResponseHelpers.GetStaticRemoteStreamResult((dynamic)state, httpClient, httpContext);
+
+            // Assert
+            handlerMock.Protected().Verify(
+                "SendAsync",
+                Times.Once(),
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>());
+
+            Assert.IsType<FileStreamResult>(result);
+            var fileStreamResult = (FileStreamResult)result;
+
+            Assert.Equal("video/mp4", fileStreamResult.ContentType);
+            Assert.Equal(100, httpContext.Response.ContentLength);
+            Assert.Equal("bytes", httpContext.Response.Headers[HeaderNames.AcceptRanges]);
+            Assert.Equal("bytes 0-99/200", httpContext.Response.Headers[HeaderNames.ContentRange]);
+            Assert.Equal((int)HttpStatusCode.PartialContent, httpContext.Response.StatusCode);
+        }
+    }
+}

@@ -4,15 +4,6 @@ Cross-phase scoreboard. One row per sealed phase × model. Numbers are sourced f
 
 Phase 2+ rows show **mean ± stddev across 5 runs of that (phase × model) cell**.
 
-## Reliability policy (durable)
-
-Model quality failures are counted only when the model had a real opportunity to
-generate and submit a test candidate. Infra/tooling incidents (timeout, auth,
-rate-limit, 5xx/service unavailable, network/transport/provider outages) are
-rerun-required reliability events and are excluded from model failure counts.
-Final published comparisons require targeted reruns and re-aggregation when
-infra-heavy buckets are present.
-
 ## Headline
 
 | Phase | Strategy | Model | Targets | Newly covered (mean ± σ) | Pass (mean ± σ) | Compile-fail | Runtime-fail | Δ line cov |

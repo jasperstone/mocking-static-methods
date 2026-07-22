@@ -170,26 +170,6 @@ The phase 2 → 3 → 4 progression chart and the cross-phase paired-bar will
 auto-pick up phase 4 once `per_model_phase.csv` and `per_model_repo.csv` have
 phase-4 rows.
 
-### Reliability incident handling (required before publish)
-
-1. Detect infra-heavy buckets (auth, rate-limit, timeout, 5xx, network/provider).
-2. Rerun targeted affected IDs or affected model-run shards.
-3. Re-aggregate artifacts after reruns complete.
-4. Publish only re-aggregated outputs; treat interim metrics as provisional.
-
-Companion diagnostics command (non-submitted failures only, does not alter
-quality metrics):
-
-```bash
-python3 tools/analysis/phase4_failure_categorization.py
-```
-
-Generated quick-check outputs:
-
-- `tools/viz/data/phase4-refactoring_failure_categories_by_model_run.csv`
-- `tools/viz/data/phase4-refactoring_failure_rerun_signal_by_model_run.csv`
-- `phases/phase4-refactoring/FAILURE_DIAGNOSTICS.md`
-
 ## Output layout
 
 ```

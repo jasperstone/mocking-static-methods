@@ -59,20 +59,6 @@ load_per_model_phase <- function() {
   read_csv(path, show_col_types = FALSE)
 }
 
-load_phase4_failure_by_model_run <- function() {
-  path <- file.path(
-    repo_root(),
-    "tools", "viz", "data", "phase4-refactoring_failure_categories_by_model_run.csv"
-  )
-  if (!file.exists(path)) {
-    stop(
-      "phase4 failure taxonomy CSV not found. Run: ",
-      "python3 tools/analysis/phase4_failure_categorization.py"
-    )
-  }
-  read_csv(path, show_col_types = FALSE)
-}
-
 load_baseline_coverage <- function() {
   path <- file.path(repo_root(), "baseline_coverage.csv")
   cov <- read_csv(path, show_col_types = FALSE) |>

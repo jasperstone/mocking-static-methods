@@ -14,30 +14,12 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import re
 import statistics
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-
-TOOLING_FAILURE_RE = re.compile(
-    r"(\b401\b|\b403\b|\b408\b|\b429\b|\b500\b|\b502\b|\b503\b|\b504\b|"
-    r"timeout|timed out|rate.?limit|access denied|invalid subscription key|"
-    r"network error|connection)",
-    re.IGNORECASE,
-)
-
-
-def is_tooling_failure(rec: dict) -> bool:
-    if rec.get("submitted"):
-        return False
-    text = " ".join(
-        str(rec.get(k, ""))
-        for k in ("error", "halt_reason", "error_type", "final_error_type")
-    )
-    return bool(TOOLING_FAILURE_RE.search(text))
 
 
 def load_attempts(phase_dir: Path):
@@ -108,18 +90,12 @@ def main() -> int:
     # produced a candidate (proxy for "agent emitted code"). Also retain per-cell
     # final compile/run outcomes for phases that do not emit evaluation.jsonl.
     attempts_per_model = defaultdict(set)
-    submitted_keys: set[tuple[str, int, str]] = set()
     attempt_outcomes = defaultdict(lambda: {"total": 0, "compile_ok": 0, "run_ok": 0})
-    tooling_excluded = defaultdict(int)
     turns_per_model = defaultdict(list)
     for model, run_idx, rec in load_attempts(phase_dir):
-        if is_tooling_failure(rec):
-            tooling_excluded[model] += 1
-            continue
         tid = rec.get("target_id")
-        if tid and rec.get("submitted"):
+        if tid:
             attempts_per_model[model].add((tid, run_idx))
-            submitted_keys.add((tid, run_idx, model))
             attempt_outcomes[model]["total"] += 1
             if rec.get("final_compile_ok"):
                 attempt_outcomes[model]["compile_ok"] += 1
@@ -132,12 +108,7 @@ def main() -> int:
 
     # Aggregate evals: per model, compile_ok / run_ok counts over (target_id, run_index).
     evals_per_model = defaultdict(lambda: {"total": 0, "compile_ok": 0, "run_ok": 0})
-    for model, run_idx, rec in load_evals(phase_dir):
-        tid = rec.get("target_id")
-        # Guardrail: evaluator rows are only valid when a submitted candidate
-        # exists for the same (target_id, run_index, model).
-        if (tid, run_idx, model) not in submitted_keys:
-            continue
+    for model, _run_idx, rec in load_evals(phase_dir):
         s = evals_per_model[model]
         s["total"] += 1
         if rec.get("compile_ok"):
@@ -155,8 +126,8 @@ def main() -> int:
     lines.append("")
     lines.append("## Per-model results")
     lines.append("")
-    lines.append("| Model | Cells attempted | Eval rows | Compile OK | Run OK | Tooling-excluded | Compile% | Run% | Median turns |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("| Model | Cells attempted | Eval rows | Compile OK | Run OK | Compile% | Run% | Median turns |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
     all_models = sorted(set(attempts_per_model) | set(evals_per_model))
     for m in all_models:
         a = len(attempts_per_model.get(m, set()))
@@ -168,15 +139,14 @@ def main() -> int:
         turns = turns_per_model.get(m, [])
         med_turns = statistics.median(turns) if turns else "—"
         lines.append(
-            f"| `{m}` | {a} | {e['total']} | {e['compile_ok']} | {e['run_ok']} | {tooling_excluded.get(m, 0)} | {comp_pct:.1f}% | {run_pct:.1f}% | {med_turns} |"
+            f"| `{m}` | {a} | {e['total']} | {e['compile_ok']} | {e['run_ok']} | {comp_pct:.1f}% | {run_pct:.1f}% | {med_turns} |"
         )
     lines.append("")
     lines.append("Definitions:")
-    lines.append("- *Cells attempted*: distinct `(target_id, run_index)` pairs with submitted candidates.")
+    lines.append("- *Cells attempted*: distinct `(target_id, run_index)` pairs the model emitted code for.")
     lines.append("- *Eval rows*: rows in `evaluation.jsonl` when present; otherwise attempt rows used as the fallback outcome source.")
     lines.append("- *Compile OK*: evaluator `compile_ok` when available, else attempt-level `final_compile_ok`.")
     lines.append("- *Run OK*: evaluator `run_ok` when available, else attempt-level `final_run_ok`.")
-    lines.append("- *Tooling-excluded*: non-submitted rows with auth/rate-limit/timeout/network/service signatures; excluded from evaluative percentages.")
     lines.append("")
 
     headline_path = phase_dir / "HEADLINE.md"

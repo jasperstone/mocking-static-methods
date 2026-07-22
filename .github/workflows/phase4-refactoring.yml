@@ -324,14 +324,22 @@ jobs:
 
           # Route credentials per shard model, not top-level inputs.models.
           # This keeps mixed-model dispatches (models=all) correct for phi/grok/llama.
-          if [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI_4:-}" ]] && [[ -n "${FOUNDRY_API_KEY_PHI_4:-}" ]]; then
+          if [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI_4:-}" ]]; then
             endpoint="${FOUNDRY_ENDPOINT_PHI_4}"
-            key="${FOUNDRY_API_KEY_PHI_4}"
-            source="phi_4"
-          elif [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI:-}" ]] && [[ -n "${FOUNDRY_API_KEY_PHI:-}" ]]; then
+            if [[ -n "${FOUNDRY_API_KEY_PHI_4:-}" ]]; then
+              key="${FOUNDRY_API_KEY_PHI_4}"
+              source="phi_4"
+            else
+              source="phi_4+default_key"
+            fi
+          elif [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI:-}" ]]; then
             endpoint="${FOUNDRY_ENDPOINT_PHI}"
-            key="${FOUNDRY_API_KEY_PHI}"
-            source="phi"
+            if [[ -n "${FOUNDRY_API_KEY_PHI:-}" ]]; then
+              key="${FOUNDRY_API_KEY_PHI}"
+              source="phi"
+            else
+              source="phi+default_key"
+            fi
           elif [[ "$model" == "grok-4-1-fast" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_API_KEY_GROK:-}" ]]; then
             endpoint="${FOUNDRY_ENDPOINT_GROK}"
             key="${FOUNDRY_API_KEY_GROK}"

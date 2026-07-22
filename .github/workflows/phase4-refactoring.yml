@@ -217,11 +217,11 @@ jobs:
         id: plan
         shell: bash
         env:
-          TARGET_SET: ${{ inputs.target_set }}
-          RUN_WINDOW: ${{ inputs.run_window }}
-          MODELS: ${{ inputs.models }}
-          REPOS: ${{ inputs.repos }}
-          SHARD_SPEC: ${{ inputs.shard_spec }}
+          TARGET_SET: ${{ github.event.inputs.target_set }}
+          RUN_WINDOW: ${{ github.event.inputs.run_window }}
+          MODELS: ${{ github.event.inputs.models }}
+          REPOS: ${{ github.event.inputs.repos }}
+          SHARD_SPEC: ${{ github.event.inputs.shard_spec }}
         run: |
           set -euo pipefail
           python3 .github/scripts/plan_matrix.py > matrix.json
@@ -250,7 +250,7 @@ jobs:
     strategy:
       fail-fast: false
       # Keep shard fan-out below Foundry burst limits to avoid 429-driven dropouts.
-      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
+      max-parallel: ${{ fromJSON(github.event.inputs.max_parallel) }}
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       # Default credentials (backward compatible).
@@ -342,7 +342,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          have=$(sha256sum "targets/${{ inputs.target_set }}/targets.csv" | awk '{print $1}')
+          have=$(sha256sum "targets/${{ github.event.inputs.target_set }}/targets.csv" | awk '{print $1}')
           want="${{ needs.plan.outputs.target_sha256 }}"
           if [[ "$want" != "$have" ]]; then
             echo "::error::target_sha256 drift: want=$want have=$have"
@@ -408,14 +408,14 @@ jobs:
       - name: Run agentic refactor generator (writer + apply_refactor tool)
         shell: bash
         env:
-          TARGET_SET: ${{ inputs.target_set }}
+          TARGET_SET: ${{ github.event.inputs.target_set }}
           MODEL: ${{ matrix.model }}
           REPO: ${{ matrix.repo }}
           RUN_INDEX: ${{ matrix.run_index }}
           TARGET_IDS: ${{ matrix.target_ids }}
-          LIMIT_PER_REPO: ${{ inputs.limit_per_repo }}
-          MAX_COMPILE_ATTEMPTS: ${{ inputs.max_compile_attempts }}
-          RUN_TIMEOUT_S: ${{ inputs.run_timeout_s }}
+          LIMIT_PER_REPO: ${{ github.event.inputs.limit_per_repo }}
+          MAX_COMPILE_ATTEMPTS: ${{ github.event.inputs.max_compile_attempts }}
+          RUN_TIMEOUT_S: ${{ github.event.inputs.run_timeout_s }}
           PYTHONUNBUFFERED: "1"
         run: |
           set -euo pipefail

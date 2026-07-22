@@ -257,6 +257,8 @@ jobs:
       FOUNDRY_ENDPOINT_DEFAULT: ${{ secrets.FOUNDRY_ENDPOINT }}
       FOUNDRY_API_KEY_DEFAULT: ${{ secrets.FOUNDRY_API_KEY }}
       # Optional model-specific credentials so grok/llama can target different projects.
+      FOUNDRY_ENDPOINT_PHI: ${{ secrets.FOUNDRY_ENDPOINT_PHI }}
+      FOUNDRY_API_KEY_PHI: ${{ secrets.FOUNDRY_API_KEY_PHI }}
       FOUNDRY_ENDPOINT_GROK: ${{ secrets.FOUNDRY_ENDPOINT_GROK }}
       FOUNDRY_API_KEY_GROK: ${{ secrets.FOUNDRY_API_KEY_GROK }}
       FOUNDRY_ENDPOINT_LLAMA: ${{ secrets.FOUNDRY_ENDPOINT_LLAMA }}
@@ -293,23 +295,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          models='${{ inputs.models }}'
-
-          # Guard against mixed-model runs when model-specific endpoints differ.
-          if [[ "$models" == "all" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_ENDPOINT_LLAMA:-}" ]] && [[ "${FOUNDRY_ENDPOINT_GROK}" != "${FOUNDRY_ENDPOINT_LLAMA}" ]]; then
-            echo "::error::models=all is ambiguous with split endpoints. Run per model (e.g., grok-only or llama-only) or align endpoint secrets."
-            exit 1
-          fi
+          model='${{ matrix.model }}'
 
           endpoint="${FOUNDRY_ENDPOINT_DEFAULT:-}"
           key="${FOUNDRY_API_KEY_DEFAULT:-}"
           source="default"
 
-          if [[ "$models" == "grok-4-1-fast" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_API_KEY_GROK:-}" ]]; then
+          # Route credentials per shard model, not top-level inputs.models.
+          # This keeps mixed-model dispatches (models=all) correct for phi/grok/llama.
+          if [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI:-}" ]] && [[ -n "${FOUNDRY_API_KEY_PHI:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_PHI}"
+            key="${FOUNDRY_API_KEY_PHI}"
+            source="phi"
+          elif [[ "$model" == "grok-4-1-fast" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_API_KEY_GROK:-}" ]]; then
             endpoint="${FOUNDRY_ENDPOINT_GROK}"
             key="${FOUNDRY_API_KEY_GROK}"
             source="grok"
-          elif [[ "$models" == "llama-3.3-70b-instruct" ]] && [[ -n "${FOUNDRY_ENDPOINT_LLAMA:-}" ]] && [[ -n "${FOUNDRY_API_KEY_LLAMA:-}" ]]; then
+          elif [[ "$model" == "llama-3.3-70b-instruct" ]] && [[ -n "${FOUNDRY_ENDPOINT_LLAMA:-}" ]] && [[ -n "${FOUNDRY_API_KEY_LLAMA:-}" ]]; then
             endpoint="${FOUNDRY_ENDPOINT_LLAMA}"
             key="${FOUNDRY_API_KEY_LLAMA}"
             source="llama"

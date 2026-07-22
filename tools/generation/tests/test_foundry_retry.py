@@ -127,3 +127,220 @@ def test_request_retries_rate_limit_marker_even_with_non_429(monkeypatch):
 
     assert payload == {"ok": True}
     assert calls["n"] == 2
+
+
+def test_generate_inference_falls_back_on_api_version_not_supported(monkeypatch):
+    monkeypatch.setattr(
+        foundry,
+        "_load_env",
+        lambda: {
+            "FOUNDRY_ENDPOINT": "https://example.inference/",
+            "FOUNDRY_API_KEY": "secret",
+            "FOUNDRY_PANEL_OPENAI_CHAT": "",
+            "FOUNDRY_PANEL_OPENAI_RESPONSES": "",
+            "FOUNDRY_PANEL_INFERENCE": "phi-4",
+        },
+    )
+
+    calls = {"urls": []}
+
+    def fake_request(url, body, key, timeout_s, **kwargs):
+        calls["urls"].append(url)
+        if "api-version=2024-05-01-preview" in url:
+            raise foundry.FoundryError('HTTP 400: {"error":{"code":"BadRequest","message":"API version not supported"}}')
+        return (
+            {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 2},
+                "model": "phi-4",
+            },
+            12,
+        )
+
+    monkeypatch.setattr(foundry, "_request", fake_request)
+
+    out = foundry.generate(
+        model_id="phi-4",
+        system_prompt="sys",
+        user_prompt="usr",
+        timeout_s=5,
+    )
+
+    assert out.text == "ok"
+    assert calls["urls"] == [
+        "https://example.inference/models/chat/completions?api-version=2024-05-01-preview",
+        "https://example.inference/models/chat/completions?api-version=2024-02-15-preview",
+    ]
+
+
+def test_generate_inference_falls_back_on_unsupported_api_version_hyphenated(monkeypatch):
+    monkeypatch.setattr(
+        foundry,
+        "_load_env",
+        lambda: {
+            "FOUNDRY_ENDPOINT": "https://example.inference/",
+            "FOUNDRY_API_KEY": "secret",
+            "FOUNDRY_PANEL_OPENAI_CHAT": "",
+            "FOUNDRY_PANEL_OPENAI_RESPONSES": "",
+            "FOUNDRY_PANEL_INFERENCE": "phi-4",
+        },
+    )
+
+    calls = {"urls": []}
+
+    def fake_request(url, body, key, timeout_s, **kwargs):
+        calls["urls"].append(url)
+        if "api-version=2024-05-01-preview" in url:
+            raise foundry.FoundryError('HTTP 400: {"error":{"code":"BadRequest","message":"Unsupported API-Version"}}')
+        return (
+            {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 2},
+                "model": "phi-4",
+            },
+            12,
+        )
+
+    monkeypatch.setattr(foundry, "_request", fake_request)
+
+    out = foundry.generate(
+        model_id="phi-4",
+        system_prompt="sys",
+        user_prompt="usr",
+        timeout_s=5,
+    )
+
+    assert out.text == "ok"
+    assert calls["urls"] == [
+        "https://example.inference/models/chat/completions?api-version=2024-05-01-preview",
+        "https://example.inference/models/chat/completions?api-version=2024-02-15-preview",
+    ]
+
+
+def test_generate_project_endpoint_uses_openai_v1_without_fallback(monkeypatch):
+    monkeypatch.setattr(
+        foundry,
+        "_load_env",
+        lambda: {
+            "FOUNDRY_ENDPOINT": "https://example.services.ai/api/projects/p123/",
+            "FOUNDRY_API_KEY": "secret",
+            "FOUNDRY_PANEL_OPENAI_CHAT": "",
+            "FOUNDRY_PANEL_OPENAI_RESPONSES": "",
+            "FOUNDRY_PANEL_INFERENCE": "phi-4",
+        },
+    )
+
+    calls = {"urls": []}
+
+    def fake_request(url, body, key, timeout_s, **kwargs):
+        calls["urls"].append(url)
+        return (
+            {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                "model": "phi-4",
+            },
+            8,
+        )
+
+    monkeypatch.setattr(foundry, "_request", fake_request)
+
+    out = foundry.generate(
+        model_id="phi-4",
+        system_prompt="sys",
+        user_prompt="usr",
+        timeout_s=5,
+    )
+
+    assert out.text == "ok"
+    assert calls["urls"] == [
+        "https://example.services.ai/api/projects/p123/openai/v1/chat/completions"
+    ]
+
+
+def test_generate_openai_chat_project_endpoint_uses_v1(monkeypatch):
+    monkeypatch.setattr(
+        foundry,
+        "_load_env",
+        lambda: {
+            "FOUNDRY_ENDPOINT": "https://example.services.ai/api/projects/p123/",
+            "FOUNDRY_API_KEY": "secret",
+            "FOUNDRY_PANEL_OPENAI_CHAT": "gpt-4.1-mini,gpt-4.1-nano",
+            "FOUNDRY_PANEL_OPENAI_RESPONSES": "",
+            "FOUNDRY_PANEL_INFERENCE": "phi-4",
+        },
+    )
+
+    calls = {"urls": [], "bodies": []}
+
+    def fake_request(url, body, key, timeout_s, **kwargs):
+        calls["urls"].append(url)
+        calls["bodies"].append(body)
+        return (
+            {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                "model": "gpt-4.1-mini",
+            },
+            8,
+        )
+
+    monkeypatch.setattr(foundry, "_request", fake_request)
+
+    out = foundry.generate(
+        model_id="gpt-4.1-mini",
+        system_prompt="sys",
+        user_prompt="usr",
+        timeout_s=5,
+    )
+
+    assert out.text == "ok"
+    assert calls["urls"] == [
+        "https://example.services.ai/api/projects/p123/openai/v1/chat/completions"
+    ]
+    assert calls["bodies"][0]["model"] == "gpt-4.1-mini"
+    assert "seed" not in calls["bodies"][0]
+
+
+def test_generate_openai_chat_non_project_keeps_deployments_api_version(monkeypatch):
+    monkeypatch.setattr(
+        foundry,
+        "_load_env",
+        lambda: {
+            "FOUNDRY_ENDPOINT": "https://example.openai/",
+            "FOUNDRY_API_KEY": "secret",
+            "FOUNDRY_PANEL_OPENAI_CHAT": "gpt-4.1-mini,gpt-4.1-nano",
+            "FOUNDRY_PANEL_OPENAI_RESPONSES": "",
+            "FOUNDRY_PANEL_INFERENCE": "phi-4",
+        },
+    )
+
+    calls = {"urls": [], "bodies": []}
+
+    def fake_request(url, body, key, timeout_s, **kwargs):
+        calls["urls"].append(url)
+        calls["bodies"].append(body)
+        return (
+            {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                "model": "gpt-4.1-mini",
+            },
+            8,
+        )
+
+    monkeypatch.setattr(foundry, "_request", fake_request)
+
+    out = foundry.generate(
+        model_id="gpt-4.1-mini",
+        system_prompt="sys",
+        user_prompt="usr",
+        timeout_s=5,
+    )
+
+    assert out.text == "ok"
+    assert calls["urls"] == [
+        "https://example.openai/openai/deployments/gpt-4.1-mini/chat/completions?api-version=2024-10-21"
+    ]
+    assert calls["bodies"][0]["seed"] == 42
+    assert "model" not in calls["bodies"][0]

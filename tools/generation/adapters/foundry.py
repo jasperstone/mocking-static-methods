@@ -33,6 +33,7 @@ ENV_FILE = REPO_ROOT / ".env.foundry"
 OPENAI_CHAT_API = "2024-10-21"
 OPENAI_RESPONSES_API = "2025-04-01-preview"
 INFERENCE_API = "2024-05-01-preview"
+INFERENCE_FALLBACK_APIS = ("2024-05-01-preview", "2024-02-15-preview")
 
 
 @dataclass
@@ -193,6 +194,18 @@ def _looks_rate_limited(body_txt: str) -> bool:
 
 def _is_retriable_http(code: int, body_txt: str) -> bool:
     return code in (408, 429, 500, 502, 503, 504) or _looks_rate_limited(body_txt)
+
+
+def _looks_api_version_unsupported(body_txt: str) -> bool:
+    txt = body_txt.lower()
+    needles = (
+        "api version not supported",
+        "unsupported api version",
+        "unsupported api-version",
+        "invalid api version",
+        "api-version not supported",
+    )
+    return any(n in txt for n in needles)
 
 
 def _compute_backoff_s(
@@ -397,17 +410,33 @@ def generate(
     surface = _surface(model_id)
 
     if surface == "openai_chat":
-        url = f"{endpoint}openai/deployments/{model_id}/chat/completions?api-version={OPENAI_CHAT_API}"
-        body = {
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": temperature,
-            "top_p": top_p,
-            "max_tokens": max_output_tokens,
-            "seed": seed,
-        }
+        resolved_model = _resolve_model_alias(env, model_id)
+        if _is_project_endpoint(endpoint):
+            # Project-scoped services.ai endpoints use the v1 path without
+            # api-version query parameter.
+            url = f"{endpoint}openai/v1/chat/completions"
+            body = {
+                "model": resolved_model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_output_tokens,
+            }
+        else:
+            url = f"{endpoint}openai/deployments/{resolved_model}/chat/completions?api-version={OPENAI_CHAT_API}"
+            body = {
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_output_tokens,
+                "seed": seed,
+            }
         payload, dt = _request(
             url,
             body,
@@ -455,8 +484,29 @@ def generate(
         # Project-scoped services.ai endpoints use the v1 path without
         # api-version query parameter.
         url = f"{endpoint}openai/v1/chat/completions"
-    else:
-        url = f"{endpoint}models/chat/completions?api-version={INFERENCE_API}"
+        body = {
+            "model": resolved_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_output_tokens,
+        }
+        payload, dt = _request(
+            url,
+            body,
+            key,
+            timeout_s,
+            retry_max_retries=retry_max_retries,
+            retry_budget_s=retry_budget_s,
+            retry_base_delay_s=retry_base_delay_s,
+            retry_max_delay_s=retry_max_delay_s,
+            retry_jitter_ratio=retry_jitter_ratio,
+        )
+        return _parse_chat(payload, model_id, dt)
+
     body = {
         "model": resolved_model,
         "messages": [
@@ -467,15 +517,28 @@ def generate(
         "top_p": top_p,
         "max_tokens": max_output_tokens,
     }
-    payload, dt = _request(
-        url,
-        body,
-        key,
-        timeout_s,
-        retry_max_retries=retry_max_retries,
-        retry_budget_s=retry_budget_s,
-        retry_base_delay_s=retry_base_delay_s,
-        retry_max_delay_s=retry_max_delay_s,
-        retry_jitter_ratio=retry_jitter_ratio,
-    )
-    return _parse_chat(payload, model_id, dt)
+    last_err: FoundryError | None = None
+    for idx, api_version in enumerate(INFERENCE_FALLBACK_APIS):
+        url = f"{endpoint}models/chat/completions?api-version={api_version}"
+        try:
+            payload, dt = _request(
+                url,
+                body,
+                key,
+                timeout_s,
+                retry_max_retries=retry_max_retries,
+                retry_budget_s=retry_budget_s,
+                retry_base_delay_s=retry_base_delay_s,
+                retry_max_delay_s=retry_max_delay_s,
+                retry_jitter_ratio=retry_jitter_ratio,
+            )
+            return _parse_chat(payload, model_id, dt)
+        except FoundryError as e:
+            msg = str(e)
+            if idx + 1 < len(INFERENCE_FALLBACK_APIS) and _looks_api_version_unsupported(msg):
+                last_err = e
+                continue
+            raise
+    if last_err is not None:
+        raise last_err
+    raise FoundryError("inference API call failed without a recoverable fallback path")

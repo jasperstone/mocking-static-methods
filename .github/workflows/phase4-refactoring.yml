@@ -238,6 +238,10 @@ jobs:
 
           python3 .github/scripts/plan_matrix.py > matrix.json
           n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
+          if [[ "$n" -gt 256 ]]; then
+            echo "::error::Planned $n shards exceeds GitHub matrix limit (256). Reduce run_window, increase chunk_size, or narrow models/repos."
+            exit 1
+          fi
           echo "::notice::Planned $n shards (target_set=$TARGET_SET, run_window=$RUN_WINDOW, shard_spec=${SHARD_SPEC:-none}, max_parallel=${MAX_PARALLEL})"
           {
             echo "matrix<<__EOF__"

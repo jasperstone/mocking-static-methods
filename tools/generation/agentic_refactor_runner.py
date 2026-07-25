@@ -389,6 +389,14 @@ def main() -> int:
     )
     args = ap.parse_args()
 
+    # Per-model output token cap: phi-4 has a 16384-token context window.
+    # Reducing its completion budget from 4096 → 3072 keeps prompt + completion
+    # under the limit for ~91% of cells (vs 0% at 4096). Only overrides the
+    # default; explicit --max-output-tokens on the CLI still wins.
+    _MODEL_MAX_OUTPUT_TOKENS: dict[str, int] = {"phi-4": 3072}
+    if args.max_output_tokens == 4096 and args.model in _MODEL_MAX_OUTPUT_TOKENS:
+        args.max_output_tokens = _MODEL_MAX_OUTPUT_TOKENS[args.model]
+
     phase_dir = REPO_ROOT / "phases" / args.phase
     if not phase_dir.is_dir():
         print(f"error: phase dir not found: {phase_dir}", file=sys.stderr)

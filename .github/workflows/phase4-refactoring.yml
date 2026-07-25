@@ -219,7 +219,7 @@ jobs:
           MODELS: ${{ github.event.inputs.models }}
           REPOS: ${{ github.event.inputs.repos }}
           SHARD_SPEC: ${{ github.event.inputs.shard_spec }}
-          MAX_PARALLEL: "3"
+          MAX_PARALLEL: "3"  # safe ceiling at 20K TPM; 4 caused 429s at prior 1K TPM quota
         run: |
           set -euo pipefail
 
@@ -465,7 +465,7 @@ jobs:
             --max-reads 8 \
             --max-attempts "${MAX_COMPILE_ATTEMPTS}" \
             --max-refactors 3 \
-            --max-output-tokens 4096 \
+            --max-output-tokens "$( [[ "${MODEL}" == 'phi-4' ]] && echo 3072 || echo 4096 )" \
             --timeout-s 240 \
             --compile-timeout-s 240 \
             --run-timeout-s "${RUN_TIMEOUT_S}" \

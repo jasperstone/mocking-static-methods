@@ -31,6 +31,12 @@ BUCKETS = [
     "api-version-unsupported",
     "baseline_compile_failed",
     "baseline_no_owning_csproj",
+    # Expanded sub-types carved out of the former "other" catch-all (2026-07-24).
+    "max-turns-exhausted",
+    "context-length",
+    "content-filter",
+    "invalid-prompt",
+    "adapter-parse-error",
     "other",
 ]
 
@@ -59,6 +65,17 @@ API_VERSION_UNSUPPORTED_RE = re.compile(
     r"(api\s*version\s*not\s*supported|unsupported\s*api\s*version|invalid\s*api\s*version)",
     re.IGNORECASE,
 )
+# Sub-type regexes carved out of the former "other" bucket (2026-07-24).
+# max_turns_exhausted is the dominant case (~96 % of prior "other" rows).
+MAX_TURNS_RE = re.compile(r"max_turns_exhausted", re.IGNORECASE)
+# HTTP 400 with model context-window overflow (codestral 16 384-token cap seen in data).
+CONTEXT_LENGTH_RE = re.compile(r"maximum context length", re.IGNORECASE)
+# Model returned finish_reason=content_filter with no tool_calls / no content.
+CONTENT_FILTER_RE = re.compile(r"content_filter", re.IGNORECASE)
+# HTTP 400 prompt flagged as policy violation (OpenAI invalid_request_error).
+INVALID_PROMPT_RE = re.compile(r"invalid_prompt|violating our usage policy", re.IGNORECASE)
+# Adapter failed to parse model response (NoneType attribute error).
+ADAPTER_PARSE_RE = re.compile(r"nonetype.*has no attribute|has no attribute.*get", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -89,6 +106,17 @@ def classify_non_submitted(rec: dict) -> str:
         return "server-5xx"
     if TIMEOUT_CONN_RE.search(text):
         return "timeout/connection"
+    # Sub-type buckets expanded from the former "other" catch-all (2026-07-24).
+    if MAX_TURNS_RE.search(text):
+        return "max-turns-exhausted"
+    if CONTEXT_LENGTH_RE.search(text):
+        return "context-length"
+    if CONTENT_FILTER_RE.search(text):
+        return "content-filter"
+    if INVALID_PROMPT_RE.search(text):
+        return "invalid-prompt"
+    if ADAPTER_PARSE_RE.search(text):
+        return "adapter-parse-error"
     return "other"
 
 

@@ -24,6 +24,11 @@ df <- load_phase4_failure_by_model_run() |>
         "auth/access",
         "server-5xx",
         "api-version-unsupported",
+        "max-turns-exhausted",
+        "context-length",
+        "content-filter",
+        "invalid-prompt",
+        "adapter-parse-error",
         "baseline_compile_failed",
         "baseline_no_owning_csproj",
         "other"
@@ -47,13 +52,18 @@ if (nrow(df) == 0) {
     mutate(model = factor(model, levels = model_order))
 
   pal_failure <- c(
-    "timeout/connection" = "#577590",
-    "auth/access" = "#43aa8b",
-    "server-5xx" = "#f9844a",
+    "timeout/connection"     = "#577590",
+    "auth/access"            = "#43aa8b",
+    "server-5xx"             = "#f9844a",
     "api-version-unsupported" = "#277da1",
+    "max-turns-exhausted"    = "#e9c46a",
+    "context-length"         = "#f4a261",
+    "content-filter"         = "#e76f51",
+    "invalid-prompt"         = "#c77dff",
+    "adapter-parse-error"    = "#b5838d",
     "baseline_compile_failed" = "#f94144",
     "baseline_no_owning_csproj" = "#9d4edd",
-    "other" = "#adb5bd"
+    "other"                  = "#adb5bd"
   )
 
   p <- ggplot(df, aes(x = model, y = count, fill = category)) +

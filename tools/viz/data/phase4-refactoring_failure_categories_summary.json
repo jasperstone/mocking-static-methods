@@ -11,6 +11,11 @@
     "api-version-unsupported",
     "baseline_compile_failed",
     "baseline_no_owning_csproj",
+    "max-turns-exhausted",
+    "context-length",
+    "content-filter",
+    "invalid-prompt",
+    "adapter-parse-error",
     "other"
   ],
   "infra_buckets": [
@@ -43,7 +48,12 @@
       "api-version-unsupported": 696,
       "baseline_compile_failed": 1170,
       "baseline_no_owning_csproj": 54,
-      "other": 52
+      "max-turns-exhausted": 49,
+      "context-length": 0,
+      "content-filter": 3,
+      "invalid-prompt": 0,
+      "adapter-parse-error": 0,
+      "other": 0
     },
     "by_phase": {
       "phase4-refactoring": {
@@ -57,7 +67,12 @@
           "api-version-unsupported": 696,
           "baseline_compile_failed": 1170,
           "baseline_no_owning_csproj": 54,
-          "other": 52
+          "max-turns-exhausted": 49,
+          "context-length": 0,
+          "content-filter": 3,
+          "invalid-prompt": 0,
+          "adapter-parse-error": 0,
+          "other": 0
         }
       }
     }

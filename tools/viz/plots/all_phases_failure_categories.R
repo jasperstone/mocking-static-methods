@@ -28,25 +28,35 @@ infra_categories <- c("timeout/connection", "auth/access", "rate-limit", "server
 baseline_categories <- c("baseline_compile_failed", "baseline_no_owning_csproj")
 
 label_map <- c(
-  "timeout/connection" = "Infra · timeout/connection",
-  "auth/access" = "Infra · auth/access",
-  "rate-limit" = "Infra · rate-limit",
-  "server-5xx" = "Infra · server-5xx",
+  "timeout/connection"      = "Infra · timeout/connection",
+  "auth/access"             = "Infra · auth/access",
+  "rate-limit"              = "Infra · rate-limit",
+  "server-5xx"              = "Infra · server-5xx",
   "api-version-unsupported" = "Infra · API version unsupported",
+  "max-turns-exhausted"     = "Model · max turns exhausted",
+  "context-length"          = "Model · context length exceeded",
+  "content-filter"          = "Model · content filtered",
+  "invalid-prompt"          = "Model · invalid prompt",
+  "adapter-parse-error"     = "Model · adapter parse error",
   "baseline_compile_failed" = "Baseline · compile failed",
   "baseline_no_owning_csproj" = "Baseline · no owning csproj",
-  "other" = "Other"
+  "other"                   = "Other"
 )
 
 palette <- c(
-  "Infra · timeout/connection" = "#4E79A7",
-  "Infra · auth/access" = "#76B7B2",
-  "Infra · rate-limit" = "#59A14F",
-  "Infra · server-5xx" = "#499894",
+  "Infra · timeout/connection"      = "#4E79A7",
+  "Infra · auth/access"             = "#76B7B2",
+  "Infra · rate-limit"              = "#59A14F",
+  "Infra · server-5xx"              = "#499894",
   "Infra · API version unsupported" = "#277DA1",
-  "Baseline · compile failed" = "#E15759",
-  "Baseline · no owning csproj" = "#B07AA1",
-  "Other" = "#ADB5BD"
+  "Model · max turns exhausted"     = "#E9C46A",
+  "Model · context length exceeded" = "#F4A261",
+  "Model · content filtered"        = "#E76F51",
+  "Model · invalid prompt"          = "#C77DFF",
+  "Model · adapter parse error"     = "#B5838D",
+  "Baseline · compile failed"       = "#E15759",
+  "Baseline · no owning csproj"     = "#B07AA1",
+  "Other"                           = "#ADB5BD"
 )
 
 phase_order <- c("phase2-agentic", "phase3-agentic-loop", "phase4-refactoring")
@@ -56,6 +66,11 @@ cat_order <- c(
   "rate-limit",
   "server-5xx",
   "api-version-unsupported",
+  "max-turns-exhausted",
+  "context-length",
+  "content-filter",
+  "invalid-prompt",
+  "adapter-parse-error",
   "baseline_compile_failed",
   "baseline_no_owning_csproj",
   "other"

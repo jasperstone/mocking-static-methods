@@ -950,7 +950,17 @@ def main() -> int:
         f"rejected={n_refactor_rejected}], attempts.jsonl at {attempts_path}",
         flush=True,
     )
-    return 0
+    # Final infra/provider gate is based on persisted per-target records.
+    infra_failures = _scan_infra_failures(attempts_path)
+    infra_n = len(infra_failures)
+    sample = ", ".join(
+        f"{target_id}:{reason}" for target_id, reason in infra_failures[:5]
+    ) or "none"
+    print(
+        f"infra_gate: infra_failures={infra_n} sample={sample}",
+        flush=True,
+    )
+    return 1 if infra_n > 0 else 0
 
 
 def _record(out, target_id: str, args, sys_sha: str, tmpl_sha: str, **fields) -> None:
@@ -977,16 +987,66 @@ def _record(out, target_id: str, args, sys_sha: str, tmpl_sha: str, **fields) ->
     out.flush()
 
 
+def _has_http_4xx_5xx(e: str) -> bool:
+    if re.search(r"\bhttp(?:\s+status)?\s*[:=]?\s*(?:4\d\d|5\d\d)\b", e):
+        return True
+    if re.search(r"\bstatus[_\s-]*code\b\s*[:=]?\s*(?:4\d\d|5\d\d)\b", e):
+        return True
+    if re.search(r"\b(?:4\d\d|5\d\d)\b", e) and any(
+        token in e for token in ("http", "status", "response", "request", "api")
+    ):
+        return True
+    return False
+
+
 def _classify_error(error: str | None) -> str | None:
     if not error:
         return None
     e = error.lower()
-    if "http 429" in e or "ratelimit" in e or "rate limit" in e:
-        return "adapter_rate_limited"
-    if "timeout/conn" in e or "timed out" in e:
-        return "adapter_timeout"
+    if (
+        "http 429" in e
+        or "ratelimit" in e
+        or "rate limit" in e
+        or re.search(r"\bstatus[_\s-]*code\b\s*[:=]?\s*429\b", e)
+    ):
+        return "infra_rate_limited"
+    if (
+        "api-version-unsupported" in e
+        or "unsupported api version" in e
+        or "unsupported api-version" in e
+    ):
+        return "infra_api_version_unsupported"
+    if (
+        "deploymentnotfound" in e
+        or "deployment not found" in e
+        or "resource not found" in e
+        or "model not found" in e
+        or "endpoint not found" in e
+    ):
+        return "infra_not_found"
+    if (
+        "context length exceeded" in e
+        or "max context" in e
+        or "maximum context" in e
+        or "token limit" in e
+        or "context window" in e
+        or "too many tokens" in e
+    ):
+        return "infra_context_limit"
+    if (
+        "request timeout" in e
+        or "read timeout" in e
+        or "connection timeout" in e
+        or "connect timeout" in e
+        or "deadline exceeded" in e
+        or "timeout/conn" in e
+        or "timed out" in e
+    ):
+        return "infra_timeout"
+    if _has_http_4xx_5xx(e):
+        return "infra_http_status"
     if "adapter error" in e:
-        return "adapter_error"
+        return "infra_adapter_error"
     if "baseline_compile_failed" in e:
         return "baseline_compile_failed"
     if "baseline_build_timeout" in e:
@@ -998,6 +1058,70 @@ def _classify_error(error: str | None) -> str | None:
     if "submitted_run_failed" in e:
         return "submitted_run_failed"
     return "other"
+
+
+def _reason_snippet(text: str, limit: int = 160) -> str:
+    s = " ".join(str(text).split())
+    if len(s) <= limit:
+        return s
+    return s[: limit - 3] + "..."
+
+
+def _infra_failure_reason(rec: dict) -> str | None:
+    texts: list[str] = []
+    for key in ("error", "halt_reason", "error_type", "final_error_type"):
+        v = rec.get(key)
+        if v:
+            texts.append(str(v))
+
+    for err in rec.get("baseline_first_compile_errors") or []:
+        if isinstance(err, dict):
+            texts.append(
+                " ".join(
+                    str(err.get(k, ""))
+                    for k in ("message", "text", "error", "details", "code")
+                )
+            )
+        else:
+            texts.append(str(err))
+
+    for attempt in rec.get("submission_iterations") or []:
+        for key in ("first_compile_errors", "first_test_failures"):
+            for err in attempt.get(key) or []:
+                if isinstance(err, dict):
+                    texts.append(
+                        " ".join(
+                            str(err.get(k, ""))
+                            for k in ("message", "text", "error", "details", "code")
+                        )
+                    )
+                else:
+                    texts.append(str(err))
+
+    for text in texts:
+        c = _classify_error(text)
+        if c and c.startswith("infra_"):
+            return f"{c} ({_reason_snippet(text)})"
+    return None
+
+
+def _scan_infra_failures(attempts_path: Path) -> list[tuple[str, str]]:
+    failures: list[tuple[str, str]] = []
+    if not attempts_path.is_file():
+        return failures
+    with attempts_path.open() as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            reason = _infra_failure_reason(rec)
+            if reason:
+                failures.append((str(rec.get("target_id", "unknown")), reason))
+    return failures
 
 
 if __name__ == "__main__":

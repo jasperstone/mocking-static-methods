@@ -109,6 +109,19 @@ def _is_project_endpoint(endpoint: str) -> bool:
     return "/api/projects/" in endpoint
 
 
+def _is_full_chat_completions_endpoint(endpoint: str) -> bool:
+    normalized = endpoint.strip().lower()
+    return "/openai/v1/chat/completions" in normalized
+
+
+def _is_full_chat_completions_endpoint(endpoint: str) -> bool:
+    """True when endpoint is already a full /openai/v1/chat/completions URL.
+
+    Accepts optional trailing slash and query string.
+    """
+    return re.search(r"/openai/v1/chat/completions/?(?:\?.*)?$", endpoint.rstrip("/"), re.IGNORECASE) is not None
+
+
 def _normalize_endpoint(endpoint: str) -> str:
     endpoint = endpoint.strip()
     if not endpoint.endswith("/"):
@@ -265,6 +278,52 @@ def _looks_api_version_unsupported(body_txt: str) -> bool:
     return any(n in txt for n in needles)
 
 
+def _parse_context_window_error(body_txt: str) -> tuple[int, int, int] | None:
+    """Parse provider context-length errors.
+
+    Expected shape example:
+      "maximum context length is 16384 tokens. However, you requested 16438
+       tokens (13366 in the messages, 3072 in the completion)."
+    Returns (max_context_tokens, message_tokens, requested_total_tokens).
+    """
+    txt = body_txt.lower()
+    if "maximum context length" not in txt:
+        return None
+    m = re.search(
+        r"maximum context length is\s*(\d+)\s*tokens.*?you requested\s*(\d+)\s*tokens\s*\((\d+)\s*in the messages",
+        txt,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(3)), int(m.group(2))
+
+
+def _shrink_output_budget(body: dict, max_context: int, message_tokens: int) -> bool:
+    """Shrink max output tokens in-place to fit the provider context window.
+
+    Leaves a small safety margin to avoid oscillation at the boundary.
+    Returns True when a shrink was applied.
+    """
+    budget_key = None
+    if "max_tokens" in body and isinstance(body.get("max_tokens"), int):
+        budget_key = "max_tokens"
+    elif "max_output_tokens" in body and isinstance(body.get("max_output_tokens"), int):
+        budget_key = "max_output_tokens"
+    if budget_key is None:
+        return False
+
+    current = int(body[budget_key])
+    # Keep a small buffer for provider-side accounting variance.
+    allowed = max(1, max_context - message_tokens - 32)
+    # Also force a minimum step-down so repeated retries make progress.
+    candidate = min(allowed, max(1, current - 256))
+    if candidate >= current:
+        return False
+    body[budget_key] = candidate
+    return True
+
+
 def _compute_backoff_s(
     *,
     attempt: int,
@@ -294,10 +353,12 @@ def _request(
     retry_max_delay_s: float,
     retry_jitter_ratio: float,
 ) -> tuple[dict, int]:
-    req_data = json.dumps(body).encode("utf-8")
     attempt = 0
+    context_shrinks = 0
+    max_context_shrinks = 3
     t0 = time.monotonic()
     while True:
+        req_data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             url,
             data=req_data,
@@ -310,6 +371,17 @@ def _request(
             return payload, int((time.monotonic() - t0) * 1000)
         except urllib.error.HTTPError as e:
             body_txt = e.read().decode("utf-8", "replace")[:512]
+            # For prompt+completion overflow errors, adaptively reduce
+            # completion budget and retry within the same call.
+            if e.code == 400 and context_shrinks < max_context_shrinks:
+                parsed = _parse_context_window_error(body_txt)
+                if parsed is not None:
+                    max_ctx, msg_tokens, _ = parsed
+                    if _shrink_output_budget(body, max_ctx, msg_tokens):
+                        context_shrinks += 1
+                        if attempt < retry_max_retries:
+                            attempt += 1
+                            continue
             if _is_retriable_http(e.code, body_txt) and attempt < retry_max_retries:
                 retry_after_s = _retry_after_seconds(getattr(e, "headers", None))
                 wait_s = _compute_backoff_s(
@@ -448,6 +520,7 @@ def generate(
 ) -> GenerationResult:
     env = _load_env()
     endpoint, key = _resolve_credentials(env, model_id)
+    endpoint_raw = endpoint.strip()
     endpoint = _normalize_endpoint(endpoint)
 
     if retry_max_retries is None:
@@ -465,10 +538,14 @@ def generate(
 
     if surface == "openai_chat":
         resolved_model = _resolve_model_alias(env, model_id)
-        if _is_project_endpoint(endpoint):
+        if _is_project_endpoint(endpoint) or _is_full_chat_completions_endpoint(endpoint):
             # Project-scoped services.ai endpoints use the v1 path without
-            # api-version query parameter.
-            url = f"{endpoint}openai/v1/chat/completions"
+            # api-version query parameter. Also accept callers that provide a
+            # full /openai/v1/chat/completions endpoint as the base.
+            if _is_full_chat_completions_endpoint(endpoint):
+                url = endpoint.rstrip("/")
+            else:
+                url = f"{endpoint}openai/v1/chat/completions"
             body = {
                 "model": resolved_model,
                 "messages": [
@@ -534,6 +611,32 @@ def generate(
 
     # inference surface (model name in body)
     resolved_model = _resolve_model_alias(env, model_id)
+    if _is_full_chat_completions_endpoint(endpoint_raw):
+        # Model-scoped endpoint already points to chat completions.
+        url = endpoint_raw
+        body = {
+            "model": resolved_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_output_tokens,
+        }
+        payload, dt = _request(
+            url,
+            body,
+            key,
+            timeout_s,
+            retry_max_retries=retry_max_retries,
+            retry_budget_s=retry_budget_s,
+            retry_base_delay_s=retry_base_delay_s,
+            retry_max_delay_s=retry_max_delay_s,
+            retry_jitter_ratio=retry_jitter_ratio,
+        )
+        return _parse_chat(payload, model_id, dt)
+
     if _is_project_endpoint(endpoint):
         # Project-scoped services.ai endpoints use the v1 path without
         # api-version query parameter.

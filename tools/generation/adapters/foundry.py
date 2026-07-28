@@ -109,6 +109,19 @@ def _is_project_endpoint(endpoint: str) -> bool:
     return "/api/projects/" in endpoint
 
 
+def _is_full_chat_completions_endpoint(endpoint: str) -> bool:
+    normalized = endpoint.strip().lower()
+    return "/openai/v1/chat/completions" in normalized
+
+
+def _is_full_chat_completions_endpoint(endpoint: str) -> bool:
+    """True when endpoint is already a full /openai/v1/chat/completions URL.
+
+    Accepts optional trailing slash and query string.
+    """
+    return re.search(r"/openai/v1/chat/completions/?(?:\?.*)?$", endpoint.rstrip("/"), re.IGNORECASE) is not None
+
+
 def _normalize_endpoint(endpoint: str) -> str:
     endpoint = endpoint.strip()
     if not endpoint.endswith("/"):
@@ -448,6 +461,7 @@ def generate(
 ) -> GenerationResult:
     env = _load_env()
     endpoint, key = _resolve_credentials(env, model_id)
+    endpoint_raw = endpoint.strip()
     endpoint = _normalize_endpoint(endpoint)
 
     if retry_max_retries is None:
@@ -465,10 +479,14 @@ def generate(
 
     if surface == "openai_chat":
         resolved_model = _resolve_model_alias(env, model_id)
-        if _is_project_endpoint(endpoint):
+        if _is_project_endpoint(endpoint) or _is_full_chat_completions_endpoint(endpoint):
             # Project-scoped services.ai endpoints use the v1 path without
-            # api-version query parameter.
-            url = f"{endpoint}openai/v1/chat/completions"
+            # api-version query parameter. Also accept callers that provide a
+            # full /openai/v1/chat/completions endpoint as the base.
+            if _is_full_chat_completions_endpoint(endpoint):
+                url = endpoint.rstrip("/")
+            else:
+                url = f"{endpoint}openai/v1/chat/completions"
             body = {
                 "model": resolved_model,
                 "messages": [
@@ -534,6 +552,32 @@ def generate(
 
     # inference surface (model name in body)
     resolved_model = _resolve_model_alias(env, model_id)
+    if _is_full_chat_completions_endpoint(endpoint_raw):
+        # Model-scoped endpoint already points to chat completions.
+        url = endpoint_raw
+        body = {
+            "model": resolved_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_tokens": max_output_tokens,
+        }
+        payload, dt = _request(
+            url,
+            body,
+            key,
+            timeout_s,
+            retry_max_retries=retry_max_retries,
+            retry_budget_s=retry_budget_s,
+            retry_base_delay_s=retry_base_delay_s,
+            retry_max_delay_s=retry_max_delay_s,
+            retry_jitter_ratio=retry_jitter_ratio,
+        )
+        return _parse_chat(payload, model_id, dt)
+
     if _is_project_endpoint(endpoint):
         # Project-scoped services.ai endpoints use the v1 path without
         # api-version query parameter.

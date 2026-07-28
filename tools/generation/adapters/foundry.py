@@ -278,6 +278,52 @@ def _looks_api_version_unsupported(body_txt: str) -> bool:
     return any(n in txt for n in needles)
 
 
+def _parse_context_window_error(body_txt: str) -> tuple[int, int, int] | None:
+    """Parse provider context-length errors.
+
+    Expected shape example:
+      "maximum context length is 16384 tokens. However, you requested 16438
+       tokens (13366 in the messages, 3072 in the completion)."
+    Returns (max_context_tokens, message_tokens, requested_total_tokens).
+    """
+    txt = body_txt.lower()
+    if "maximum context length" not in txt:
+        return None
+    m = re.search(
+        r"maximum context length is\s*(\d+)\s*tokens.*?you requested\s*(\d+)\s*tokens\s*\((\d+)\s*in the messages",
+        txt,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(3)), int(m.group(2))
+
+
+def _shrink_output_budget(body: dict, max_context: int, message_tokens: int) -> bool:
+    """Shrink max output tokens in-place to fit the provider context window.
+
+    Leaves a small safety margin to avoid oscillation at the boundary.
+    Returns True when a shrink was applied.
+    """
+    budget_key = None
+    if "max_tokens" in body and isinstance(body.get("max_tokens"), int):
+        budget_key = "max_tokens"
+    elif "max_output_tokens" in body and isinstance(body.get("max_output_tokens"), int):
+        budget_key = "max_output_tokens"
+    if budget_key is None:
+        return False
+
+    current = int(body[budget_key])
+    # Keep a small buffer for provider-side accounting variance.
+    allowed = max(1, max_context - message_tokens - 32)
+    # Also force a minimum step-down so repeated retries make progress.
+    candidate = min(allowed, max(1, current - 256))
+    if candidate >= current:
+        return False
+    body[budget_key] = candidate
+    return True
+
+
 def _compute_backoff_s(
     *,
     attempt: int,
@@ -307,10 +353,12 @@ def _request(
     retry_max_delay_s: float,
     retry_jitter_ratio: float,
 ) -> tuple[dict, int]:
-    req_data = json.dumps(body).encode("utf-8")
     attempt = 0
+    context_shrinks = 0
+    max_context_shrinks = 3
     t0 = time.monotonic()
     while True:
+        req_data = json.dumps(body).encode("utf-8")
         req = urllib.request.Request(
             url,
             data=req_data,
@@ -323,6 +371,17 @@ def _request(
             return payload, int((time.monotonic() - t0) * 1000)
         except urllib.error.HTTPError as e:
             body_txt = e.read().decode("utf-8", "replace")[:512]
+            # For prompt+completion overflow errors, adaptively reduce
+            # completion budget and retry within the same call.
+            if e.code == 400 and context_shrinks < max_context_shrinks:
+                parsed = _parse_context_window_error(body_txt)
+                if parsed is not None:
+                    max_ctx, msg_tokens, _ = parsed
+                    if _shrink_output_budget(body, max_ctx, msg_tokens):
+                        context_shrinks += 1
+                        if attempt < retry_max_retries:
+                            attempt += 1
+                            continue
             if _is_retriable_http(e.code, body_txt) and attempt < retry_max_retries:
                 retry_after_s = _retry_after_seconds(getattr(e, "headers", None))
                 wait_s = _compute_backoff_s(

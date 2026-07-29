@@ -196,7 +196,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | shard_spec: ${{ github.event.inputs.shard_spec || 'none' }} | run_window: ${{ github.event.inputs.run_window }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }}"
+          echo "::warning::foundry mode confirmed. Target set: ${{ github.event.inputs.target_set }} | models: ${{ github.event.inputs.models }} | repos: ${{ github.event.inputs.repos }} | shard_spec: ${{ github.event.inputs.shard_spec || 'none' }} | run_window: ${{ github.event.inputs.run_window }} | limit_per_repo: ${{ github.event.inputs.limit_per_repo }} | max_compile_attempts: ${{ github.event.inputs.max_compile_attempts }} | max_parallel: 3"
 
   plan:
     name: "Plan shards"
@@ -206,6 +206,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       target_sha256: ${{ steps.plan.outputs.target_sha256 }}
+      max_parallel: ${{ steps.plan.outputs.max_parallel }}
     steps:
       - uses: actions/checkout@v5
 
@@ -218,17 +219,34 @@ jobs:
           MODELS: ${{ github.event.inputs.models }}
           REPOS: ${{ github.event.inputs.repos }}
           SHARD_SPEC: ${{ github.event.inputs.shard_spec }}
+          MAX_PARALLEL: "3"  # safe ceiling at 20K TPM; 4 caused 429s at prior 1K TPM quota
         run: |
           set -euo pipefail
+
+          if ! [[ "${MAX_PARALLEL}" =~ ^[0-9]+$ ]]; then
+            echo "::error::max_parallel must be an integer in [1,4]; got '${MAX_PARALLEL}'"
+            exit 1
+          fi
+          if [[ "${MAX_PARALLEL}" -lt 1 || "${MAX_PARALLEL}" -gt 4 ]]; then
+            echo "::error::max_parallel must be within [1,4]; got '${MAX_PARALLEL}'"
+            exit 1
+          fi
+
           python3 .github/scripts/plan_matrix.py > matrix.json
           n=$(python3 -c "import json; print(len(json.load(open('matrix.json'))['include']))")
-          echo "::notice::Planned $n shards (target_set=$TARGET_SET, run_window=$RUN_WINDOW, shard_spec=${SHARD_SPEC:-none})"
+          if [[ "$n" -gt 256 ]]; then
+            echo "::error::Planned $n shards exceeds GitHub matrix limit (256). Reduce run_window, increase chunk_size, or narrow models/repos."
+            exit 1
+          fi
+          echo "::notice::Planned $n shards (target_set=$TARGET_SET, run_window=$RUN_WINDOW, shard_spec=${SHARD_SPEC:-none}, max_parallel=${MAX_PARALLEL})"
           {
             echo "matrix<<__EOF__"
             cat matrix.json
             echo
             echo "__EOF__"
           } >> "$GITHUB_OUTPUT"
+
+          echo "max_parallel=${MAX_PARALLEL}" >> "$GITHUB_OUTPUT"
 
           sha=$(sha256sum "targets/${TARGET_SET}/targets.csv" | awk '{print $1}')
           echo "target_sha256=$sha" >> "$GITHUB_OUTPUT"
@@ -246,13 +264,16 @@ jobs:
     strategy:
       fail-fast: false
       # Keep shard fan-out below Foundry burst limits to avoid 429-driven dropouts.
-      max-parallel: 1
+      # Value is validated in the plan job and bounded to [1,4].
+      max-parallel: ${{ fromJSON(needs.plan.outputs.max_parallel) }}
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       # Default credentials (backward compatible).
       FOUNDRY_ENDPOINT_DEFAULT: ${{ secrets.FOUNDRY_ENDPOINT }}
       FOUNDRY_API_KEY_DEFAULT: ${{ secrets.FOUNDRY_API_KEY }}
       # Optional model-specific credentials so grok/llama can target different projects.
+      FOUNDRY_ENDPOINT_PHI_4: ${{ secrets.FOUNDRY_ENDPOINT_PHI_4 }}
+      FOUNDRY_API_KEY_PHI_4: ${{ secrets.FOUNDRY_API_KEY_PHI_4 }}
       FOUNDRY_ENDPOINT_PHI: ${{ secrets.FOUNDRY_ENDPOINT_PHI }}
       FOUNDRY_API_KEY_PHI: ${{ secrets.FOUNDRY_API_KEY_PHI }}
       FOUNDRY_ENDPOINT_GROK: ${{ secrets.FOUNDRY_ENDPOINT_GROK }}
@@ -299,10 +320,22 @@ jobs:
 
           # Route credentials per shard model, not top-level inputs.models.
           # This keeps mixed-model dispatches (models=all) correct for phi/grok/llama.
-          if [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI:-}" ]] && [[ -n "${FOUNDRY_API_KEY_PHI:-}" ]]; then
+          if [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI_4:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_PHI_4}"
+            if [[ -n "${FOUNDRY_API_KEY_PHI_4:-}" ]]; then
+              key="${FOUNDRY_API_KEY_PHI_4}"
+              source="phi_4"
+            else
+              source="phi_4+default_key"
+            fi
+          elif [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI:-}" ]]; then
             endpoint="${FOUNDRY_ENDPOINT_PHI}"
-            key="${FOUNDRY_API_KEY_PHI}"
-            source="phi"
+            if [[ -n "${FOUNDRY_API_KEY_PHI:-}" ]]; then
+              key="${FOUNDRY_API_KEY_PHI}"
+              source="phi"
+            else
+              source="phi+default_key"
+            fi
           elif [[ "$model" == "grok-4-1-fast" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_API_KEY_GROK:-}" ]]; then
             endpoint="${FOUNDRY_ENDPOINT_GROK}"
             key="${FOUNDRY_API_KEY_GROK}"
@@ -432,7 +465,7 @@ jobs:
             --max-reads 8 \
             --max-attempts "${MAX_COMPILE_ATTEMPTS}" \
             --max-refactors 3 \
-            --max-output-tokens 4096 \
+            --max-output-tokens "$( [[ "${MODEL}" == 'phi-4' ]] && echo 3072 || echo 4096 )" \
             --timeout-s 240 \
             --compile-timeout-s 240 \
             --run-timeout-s "${RUN_TIMEOUT_S}" \

@@ -55,7 +55,7 @@ def test_request_retries_429_until_success(monkeypatch):
         "secret",
         timeout_s=5,
         retry_max_retries=5,
-        retry_budget_s=30,
+        retry_budget_s=180,
         retry_base_delay_s=1,
         retry_max_delay_s=10,
         retry_jitter_ratio=0.25,
@@ -64,7 +64,7 @@ def test_request_retries_429_until_success(monkeypatch):
     assert payload == {"ok": True}
     assert latency_ms >= 0
     assert calls["n"] == 3
-    assert sleep_calls == [1.0, 1.0]
+    assert sleep_calls == [60.0, 60.0]
 
 
 def test_request_honors_retry_after_without_capping(monkeypatch):
@@ -99,6 +99,42 @@ def test_request_honors_retry_after_without_capping(monkeypatch):
     assert sleep_calls == [120.0]
 
 
+def test_retry_after_supports_azure_millisecond_header():
+    assert foundry._retry_after_seconds({"retry-after-ms": "1500"}) == 1.5
+    assert foundry._retry_after_seconds({"x-ms-retry-after-ms": "2500"}) == 2.5
+
+
+def test_request_enforces_configured_rate_limit_cooldown(monkeypatch):
+    sleep_calls: list[float] = []
+    monkeypatch.setattr(foundry.time, "sleep", lambda s: sleep_calls.append(float(s)))
+
+    calls = {"n": 0}
+
+    def fake_urlopen(_req, timeout):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _http_error(429, '{"error":{"code":"RateLimitReached"}}', retry_after="0")
+        return _FakeResponse({"ok": True})
+
+    monkeypatch.setattr(foundry.urllib.request, "urlopen", fake_urlopen)
+
+    payload, _ = foundry._request(
+        "https://example.invalid",
+        {"hello": "world"},
+        "secret",
+        timeout_s=5,
+        retry_max_retries=3,
+        retry_budget_s=300,
+        retry_base_delay_s=1,
+        retry_max_delay_s=10,
+        retry_jitter_ratio=0.25,
+        retry_rate_limit_min_delay_s=45,
+    )
+
+    assert payload == {"ok": True}
+    assert sleep_calls == [45.0]
+
+
 def test_request_retries_rate_limit_marker_even_with_non_429(monkeypatch):
     monkeypatch.setattr(foundry.time, "sleep", lambda _s: None)
     monkeypatch.setattr(foundry.random, "uniform", lambda _a, _b: 0.0)
@@ -119,7 +155,7 @@ def test_request_retries_rate_limit_marker_even_with_non_429(monkeypatch):
         "secret",
         timeout_s=5,
         retry_max_retries=3,
-        retry_budget_s=30,
+        retry_budget_s=90,
         retry_base_delay_s=1,
         retry_max_delay_s=10,
         retry_jitter_ratio=0.25,

@@ -79,6 +79,7 @@ def _load_env() -> dict[str, str]:
         "FOUNDRY_RETRY_BASE_DELAY_S",
         "FOUNDRY_RETRY_MAX_DELAY_S",
         "FOUNDRY_RETRY_JITTER_RATIO",
+        "FOUNDRY_RETRY_RATE_LIMIT_MIN_DELAY_S",
     ):
         if os.environ.get(k):
             env[k] = os.environ[k]
@@ -231,6 +232,14 @@ def _retry_after_seconds(headers) -> float | None:
     if not headers:
         return None
     value = headers.get("Retry-After")
+    if not value:
+        for key in ("retry-after-ms", "x-ms-retry-after-ms"):
+            milliseconds = headers.get(key)
+            if milliseconds:
+                try:
+                    return max(0.0, float(milliseconds) / 1000.0)
+                except (TypeError, ValueError):
+                    return None
     if not value:
         return None
     v = str(value).strip()
@@ -415,6 +424,7 @@ def _request(
     retry_base_delay_s: float,
     retry_max_delay_s: float,
     retry_jitter_ratio: float,
+    retry_rate_limit_min_delay_s: float = 60.0,
 ) -> tuple[dict, int]:
     attempt = 0
     context_shrinks = 0
@@ -455,6 +465,11 @@ def _request(
                             continue
             if _is_retriable_http(e.code, body_txt) and attempt < retry_max_retries:
                 retry_after_s = _retry_after_seconds(getattr(e, "headers", None))
+                if e.code == 429 or _looks_rate_limited(body_txt):
+                    retry_after_s = max(
+                        retry_rate_limit_min_delay_s,
+                        retry_after_s or 0.0,
+                    )
                 wait_s = _compute_backoff_s(
                     attempt=attempt,
                     retry_base_delay_s=retry_base_delay_s,
@@ -588,6 +603,7 @@ def generate(
     retry_base_delay_s: float | None = None,
     retry_max_delay_s: float | None = None,
     retry_jitter_ratio: float | None = None,
+    retry_rate_limit_min_delay_s: float | None = None,
 ) -> GenerationResult:
     env = _load_env()
     endpoint, key = _resolve_credentials(env, model_id)
@@ -604,6 +620,13 @@ def generate(
         retry_max_delay_s = _env_float(env, "FOUNDRY_RETRY_MAX_DELAY_S", default=30.0, min_value=0.1)
     if retry_jitter_ratio is None:
         retry_jitter_ratio = _env_float(env, "FOUNDRY_RETRY_JITTER_RATIO", default=0.25, min_value=0.0)
+    if retry_rate_limit_min_delay_s is None:
+        retry_rate_limit_min_delay_s = _env_float(
+            env,
+            "FOUNDRY_RETRY_RATE_LIMIT_MIN_DELAY_S",
+            default=60.0,
+            min_value=0.0,
+        )
 
     surface = _surface(model_id)
 
@@ -649,6 +672,7 @@ def generate(
             retry_base_delay_s=retry_base_delay_s,
             retry_max_delay_s=retry_max_delay_s,
             retry_jitter_ratio=retry_jitter_ratio,
+            retry_rate_limit_min_delay_s=retry_rate_limit_min_delay_s,
         )
         return _parse_chat(payload, model_id, dt)
 
@@ -677,6 +701,7 @@ def generate(
             retry_base_delay_s=retry_base_delay_s,
             retry_max_delay_s=retry_max_delay_s,
             retry_jitter_ratio=retry_jitter_ratio,
+            retry_rate_limit_min_delay_s=retry_rate_limit_min_delay_s,
         )
         return _parse_responses(payload, model_id, dt)
 
@@ -705,6 +730,7 @@ def generate(
             retry_base_delay_s=retry_base_delay_s,
             retry_max_delay_s=retry_max_delay_s,
             retry_jitter_ratio=retry_jitter_ratio,
+            retry_rate_limit_min_delay_s=retry_rate_limit_min_delay_s,
         )
         return _parse_chat(payload, model_id, dt)
 
@@ -732,6 +758,7 @@ def generate(
             retry_base_delay_s=retry_base_delay_s,
             retry_max_delay_s=retry_max_delay_s,
             retry_jitter_ratio=retry_jitter_ratio,
+            retry_rate_limit_min_delay_s=retry_rate_limit_min_delay_s,
         )
         return _parse_chat(payload, model_id, dt)
 
@@ -759,6 +786,7 @@ def generate(
                 retry_base_delay_s=retry_base_delay_s,
                 retry_max_delay_s=retry_max_delay_s,
                 retry_jitter_ratio=retry_jitter_ratio,
+                retry_rate_limit_min_delay_s=retry_rate_limit_min_delay_s,
             )
             return _parse_chat(payload, model_id, dt)
         except FoundryError as e:

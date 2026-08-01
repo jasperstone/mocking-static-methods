@@ -293,6 +293,8 @@ jobs:
       FOUNDRY_RETRY_BASE_DELAY_S: "1"
       FOUNDRY_RETRY_MAX_DELAY_S: "600"
       FOUNDRY_RETRY_JITTER_RATIO: "0.5"
+      # Phi-4 TPM windows need time to drain; Azure may return Retry-After: 0.
+      FOUNDRY_RETRY_RATE_LIMIT_MIN_DELAY_S: "60"
       # Make sure compile_only.py picks up the SDK on $PATH (not the home-dir copy).
       DOTNET: "dotnet"
       DOTNET_NOLOGO: "1"

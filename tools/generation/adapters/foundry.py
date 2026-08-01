@@ -289,14 +289,27 @@ def _parse_context_window_error(body_txt: str) -> tuple[int, int, int] | None:
     txt = body_txt.lower()
     if "maximum context length" not in txt:
         return None
-    m = re.search(
-        r"maximum context length is\s*(\d+)\s*tokens.*?you requested\s*(\d+)\s*tokens\s*\((\d+)\s*in the messages",
-        txt,
-        re.IGNORECASE | re.DOTALL,
-    )
-    if not m:
+    max_match = re.search(r"maximum context length is\s*(\d+)\s*tokens", txt)
+    if not max_match:
         return None
-    return int(m.group(1)), int(m.group(3)), int(m.group(2))
+
+    requested_match = re.search(r"you requested\s*(\d+)\s*tokens", txt)
+    message_match = re.search(r"(\d+)\s*in the messages", txt)
+    if message_match is None:
+        message_match = re.search(r"messages resulted in\s*(\d+)\s*tokens", txt)
+    if message_match is None:
+        message_match = re.search(r"input (?:has|contains)\s*(\d+)\s*tokens", txt)
+    if message_match is None:
+        return None
+
+    max_context = int(max_match.group(1))
+    message_tokens = int(message_match.group(1))
+    requested_total = (
+        int(requested_match.group(1))
+        if requested_match is not None
+        else message_tokens
+    )
+    return max_context, message_tokens, requested_total
 
 
 def _shrink_output_budget(body: dict, max_context: int, message_tokens: int) -> bool:
@@ -321,6 +334,56 @@ def _shrink_output_budget(body: dict, max_context: int, message_tokens: int) -> 
     if candidate >= current:
         return False
     body[budget_key] = candidate
+    return True
+
+
+def _compact_messages(body: dict, max_context: int, message_tokens: int) -> bool:
+    """Compact the user message after the provider reports prompt overflow.
+
+    Agentic conversations append tool transcripts to one user message. Preserve
+    the original task at the front and the latest feedback at the end while
+    removing enough middle history to fit the provider's measured token window.
+    """
+    messages = body.get("messages")
+    if not isinstance(messages, list) or message_tokens <= 0:
+        return False
+
+    output_budget = body.get("max_tokens", body.get("max_output_tokens", 0))
+    if not isinstance(output_budget, int):
+        output_budget = 0
+    target_message_tokens = max(1, max_context - output_budget - 256)
+    if message_tokens <= target_message_tokens:
+        return False
+
+    candidates = [
+        message
+        for message in messages
+        if isinstance(message, dict)
+        and message.get("role") == "user"
+        and isinstance(message.get("content"), str)
+    ]
+    if not candidates:
+        return False
+
+    message = max(candidates, key=lambda item: len(item["content"]))
+    content = message["content"]
+    if len(content) < 1024:
+        return False
+
+    keep_ratio = min(0.9, target_message_tokens / message_tokens)
+    keep_chars = max(768, int(len(content) * keep_ratio * 0.9))
+    if keep_chars >= len(content):
+        return False
+
+    marker = (
+        "\n\n<conversation-history-compacted>"
+        "\nOlder intermediate turns were removed to fit the model context window."
+        "\n</conversation-history-compacted>\n\n"
+    )
+    payload_chars = max(512, keep_chars - len(marker))
+    head_chars = max(256, int(payload_chars * 0.4))
+    tail_chars = max(256, payload_chars - head_chars)
+    message["content"] = content[:head_chars] + marker + content[-tail_chars:]
     return True
 
 
@@ -370,14 +433,22 @@ def _request(
                 payload = json.loads(resp.read().decode("utf-8"))
             return payload, int((time.monotonic() - t0) * 1000)
         except urllib.error.HTTPError as e:
-            body_txt = e.read().decode("utf-8", "replace")[:512]
+            body_txt = e.read().decode("utf-8", "replace")[:4096]
             # For prompt+completion overflow errors, adaptively reduce
             # completion budget and retry within the same call.
             if e.code == 400 and context_shrinks < max_context_shrinks:
                 parsed = _parse_context_window_error(body_txt)
                 if parsed is not None:
                     max_ctx, msg_tokens, _ = parsed
-                    if _shrink_output_budget(body, max_ctx, msg_tokens):
+                    # If the prompt itself fills the window, preserve a useful
+                    # completion budget and compact history first.
+                    if msg_tokens >= max_ctx - 256:
+                        adapted = _compact_messages(body, max_ctx, msg_tokens)
+                    else:
+                        adapted = _shrink_output_budget(body, max_ctx, msg_tokens)
+                        if not adapted:
+                            adapted = _compact_messages(body, max_ctx, msg_tokens)
+                    if adapted:
                         context_shrinks += 1
                         if attempt < retry_max_retries:
                             attempt += 1

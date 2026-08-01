@@ -129,6 +129,61 @@ def test_request_retries_rate_limit_marker_even_with_non_429(monkeypatch):
     assert calls["n"] == 2
 
 
+def test_parse_context_window_error_accepts_messages_resulted_wording():
+    parsed = foundry._parse_context_window_error(
+        '{"error":{"message":"This model\'s maximum context length is 16384 tokens. '
+        'However, your messages resulted in 17120 tokens."}}'
+    )
+
+    assert parsed == (16384, 17120, 17120)
+
+
+def test_request_compacts_prompt_after_context_overflow(monkeypatch):
+    original = "TASK:" + ("A" * 12000) + "LATEST-FEEDBACK"
+    body = {
+        "messages": [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": original},
+        ],
+        "max_tokens": 2048,
+    }
+    calls = {"n": 0, "user_content": []}
+
+    def fake_urlopen(req, timeout):
+        calls["n"] += 1
+        request_body = json.loads(req.data.decode("utf-8"))
+        calls["user_content"].append(request_body["messages"][1]["content"])
+        if calls["n"] == 1:
+            raise _http_error(
+                400,
+                '{"error":{"message":"This model\'s maximum context length is 16384 tokens. '
+                'However, your messages resulted in 17000 tokens."}}',
+            )
+        return _FakeResponse({"ok": True})
+
+    monkeypatch.setattr(foundry.urllib.request, "urlopen", fake_urlopen)
+
+    payload, _ = foundry._request(
+        "https://example.invalid",
+        body,
+        "secret",
+        timeout_s=5,
+        retry_max_retries=3,
+        retry_budget_s=30,
+        retry_base_delay_s=1,
+        retry_max_delay_s=10,
+        retry_jitter_ratio=0.25,
+    )
+
+    assert payload == {"ok": True}
+    assert calls["n"] == 2
+    compacted = calls["user_content"][1]
+    assert len(compacted) < len(original)
+    assert compacted.startswith("TASK:")
+    assert compacted.endswith("LATEST-FEEDBACK")
+    assert "<conversation-history-compacted>" in compacted
+
+
 def test_generate_inference_falls_back_on_api_version_not_supported(monkeypatch):
     monkeypatch.setattr(
         foundry,

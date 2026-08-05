@@ -312,6 +312,14 @@ jobs:
 
       - uses: actions/checkout@v5
 
+      - name: Build RoslynRefactorTool
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet restore RoslynRefactorTool/RoslynRefactorTool.csproj
+          dotnet build RoslynRefactorTool/RoslynRefactorTool.csproj \
+            --no-restore -c Release
+
       - name: Select Foundry credentials for requested model set
         shell: bash
         run: |

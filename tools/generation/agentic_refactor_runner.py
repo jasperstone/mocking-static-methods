@@ -347,6 +347,12 @@ def main() -> int:
     ap.add_argument("--top-p", type=float, default=1.0)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--max-output-tokens", type=int, default=4096)
+    ap.add_argument(
+        "--max-conversation-chars",
+        type=int,
+        default=0,
+        help="Maximum composed user-prompt characters; 0 keeps full history.",
+    )
     ap.add_argument("--timeout-s", type=int, default=180)
     ap.add_argument("--compile-timeout-s", type=int, default=240)
     ap.add_argument(
@@ -389,11 +395,10 @@ def main() -> int:
     )
     args = ap.parse_args()
 
-    # Per-model output token cap: phi-4 has a 16384-token context window.
-    # Reducing its completion budget from 4096 → 3072 keeps prompt + completion
-    # under the limit for ~91% of cells (vs 0% at 4096). Only overrides the
+    # Per-model output token cap: Phi-4 is limited to 20K TPM. Reserve enough
+    # output for a test while leaving room for multiple bounded turns. Only overrides the
     # default; explicit --max-output-tokens on the CLI still wins.
-    _MODEL_MAX_OUTPUT_TOKENS: dict[str, int] = {"phi-4": 3072}
+    _MODEL_MAX_OUTPUT_TOKENS: dict[str, int] = {"phi-4": 1536}
     if args.max_output_tokens == 4096 and args.model in _MODEL_MAX_OUTPUT_TOKENS:
         args.max_output_tokens = _MODEL_MAX_OUTPUT_TOKENS[args.model]
 
@@ -745,6 +750,11 @@ def main() -> int:
                     top_p=args.top_p,
                     seed=args.seed,
                     timeout_s=args.timeout_s,
+                    max_conversation_chars=(
+                        args.max_conversation_chars
+                        if args.max_conversation_chars > 0
+                        else None
+                    ),
                     progress_cb=lambda **progress: emit_heartbeat(
                         "loop",
                         loop_stage=progress.get("stage", "unknown"),

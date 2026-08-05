@@ -66,6 +66,44 @@ APPLY_REFACTOR_RE = re.compile(
 )
 
 
+def _compose_bounded_conversation(conversation: list[str], max_chars: int | None) -> str:
+    """Keep the original task and newest feedback within a stable prompt budget."""
+    joined = "\n\n".join(conversation)
+    if not max_chars or len(joined) <= max_chars:
+        return joined
+
+    marker = (
+        "\n\n<conversation-history-compacted>"
+        "Older tool turns were removed to stay within the model TPM budget."
+        "</conversation-history-compacted>\n\n"
+    )
+    payload_budget = max(1024, max_chars - len(marker))
+    initial_budget = max(512, int(payload_budget * 0.6))
+    initial = conversation[0]
+    if len(initial) > initial_budget:
+        head = int(initial_budget * 0.7)
+        initial = (
+            initial[:head]
+            + "\n\n[... initial source context compacted ...]\n\n"
+            + initial[-(initial_budget - head):]
+        )
+
+    recent_budget = payload_budget - len(initial)
+    recent: list[str] = []
+    for entry in reversed(conversation[1:]):
+        separator_cost = 2 if recent else 0
+        if len(entry) + separator_cost <= recent_budget:
+            recent.append(entry)
+            recent_budget -= len(entry) + separator_cost
+            continue
+        if not recent and recent_budget >= 256:
+            recent.append("[... latest turn truncated ...]\n" + entry[-(recent_budget - 32):])
+        break
+
+    recent.reverse()
+    return initial + marker + "\n\n".join(recent)
+
+
 @dataclass
 class RefactorLoopResult(FeedbackLoopResult):
     """FeedbackLoopResult + the refactor transforms applied/rejected this cell."""
@@ -161,6 +199,7 @@ def run(
     top_p: float = 1.0,
     seed: int = 42,
     timeout_s: int = 180,
+    max_conversation_chars: int | None = None,
     progress_cb: Callable[..., None] | None = None,
 ) -> RefactorLoopResult:
     """Drive the phase-4 loop: compile+run feedback plus the apply_refactor tool.
@@ -195,7 +234,10 @@ def run(
             attempts_used=attempts_used,
             refactors_used=refactors_used,
         )
-        composed_user = "\n\n".join(conversation)
+        composed_user = _compose_bounded_conversation(
+            conversation,
+            max_conversation_chars,
+        )
         try:
             r = generate(
                 model_id=model_id,

@@ -179,6 +179,9 @@ sys.path.insert(0, str(REPO_ROOT))
 from tools.evaluation.compile_only import DOTNET  # noqa: E402
 from tools.generation.apply_refactor import _resolve_roslyn_tool_dll  # noqa: E402
 from tools.generation.agentic_refactor_runner import verify_via_seam  # noqa: E402
+from tools.generation.strategies.agentic_loop_refactor import (  # noqa: E402
+    _compose_bounded_conversation,
+)
 
 _DLL = _resolve_roslyn_tool_dll()
 _DOTNET = DOTNET if Path(DOTNET).exists() else shutil.which("dotnet")
@@ -188,6 +191,21 @@ _needs_tool = pytest.mark.skipif(
     reason="RoslynRefactorTool.dll not built or dotnet runtime unavailable "
            "(build: dotnet build RoslynRefactorTool/RoslynRefactorTool.csproj -c Release).",
 )
+
+
+def test_bounded_conversation_keeps_task_and_latest_feedback():
+    conversation = [
+        "ORIGINAL TASK\n" + ("source " * 2000),
+        "<assistant-turn-1>" + ("old " * 2000) + "</assistant-turn-1>",
+        "<tool-result>important latest feedback</tool-result>",
+    ]
+
+    composed = _compose_bounded_conversation(conversation, 6000)
+
+    assert len(composed) <= 6100
+    assert composed.startswith("ORIGINAL TASK")
+    assert "important latest feedback" in composed
+    assert "<conversation-history-compacted>" in composed
 
 # A minimal csproj just so apply_refactor's find_owning_csproj resolves an owning
 # project; the Roslyn tool compiles the *.cs in-memory against its OWN bundled

@@ -469,7 +469,8 @@ jobs:
             --max-reads 8 \
             --max-attempts "${MAX_COMPILE_ATTEMPTS}" \
             --max-refactors 3 \
-            --max-output-tokens "$( [[ "${MODEL}" == 'phi-4' ]] && echo 3072 || echo 4096 )" \
+            --max-output-tokens "$( [[ "${MODEL}" == 'phi-4' ]] && echo 1536 || echo 4096 )" \
+            --max-conversation-chars "$( [[ "${MODEL}" == 'phi-4' ]] && echo 24000 || echo 0 )" \
             --timeout-s 240 \
             --compile-timeout-s 240 \
             --run-timeout-s "${RUN_TIMEOUT_S}" \

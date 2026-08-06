@@ -1,0 +1,14 @@
+scope,phase,category,count,share_of_non_submitted,share_of_attempts
+phase_total,phase3-agentic-loop,timeout/connection,4,0.0072,0.0007
+phase_total,phase3-agentic-loop,auth/access,0,0.0000,0.0000
+phase_total,phase3-agentic-loop,rate-limit,450,0.8123,0.0833
+phase_total,phase3-agentic-loop,server-5xx,1,0.0018,0.0002
+phase_total,phase3-agentic-loop,api-version-unsupported,0,0.0000,0.0000
+phase_total,phase3-agentic-loop,baseline_compile_failed,2,0.0036,0.0004
+phase_total,phase3-agentic-loop,baseline_no_owning_csproj,0,0.0000,0.0000
+phase_total,phase3-agentic-loop,max-turns-exhausted,83,0.1498,0.0154
+phase_total,phase3-agentic-loop,context-length,5,0.0090,0.0009
+phase_total,phase3-agentic-loop,content-filter,5,0.0090,0.0009
+phase_total,phase3-agentic-loop,invalid-prompt,0,0.0000,0.0000
+phase_total,phase3-agentic-loop,adapter-parse-error,4,0.0072,0.0007
+phase_total,phase3-agentic-loop,other,0,0.0000,0.0000

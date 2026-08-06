@@ -1,94 +1,96 @@
-# Phase 4 — Agentic loop + testability refactoring tool: REPORT
+# Phase 4 - Agentic loop + testability refactoring tool: REPORT
 
-> **Status: scaffold. No production runs yet — every number below is a
-> PREDICTION.** Design lives in [PLAN.md](PLAN.md); replication recipe lives in
-> [REPLICATION.md](REPLICATION.md); Azure dispatch is gated on the run_1 go/no-go.
+> **Status: production results reconciled 2026-08-06.** The retained artifact
+> set contains 5,238 unique attempts across six models and three runs. All
+> infrastructure-only failures were removed by the completed reruns.
 
 ## Per-model results
 
-_Empty until the first production dispatch lands._
+![Phase 4 compile and run-OK rates](../../assets/figures/phase4-by-model-compile-vs-run.png)
 
-| Model | Attempts | Submitted | Compile OK | Run OK | Compile% | Run% | Refactored% | Token cost |
+![Phase 2 vs Phase 3 vs Phase 4](../../assets/figures/phase2-vs-phase3-vs-phase4.png)
+
+Percentages use the available attempt count for each model. The historical
+artifact snapshot is complete for four models (900 attempts each) and contains
+846/900 `gpt-4.1-mini` attempts and 792/900 `gpt-4.1-nano` attempts.
+
+| Model | Attempts | Submitted | Compile OK | Run OK | Compile% | Run% | Applied refactor | Token cost |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| _tbd_ | — | — | — | — | — | — | — | — |
+| codestral-2501 | 900 | 683 | 146 | 31 | 16.2% | 3.4% | 0 | $18.88 |
+| gpt-4.1-mini | 846 | 642 | 316 | 153 | 37.4% | 18.1% | 0 | $18.03 |
+| gpt-4.1-nano | 792 | 553 | 43 | 24 | 5.4% | 3.0% | 0 | $5.26 |
+| grok-4-1-fast | 900 | 692 | 208 | 56 | 23.1% | 6.2% | 0 | $6.10 |
+| llama-3.3-70b-instruct | 900 | 696 | 122 | 29 | 13.6% | 3.2% | 0 | $29.17 |
+| phi-4 | 900 | 679 | 50 | 11 | 5.6% | 1.2% | 1 | $5.23 |
+| **Total** | **5,238** | **3,945** | **885** | **304** | **16.9%** | **5.8%** | **1** | **$82.69** |
 
-## Cross-phase comparison (predicted — NOT yet run)
+## Infrastructure reconciliation
 
-Will be filled once phase 4 has N runs against the same v2 300-cell target set.
-The headline is **run-OK% A/B vs phase 3's 7.1% on the identical cells**. The only
-difference between the arms is the `apply_refactor` capability.
+![Phase 4 model and target failure buckets](../../assets/figures/phase4-model-failure-buckets.png)
 
-| Metric | Phase 3 (measured) | Phase 4 (predicted) |
+The final canonical data has:
+
+- 0 authentication/access failures
+- 0 rate-limit failures
+- 0 context-length failures
+- 0 unsupported API-version failures
+- 0 timeout/connection or server-5xx failures
+
+The 1,293 non-submitted attempts are model or target outcomes: 1,170 baseline
+compile failures, 54 targets without an owning project, 66 max-tun
+exhaustions, and 3 content-filter responses. See
+[FAILURE_DIAGNOSTICS.md](FAILURE_DIAGNOSTICS.md) for the per-model/run table.
+
+## Refactoring-capability limitation
+
+These results do **not** provide a valid full-sweep test of the refactoring
+hypothesis. The Foundry generation job did not build `RoslynRefactorTool.dll`
+during the original sweep, so 5,082 requested refactors were rejected as
+`roslyn_tool_missing`.
+
+The corrected workflow built the tool for the final `orleans:0116` rerun. In
+that cell, `parameterize_dependency` applied successfully and the modified
+owning project built, but the generated test did not compile. Across the
+retained sweep:
+
+| Refactor outcome | Count |
+|---|---:|
+| Rejected: Roslyn tool missing | 5,082 |
+| Applied and owning project built | 1 |
+| Applied then reverted after build failure | 1 |
+| Not applicable to owning project | 1 |
+| Invalid transform requested by model | 12 |
+
+Because only one refactor was successfully applied, no run-OK improvement can
+be attributed to the refactoring tool. A clean A/B measurement would require a
+new full sweep from workflow commit `0252f07c` or later.
+
+## Cross-phase comparison
+
+Using the same canonical aggregation rules:
+
+| Metric | Phase 3 | Phase 4 |
 |---|---:|---:|
-| Compile-OK% (blended) | 14.6% | 18–24% |
-| Run-OK% (blended) | 7.1% | 12–18% |
-| Refactor-attributable run-OK | — | the lift above 7.1% |
-| `refactor_rejected` rate | — | < 25% (target) |
-| Token cost (run_1) | — | ~$214 |
+| Available attempts | 4,954 | 5,238 |
+| Submitted | 4,855 | 3,945 |
+| Compile OK | 787 (15.9%) | 885 (16.9%) |
+| Run OK | 386 (7.8%) | 304 (5.8%) |
+| Token cost | $81.80 | $82.69 |
 
-> These are predictions, not results. They will be replaced with measured values
-> once phase 4 has dispatched.
+This is an observational comparison, not a refactor-effect estimate, because
+the original Phase 4 sweep lacked the refactoring executable.
 
-## What we're testing
+## Data products
 
-The hypothesis under examination is that **giving the proven phase-3 single agent
-a constrained refactoring capability converts unmockable Mode #1 sites into
-mockable ones**, lifting run-OK% above the 7.1% phase-3 ceiling. The lift, if any,
-is attributable to the tool — the writer prompt stays generic, the model panel and
-the harness are unchanged.
-
-## Failure-bucket prediction
-
-Phase 3's run failures split into those that are about **mockability** (a refactor
-should convert them) and those that are not (a refactor should not move them). For
-each phase-3 failure bucket, the predicted phase-4 outcome:
-
-| Bucket | Phase 3 | Phase 4 prediction | Why a refactor does / doesn't help |
-|---|---:|---:|---|
-| unmockable Mode #1 (no seam) | large | **converts** | This is the bucket the tool exists for — `make_virtual` / `wrapper_interface` gives the test a substitution point |
-| `other_exception` (DI / ctor) | 253 | partial | `parameterize_dependency` / `wrapper_interface` can inject a fake dependency; many still need code the agent can't see |
-| `no_fact_methods` | 160 | small | Not a mockability problem — a seam doesn't make the agent write a `[Fact]`; out of scope for phase 4 (that's phase 5's reviewer) |
-| `assertion_failed` | 53 | flat | Real failures — a seam doesn't conjure passing assertions |
-| `null_ref` / `arg_null` | 22 / 24 | partial | If the null was an un-injectable dependency, the seam helps; otherwise flat |
-| `invalid_op_runtime` | 35 | partial | Some are isolation-fixable, some environmental |
-
-If the prediction holds, the run-OK lift is dominated by the **unmockable Mode #1**
-conversion plus partial gains on the DI/ctor (`other_exception`) bucket where a
-dependency can now be parameterized or wrapped. The `no_fact_methods` bucket is
-explicitly **not** a phase-4 target — that structural problem is what phase 5
-(reviewer) addresses.
-
-## What this report will contain post-dispatch
-
-1. **Per-model success table** (same shape as phase 3 HEADLINE, plus a
-   `Refactored%` column).
-2. **Cross-phase paired-bar chart** — phase 2 vs 3 vs 4 run-OK per model.
-3. **Refactor-attributable breakdown** — cells that pass ONLY when a refactor was
-   applied (run-fail in phase 3, legitimate run-OK in phase 4 through a seam).
-4. **Transform-type success** — `make_virtual` vs `wrapper_interface` vs
-   `parameterize_dependency`, by Mode #1 kind (EXT / NonVirtual).
-5. **`refactor_rejected` analysis** — guard auto-revert rate and what kinds of
-   edits tripped it.
-6. **Cost reconciliation** — actual vs the ~$214 run_1 projection.
-7. **Decisions captured** — anything we changed mid-flight, with justification.
-
-## Legitimacy audit
-
-Because phase 4 lets the agent edit production code, the report will include a
-**legitimacy audit**: the fraction of compiling "passes" that were excluded from
-the refactor-attributable metric for bypassing the target site or asserting
-trivially. A healthy filter excludes some passes — if it excludes none, the filter
-is suspect.
-
-## Sandbox discrepancy
-
-The runner rebuilds the single owning csproj from the (transiently) refactored
-source; the canonical evaluator (production csproj) remains the headline metric, as
-in phase 3.
+- `results/<model>/run_<n>/attempts.jsonl` - canonical reconciled attempt rows
+- `tools/viz/data/per_model_phase.csv` - phase/model summary
+- `tools/viz/data/per_model_repo.csv` - Phase 4 model/repository summary
+- `tools/viz/data/phase4-refactoring_failure_categories_*.csv` - failure buckets
+- `assets/figures/` - rendered report figures
 
 ## See also
 
-- [PLAN.md](PLAN.md) — design + anti-gaming + lifecycle
-- [REPLICATION.md](REPLICATION.md) — one-page recipe
-- [phase 3 REPORT](../phase3-agentic-loop/REPORT.md) — the 7.1% run-OK baseline we're trying to beat
-- [phase 5 PLAN](../phase5-multiagent/PLAN.md) — the multi-agent phase that follows
+- [PLAN.md](PLAN.md) - experiment design and anti-gaming rules
+- [REPLICATION.md](REPLICATION.md) - replication recipe
+- [FAILURE_DIAGNOSTICS.md](FAILURE_DIAGNOSTICS.md) - reconciled failure taxonomy
+- [phase 3 REPORT](../phase3-agentic-loop/REPORT.md) - agentic-loop baseline

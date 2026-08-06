@@ -1,0 +1,285 @@
+{
+  "phases": [
+    "phase4-refactoring"
+  ],
+  "output_prefix": "phase4-refactoring",
+  "bucket_order": [
+    "timeout/connection",
+    "auth/access",
+    "rate-limit",
+    "server-5xx",
+    "api-version-unsupported",
+    "baseline_compile_failed",
+    "baseline_no_owning_csproj",
+    "max-turns-exhausted",
+    "context-length",
+    "content-filter",
+    "invalid-prompt",
+    "adapter-parse-error",
+    "other"
+  ],
+  "infra_buckets": [
+    "api-version-unsupported",
+    "auth/access",
+    "rate-limit",
+    "server-5xx",
+    "timeout/connection"
+  ],
+  "thresholds": {
+    "red": {
+      "infra_non_submitted_min": 10,
+      "infra_share_of_attempts_min": 0.03,
+      "infra_share_of_non_submitted_min": 0.2
+    },
+    "yellow": {
+      "infra_non_submitted_min": 3,
+      "infra_share_of_attempts_min": 0.01,
+      "infra_share_of_non_submitted_min": 0.1
+    }
+  },
+  "grand_totals": {
+    "attempts_total": 5238,
+    "non_submitted_total": 1293,
+    "categories": {
+      "timeout/connection": 0,
+      "auth/access": 0,
+      "rate-limit": 0,
+      "server-5xx": 0,
+      "api-version-unsupported": 0,
+      "baseline_compile_failed": 1170,
+      "baseline_no_owning_csproj": 54,
+      "max-turns-exhausted": 66,
+      "context-length": 0,
+      "content-filter": 3,
+      "invalid-prompt": 0,
+      "adapter-parse-error": 0,
+      "other": 0
+    },
+    "by_phase": {
+      "phase4-refactoring": {
+        "attempts_total": 5238,
+        "non_submitted_total": 1293,
+        "categories": {
+          "timeout/connection": 0,
+          "auth/access": 0,
+          "rate-limit": 0,
+          "server-5xx": 0,
+          "api-version-unsupported": 0,
+          "baseline_compile_failed": 1170,
+          "baseline_no_owning_csproj": 54,
+          "max-turns-exhausted": 66,
+          "context-length": 0,
+          "content-filter": 3,
+          "invalid-prompt": 0,
+          "adapter-parse-error": 0,
+          "other": 0
+        }
+      }
+    }
+  },
+  "signals_by_model_run": [
+    {
+      "phase": "phase4-refactoring",
+      "model": "codestral-2501",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 73,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "codestral-2501",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 71,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "codestral-2501",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 73,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-mini",
+      "run": 1,
+      "attempts_total": 277,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-mini",
+      "run": 2,
+      "attempts_total": 286,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-mini",
+      "run": 3,
+      "attempts_total": 283,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-nano",
+      "run": 1,
+      "attempts_total": 268,
+      "non_submitted_total": 80,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-nano",
+      "run": 2,
+      "attempts_total": 266,
+      "non_submitted_total": 76,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "gpt-4.1-nano",
+      "run": 3,
+      "attempts_total": 258,
+      "non_submitted_total": 83,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "grok-4-1-fast",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 69,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "grok-4-1-fast",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 69,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "grok-4-1-fast",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 70,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "llama-3.3-70b-instruct",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "llama-3.3-70b-instruct",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "llama-3.3-70b-instruct",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 68,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "phi-4",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 74,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "phi-4",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 75,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase4-refactoring",
+      "model": "phi-4",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 72,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    }
+  ],
+  "outputs": {
+    "by_model_run_csv": "tools/viz/data/phase4-refactoring_failure_categories_by_model_run.csv",
+    "totals_csv": "tools/viz/data/phase4-refactoring_failure_categories_totals.csv",
+    "signals_csv": "tools/viz/data/phase4-refactoring_failure_rerun_signal_by_model_run.csv"
+  }
+}

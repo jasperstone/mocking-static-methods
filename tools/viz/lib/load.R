@@ -59,30 +59,50 @@ load_per_model_phase <- function() {
   read_csv(path, show_col_types = FALSE)
 }
 
+load_phase4_failure_by_model_run <- function() {
+  path <- file.path(
+    repo_root(),
+    "tools", "viz", "data", "phase4-refactoring_failure_categories_by_model_run.csv"
+  )
+  if (!file.exists(path)) {
+    stop(
+      "phase4 failure taxonomy CSV not found. Run: ",
+      "python3 tools/analysis/phase4_failure_categorization.py"
+    )
+  }
+  read_csv(path, show_col_types = FALSE)
+}
+
 load_baseline_coverage <- function() {
   path <- file.path(repo_root(), "baseline_coverage.csv")
-  cov <- read_csv(path, show_col_types = FALSE) |>
-    rename(
-      repo            = Repo,
-      lines_total     = `Lines (total)`,
-      lines_covered   = `Lines (covered)`,
-      line_pct        = `Line coverage %`,
-      branches_total  = `Branches (total)`,
-      branches_covered = `Branches (covered)`,
-      branch_pct      = `Branch coverage %`,
-      static_sites    = `Static call sites`,
-      classes_static  = `Classes with static calls`
-    )
+  cov <- NULL
+  if (file.exists(path)) {
+    cov <- read_csv(path, show_col_types = FALSE) |>
+      rename(
+        repo            = Repo,
+        lines_total     = `Lines (total)`,
+        lines_covered   = `Lines (covered)`,
+        line_pct        = `Line coverage %`,
+        branches_total  = `Branches (total)`,
+        branches_covered = `Branches (covered)`,
+        branch_pct      = `Branch coverage %`,
+        static_sites    = `Static call sites`,
+        classes_static  = `Classes with static calls`
+      )
+  }
 
   # Some snapshots have a placeholder baseline_coverage.csv with all-zero
   # coverage values. Fall back to the canonical phase-1 unified table when
   # this happens so visuals stay truthful without manual file surgery.
-  if (sum(cov$lines_total, na.rm = TRUE) > 0) {
+  if (!is.null(cov) && sum(cov$lines_total, na.rm = TRUE) > 0) {
     return(cov)
   }
 
   fallback <- file.path(repo_root(), "phases", "phase1-baseline", "reports", "unified_table.csv")
   if (!file.exists(fallback)) {
+    if (is.null(cov)) {
+      stop("Neither baseline_coverage.csv nor the phase-1 unified table exists.")
+    }
     return(cov)
   }
 

@@ -1,0 +1,285 @@
+{
+  "phases": [
+    "phase3-agentic-loop"
+  ],
+  "output_prefix": "phase3-agentic-loop",
+  "bucket_order": [
+    "timeout/connection",
+    "auth/access",
+    "rate-limit",
+    "server-5xx",
+    "api-version-unsupported",
+    "baseline_compile_failed",
+    "baseline_no_owning_csproj",
+    "max-turns-exhausted",
+    "context-length",
+    "content-filter",
+    "invalid-prompt",
+    "adapter-parse-error",
+    "other"
+  ],
+  "infra_buckets": [
+    "api-version-unsupported",
+    "auth/access",
+    "rate-limit",
+    "server-5xx",
+    "timeout/connection"
+  ],
+  "thresholds": {
+    "red": {
+      "infra_non_submitted_min": 10,
+      "infra_share_of_attempts_min": 0.03,
+      "infra_share_of_non_submitted_min": 0.2
+    },
+    "yellow": {
+      "infra_non_submitted_min": 3,
+      "infra_share_of_attempts_min": 0.01,
+      "infra_share_of_non_submitted_min": 0.1
+    }
+  },
+  "grand_totals": {
+    "attempts_total": 5400,
+    "non_submitted_total": 554,
+    "categories": {
+      "timeout/connection": 4,
+      "auth/access": 0,
+      "rate-limit": 450,
+      "server-5xx": 1,
+      "api-version-unsupported": 0,
+      "baseline_compile_failed": 2,
+      "baseline_no_owning_csproj": 0,
+      "max-turns-exhausted": 83,
+      "context-length": 5,
+      "content-filter": 5,
+      "invalid-prompt": 0,
+      "adapter-parse-error": 4,
+      "other": 0
+    },
+    "by_phase": {
+      "phase3-agentic-loop": {
+        "attempts_total": 5400,
+        "non_submitted_total": 554,
+        "categories": {
+          "timeout/connection": 4,
+          "auth/access": 0,
+          "rate-limit": 450,
+          "server-5xx": 1,
+          "api-version-unsupported": 0,
+          "baseline_compile_failed": 2,
+          "baseline_no_owning_csproj": 0,
+          "max-turns-exhausted": 83,
+          "context-length": 5,
+          "content-filter": 5,
+          "invalid-prompt": 0,
+          "adapter-parse-error": 4,
+          "other": 0
+        }
+      }
+    }
+  },
+  "signals_by_model_run": [
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "codestral-2501",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 15,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "codestral-2501",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 13,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "codestral-2501",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 17,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-mini",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 66,
+      "infra_non_submitted": 66,
+      "infra_share_of_attempts": "0.2200",
+      "infra_share_of_non_submitted": "1.0000",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-mini",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 113,
+      "infra_non_submitted": 113,
+      "infra_share_of_attempts": "0.3767",
+      "infra_share_of_non_submitted": "1.0000",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-mini",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 84,
+      "infra_non_submitted": 83,
+      "infra_share_of_attempts": "0.2767",
+      "infra_share_of_non_submitted": "0.9881",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-nano",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 23,
+      "infra_non_submitted": 15,
+      "infra_share_of_attempts": "0.0500",
+      "infra_share_of_non_submitted": "0.6522",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-nano",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 84,
+      "infra_non_submitted": 79,
+      "infra_share_of_attempts": "0.2633",
+      "infra_share_of_non_submitted": "0.9405",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "gpt-4.1-nano",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 92,
+      "infra_non_submitted": 90,
+      "infra_share_of_attempts": "0.3000",
+      "infra_share_of_non_submitted": "0.9783",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "grok-4-1-fast",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 1,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "grok-4-1-fast",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 1,
+      "infra_non_submitted": 1,
+      "infra_share_of_attempts": "0.0033",
+      "infra_share_of_non_submitted": "1.0000",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "grok-4-1-fast",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 1,
+      "infra_non_submitted": 1,
+      "infra_share_of_attempts": "0.0033",
+      "infra_share_of_non_submitted": "1.0000",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "llama-3.3-70b-instruct",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 2,
+      "infra_non_submitted": 1,
+      "infra_share_of_attempts": "0.0033",
+      "infra_share_of_non_submitted": "0.5000",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "llama-3.3-70b-instruct",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 2,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "llama-3.3-70b-instruct",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 4,
+      "infra_non_submitted": 2,
+      "infra_share_of_attempts": "0.0067",
+      "infra_share_of_non_submitted": "0.5000",
+      "rerun_signal": "red"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "phi-4",
+      "run": 1,
+      "attempts_total": 300,
+      "non_submitted_total": 5,
+      "infra_non_submitted": 0,
+      "infra_share_of_attempts": "0.0000",
+      "infra_share_of_non_submitted": "0.0000",
+      "rerun_signal": "green"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "phi-4",
+      "run": 2,
+      "attempts_total": 300,
+      "non_submitted_total": 16,
+      "infra_non_submitted": 3,
+      "infra_share_of_attempts": "0.0100",
+      "infra_share_of_non_submitted": "0.1875",
+      "rerun_signal": "yellow"
+    },
+    {
+      "phase": "phase3-agentic-loop",
+      "model": "phi-4",
+      "run": 3,
+      "attempts_total": 300,
+      "non_submitted_total": 15,
+      "infra_non_submitted": 1,
+      "infra_share_of_attempts": "0.0033",
+      "infra_share_of_non_submitted": "0.0667",
+      "rerun_signal": "green"
+    }
+  ],
+  "outputs": {
+    "by_model_run_csv": "tools/viz/data/phase3-agentic-loop_failure_categories_by_model_run.csv",
+    "totals_csv": "tools/viz/data/phase3-agentic-loop_failure_categories_totals.csv",
+    "signals_csv": "tools/viz/data/phase3-agentic-loop_failure_rerun_signal_by_model_run.csv"
+  }
+}

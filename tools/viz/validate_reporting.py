@@ -26,7 +26,7 @@ def reported_outcome_counts() -> dict[tuple[str, str], int]:
     submitted_keys: set[tuple[str, str, int, str]] = set()
     for phase in PHASES:
         phase_dir = REPO_ROOT / "phases" / phase
-        for path in phase_dir.glob("results*/**/run_*/attempts.jsonl"):
+        for path in phase_dir.glob("results*/*/run_*/attempts.jsonl"):
             with path.open(encoding="utf-8") as stream:
                 for line in stream:
                     if not line.strip():
@@ -46,7 +46,7 @@ def reported_outcome_counts() -> dict[tuple[str, str], int]:
 
         if phase == "phase3-agentic-loop":
             evaluator_keys: set[tuple[str, str, int, str]] = set()
-            for path in phase_dir.glob("results*/**/run_*/evaluation.jsonl"):
+            for path in phase_dir.glob("results*/*/run_*/evaluation.jsonl"):
                 with path.open(encoding="utf-8") as stream:
                     for line in stream:
                         if not line.strip():

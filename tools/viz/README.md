@@ -71,20 +71,35 @@ loads its own data, and `ggsave()`s to `assets/figures/`.
 
 ## Refreshing derived data
 
+### Non-negotiable reporting policy
+
+Reports, CSVs, and figures must include every recorded attempt and every failure
+category. Infrastructure failures (authentication, rate limits, timeouts,
+server errors, unsupported API versions, and similar execution failures) are
+first-class results because they identify work that still needs correction.
+Never filter them from charts, drop them from aggregate totals, or remove them
+from metric denominators. If a model-quality-only view is useful, add it as a
+separate view while preserving an all-results view as the default.
+
 After new phase results land, regenerate phase-level and failure-taxonomy data:
 
 ```bash
 python3 tools/viz/aggregate_phase_results.py
 python3 tools/analysis/phase4_failure_categorization.py
 python3 tools/analysis/phase4_failure_categorization.py --phases phase2-agentic,phase3-agentic-loop,phase4-refactoring
+python3 tools/viz/validate_reporting.py
 Rscript tools/viz/render_all.R
 ```
 
-The aggregator walks `phases/phase2-agentic/results*/<model>/run_*/attempts.jsonl`
-(and the parallel `evaluation.jsonl`), reuses the `PRICES` table from
-`tools/cost/estimate.py`, and synthesises phase 3 totals from
-`data/per_model_repo.csv` (phase 3 raw attempts are not committed; cost is
-emitted as blank for phase 3).
+The validator fails if phase/model attempt counts differ from the raw JSONL,
+failure-category counts do not conserve all non-submitted attempts, an
+infrastructure category is missing, or infrastructure totals differ between
+the taxonomy and aggregate CSV.
+
+The aggregator walks each phase's
+`results*/<model>/run_*/attempts.jsonl` files (and parallel
+`evaluation.jsonl` files), reuses the `PRICES` table from
+`tools/cost/estimate.py`, and derives both summary CSVs from those raw records.
 
 ## Outputs in `assets/figures/`
 
@@ -95,7 +110,7 @@ emitted as blank for phase 3).
 - `phase2-vs-phase3-vs-phase4.png`
 - `phase4-by-model-compile-vs-run.png`
 - `phase4-failure-buckets.png`
-- `phase4-model-failure-buckets.png`
+- `phase4-all-failure-buckets.png`
 - `coverage-baseline.png`
 - `cost-efficiency.png`
 - `cost-per-passing-test.png`
@@ -110,9 +125,8 @@ can quickly see composition shifts per model. Infra categories (`timeout/connect
 categories (`baseline_compile_failed`, `baseline_no_owning_csproj`) via distinct
 color families.
 
-`phase4-model-failure-buckets.png` excludes every infrastructure category:
-timeout/connection, authentication/access, rate limits, server 5xx responses,
-and unsupported API versions.
+`phase4-all-failure-buckets.png` includes every non-submitted category,
+including infrastructure failures.
 
 ### Failure Taxonomy Note
 

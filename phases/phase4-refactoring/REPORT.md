@@ -2,7 +2,9 @@
 
 > **Status: production results reconciled 2026-08-06.** The retained artifact
 > set contains 5,238 unique attempts across six models and three runs. All
-> infrastructure-only failures were removed by the completed reruns.
+> infrastructure failures are zero in the reconciled canonical outcomes after
+> the completed reruns. Infrastructure categories remain present in reporting
+> and are never filtered.
 
 ## Per-model results
 
@@ -26,7 +28,7 @@ artifact snapshot is complete for four models (900 attempts each) and contains
 
 ## Infrastructure reconciliation
 
-![Phase 4 model and target failure buckets](../../assets/figures/phase4-model-failure-buckets.png)
+![Phase 4 all failure buckets](../../assets/figures/phase4-all-failure-buckets.png)
 
 The final canonical data has:
 
@@ -71,11 +73,11 @@ Using the same canonical aggregation rules:
 
 | Metric | Phase 3 | Phase 4 |
 |---|---:|---:|
-| Available attempts | 4,954 | 5,238 |
+| Available attempts | 5,409 | 5,238 |
 | Submitted | 4,855 | 3,945 |
-| Compile OK | 787 (15.9%) | 885 (16.9%) |
-| Run OK | 386 (7.8%) | 304 (5.8%) |
-| Token cost | $81.80 | $82.69 |
+| Compile OK | 787 (14.5%) | 885 (16.9%) |
+| Run OK | 386 (7.1%) | 304 (5.8%) |
+| Token cost | $82.12 | $82.69 |
 
 This is an observational comparison, not a refactor-effect estimate, because
 the original Phase 4 sweep lacked the refactoring executable.

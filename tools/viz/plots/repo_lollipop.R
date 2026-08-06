@@ -15,22 +15,22 @@ df <- load_per_model_repo() |>
 
 repo_order <- df |>
   group_by(repo) |>
-  summarise(run = sum(run_ok), sub = sum(submitted), .groups = "drop") |>
-  mutate(pct = run / sub) |>
+  summarise(run = sum(run_ok), attempts = sum(attempts), .groups = "drop") |>
+  mutate(pct = run / attempts) |>
   arrange(pct) |>
   pull(repo)
 
 repo_summary <- df |>
   group_by(repo) |>
   summarise(
-    submitted = sum(submitted),
+    attempts  = sum(attempts),
     compile   = sum(compile_ok),
     run       = sum(run_ok),
     .groups   = "drop"
   ) |>
   mutate(
-    compile_pct = 100 * compile / submitted,
-    run_pct     = 100 * run / submitted,
+    compile_pct = 100 * compile / attempts,
+    run_pct     = 100 * run / attempts,
     repo        = factor(repo, levels = repo_order)
   )
 

@@ -45,7 +45,7 @@ p <- ggplot(long, aes(x = model, y = pct, fill = metric)) +
   ) +
   labs(
     title = "Phase 4 compile and run-OK rates by model",
-    subtitle = "Reconciled production results: 5,238 unique attempts; infrastructure failures excluded from quality metrics.",
+    subtitle = "Reconciled production results: 5,238 unique attempts; every failure remains in the denominator.",
     x = NULL,
     y = "share of available attempts",
     fill = NULL,

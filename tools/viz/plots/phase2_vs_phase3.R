@@ -30,10 +30,8 @@ df <- load_per_model_phase() |>
   filter(model %in% PANEL,
          phase %in% c("phase2-agentic", "phase3-agentic-loop", "phase4-refactoring")) |>
   mutate(
-    # Tooling-only failures (timeout/access/rate-limit) can produce submitted=0.
-    # Treat those rows as non-evaluable rather than 0%-quality outcomes.
-    compile_pct = ifelse(submitted > 0, 100 * compile_ok / submitted, NA_real_),
-    run_pct     = ifelse(submitted > 0, 100 * run_ok     / submitted, NA_real_),
+    compile_pct = ifelse(attempts > 0, 100 * compile_ok / attempts, NA_real_),
+    run_pct     = ifelse(attempts > 0, 100 * run_ok     / attempts, NA_real_),
     phase_label = recode(phase,
       "phase2-agentic"      = "Phase 2: single shot",
       "phase3-agentic-loop" = "Phase 3: + compile/run feedback",
@@ -130,7 +128,7 @@ p <- ggplot(long, aes(x = model_short, y = pct_plot, fill = phase_label)) +
                      expand = expansion(mult = c(0, 0.02))) +
   labs(
     title    = "Phase 2 vs Phase 3 vs Phase 4 \u2014 compile and run-OK rates",
-    subtitle = "Rates use submitted outputs only. Dashed red markers + n/a labels indicate non-evaluable cells (submitted=0).",
+    subtitle = "Rates use every attempt, including infrastructure and non-submission failures.",
     x = NULL, y = NULL, fill = NULL,
     caption = "Source: tools/viz/data/per_model_phase.csv \u2014 canonical evaluator."
   ) +

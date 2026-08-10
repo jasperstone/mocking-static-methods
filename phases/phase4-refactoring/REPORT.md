@@ -28,6 +28,13 @@ artifact snapshot is complete for four models (900 attempts each) and contains
 
 ## Infrastructure reconciliation
 
+![Infrastructure failures across all phases](../../assets/figures/all-phases-infrastructure-failures.png)
+
+Phase 4 has no remaining infrastructure failures, but the canonical Phase 2
+and Phase 3 snapshots still contain 1,796 and 455 respectively. Those failures
+remain visible and counted until corrected reruns replace their canonical
+outcomes.
+
 ![Phase 4 all failure buckets](../../assets/figures/phase4-all-failure-buckets.png)
 
 The final canonical data has:
@@ -39,7 +46,7 @@ The final canonical data has:
 - 0 timeout/connection or server-5xx failures
 
 The 1,293 non-submitted attempts are model or target outcomes: 1,170 baseline
-compile failures, 54 targets without an owning project, 66 max-tun
+compile failures, 54 targets without an owning project, 66 max-turn
 exhaustions, and 3 content-filter responses. See
 [FAILURE_DIAGNOSTICS.md](FAILURE_DIAGNOSTICS.md) for the per-model/run table.
 

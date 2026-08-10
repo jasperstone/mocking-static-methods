@@ -34,6 +34,8 @@ tools/viz/
   plots/
     all_phases_failure_categories.R
                   all-phases stacked share mix by model (faceted)
+    all_phases_infrastructure_failures.R
+                  absolute infrastructure failure matrix by phase/category
     heatmap_runok.R              Fig 1 — phase 3 heatmap
     compile_vs_run.R             Fig 2 — phase 3 per-model bars
     repo_lollipop.R              Fig 3 — phase 3 per-repo lollipop
@@ -115,6 +117,7 @@ The aggregator walks each phase's
 - `cost-efficiency.png`
 - `cost-per-passing-test.png`
 - `all-phases-failure-category-shares-by-model-faceted.png`
+- `all-phases-infrastructure-failures.png`
 
 ### `all-phases-failure-category-shares-by-model-faceted.png`
 
@@ -124,6 +127,12 @@ can quickly see composition shifts per model. Infra categories (`timeout/connect
 `auth/access`, `rate-limit`, `server-5xx`, `api-version-unsupported`) are visually separated from baseline
 categories (`baseline_compile_failed`, `baseline_no_owning_csproj`) via distinct
 color families.
+
+### `all-phases-infrastructure-failures.png`
+
+Shows absolute infrastructure-failure counts for every phase and category,
+including explicit zeroes. Use this as the at-a-glance remediation view; the
+faceted share chart remains useful for model-level failure composition.
 
 `phase4-all-failure-buckets.png` includes every non-submitted category,
 including infrastructure failures.

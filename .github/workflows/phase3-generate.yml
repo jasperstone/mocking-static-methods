@@ -102,20 +102,31 @@ jobs:
       # Run as root inside the container so apt-get works without sudo.
     strategy:
       fail-fast: false
-      max-parallel: 12
+      # A single compile-feedback loop can consume a deployment's full TPM allowance.
+      max-parallel: 1
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
-      FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
-      FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+      FOUNDRY_ENDPOINT_DEFAULT: ${{ secrets.FOUNDRY_ENDPOINT }}
+      FOUNDRY_API_KEY_DEFAULT: ${{ secrets.FOUNDRY_API_KEY }}
+      FOUNDRY_ENDPOINT_PHI_4: ${{ secrets.FOUNDRY_ENDPOINT_PHI_4 }}
+      FOUNDRY_API_KEY_PHI_4: ${{ secrets.FOUNDRY_API_KEY_PHI_4 }}
+      FOUNDRY_ENDPOINT_PHI: ${{ secrets.FOUNDRY_ENDPOINT_PHI }}
+      FOUNDRY_API_KEY_PHI: ${{ secrets.FOUNDRY_API_KEY_PHI }}
+      FOUNDRY_ENDPOINT_GROK: ${{ secrets.FOUNDRY_ENDPOINT_GROK }}
+      FOUNDRY_API_KEY_GROK: ${{ secrets.FOUNDRY_API_KEY_GROK }}
+      FOUNDRY_ENDPOINT_LLAMA: ${{ secrets.FOUNDRY_ENDPOINT_LLAMA }}
+      FOUNDRY_API_KEY_LLAMA: ${{ secrets.FOUNDRY_API_KEY_LLAMA }}
       FOUNDRY_PANEL_OPENAI_CHAT: "gpt-4.1-mini,gpt-4.1-nano"
       FOUNDRY_PANEL_OPENAI_RESPONSES: ""
       FOUNDRY_PANEL_INFERENCE: "phi-4,codestral-2501,llama-3.3-70b-instruct,grok-4-1-fast"
+      FOUNDRY_MODEL_ALIASES: "grok-4-1-fast:grok-4-1-fast-non-reasoning"
       # Retry throttling defaults for Foundry transient 429/503 bursts.
-      FOUNDRY_RETRY_MAX_RETRIES: "40"
-      FOUNDRY_RETRY_BUDGET_S: "1800"
+      FOUNDRY_RETRY_MAX_RETRIES: "200"
+      FOUNDRY_RETRY_BUDGET_S: "21600"
       FOUNDRY_RETRY_BASE_DELAY_S: "1"
-      FOUNDRY_RETRY_MAX_DELAY_S: "60"
-      FOUNDRY_RETRY_JITTER_RATIO: "0.25"
+      FOUNDRY_RETRY_MAX_DELAY_S: "600"
+      FOUNDRY_RETRY_JITTER_RATIO: "0.5"
+      FOUNDRY_RETRY_RATE_LIMIT_MIN_DELAY_S: "60"
       # Make sure compile_only.py picks up the SDK on $PATH (not the home-dir copy).
       DOTNET: "dotnet"
       DOTNET_NOLOGO: "1"
@@ -133,6 +144,41 @@ jobs:
 
       - uses: actions/checkout@v5
 
+      - name: Select Foundry credentials for shard model
+        shell: bash
+        run: |
+          set -euo pipefail
+          model='${{ matrix.model }}'
+          endpoint="${FOUNDRY_ENDPOINT_DEFAULT:-}"
+          key="${FOUNDRY_API_KEY_DEFAULT:-}"
+          source="default"
+
+          if [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI_4:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_PHI_4}"
+            key="${FOUNDRY_API_KEY_PHI_4:-${key}}"
+            source="phi_4"
+          elif [[ "$model" == "phi-4" ]] && [[ -n "${FOUNDRY_ENDPOINT_PHI:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_PHI}"
+            key="${FOUNDRY_API_KEY_PHI:-${key}}"
+            source="phi"
+          elif [[ "$model" == "grok-4-1-fast" ]] && [[ -n "${FOUNDRY_ENDPOINT_GROK:-}" ]] && [[ -n "${FOUNDRY_API_KEY_GROK:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_GROK}"
+            key="${FOUNDRY_API_KEY_GROK}"
+            source="grok"
+          elif [[ "$model" == "llama-3.3-70b-instruct" ]] && [[ -n "${FOUNDRY_ENDPOINT_LLAMA:-}" ]] && [[ -n "${FOUNDRY_API_KEY_LLAMA:-}" ]]; then
+            endpoint="${FOUNDRY_ENDPOINT_LLAMA}"
+            key="${FOUNDRY_API_KEY_LLAMA}"
+            source="llama"
+          fi
+
+          endpoint="$(printf '%s' "$endpoint" | tr -d '\r\n')"
+          key="$(printf '%s' "$key" | tr -d '\r\n')"
+          {
+            echo "FOUNDRY_ENDPOINT=${endpoint}"
+            echo "FOUNDRY_API_KEY=${key}"
+            echo "FOUNDRY_CREDENTIAL_SOURCE=${source}"
+          } >> "$GITHUB_ENV"
+
       - name: Verify Foundry secrets present
         shell: bash
         run: |
@@ -141,6 +187,7 @@ jobs:
             echo "::error::FOUNDRY_ENDPOINT or FOUNDRY_API_KEY missing from repo secrets"
             exit 1
           fi
+          echo "credential source: ${FOUNDRY_CREDENTIAL_SOURCE}"
           echo "endpoint length: ${#FOUNDRY_ENDPOINT}, key length: ${#FOUNDRY_API_KEY}"
 
       - name: Verify target set integrity

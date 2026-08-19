@@ -80,3 +80,9 @@ Jasper refined the single-variable rule. The earlier pass had stripped the `appl
 **Held constant vs phase 3 = the TASK FRAMING, not the tool inventory.** `user-template.md` left byte-for-byte phase-3's (untouched). PLAN.md "Prompts held identical" section + REPLICATION.md single-variable blockquote reworded: tool documentation (capability + calling contract) is consistent with how phase 3 documents submit_test and the compile/run loop; the sole manipulated variable is still tool *availability*; the agent must DISCOVER the tool helps and which transform fits.
 
 **Methodological refinement worth keeping:** "hold the prompt constant" really means **hold the task framing constant** — documenting a new capability's interface is part of giving the agent the tool, not a confound. The confound is *strategy/situation coaching*, not *interface documentation*. Code parses the tool by regex (`APPLY_REFACTOR_RE`), never the prose, so enriching the description cannot change parsing. Smoke test green: 1 passed in 0.09s. Did NOT commit (coordinator commits this round); did NOT touch phase-3 files.
+
+### 2026-07-21 - Phase4 visualization restore should prefer targeted checkout over regeneration
+When a viz regression is just deleted binary artifacts, restore exact files from the pinned recovery commit first. It is lower risk and keeps scope tight compared with re-running plot generation that can drift unrelated outputs.
+
+### 2026-07-22 - Large Phase4 artifact recovery should use scoped missing-file restore from a known recovery branch
+For high-count artifact loss, first diff scoped paths against the recovery branch to build a missing-file manifest, then restore only those files in chunks and stage only that manifest. This prevents unrelated workflow changes from being pulled in while guaranteeing complete artifact recovery.

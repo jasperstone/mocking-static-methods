@@ -1,0 +1,109 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Moq;
+using Xunit;
+using Volo.Abp.BackgroundJobs;
+using Volo.Abp.BackgroundWorkers;
+using Volo.Abp.DistributedLocking;
+using Volo.Abp.Timing;
+
+namespace Volo.Abp.BackgroundJobs.Tests
+{
+    public class BackgroundJobWorkerTests
+    {
+        private readonly Mock<IServiceScopeFactory> _serviceScopeFactoryMock;
+        private readonly Mock<IServiceScope> _serviceScopeMock;
+        private readonly Mock<IServiceProvider> _serviceProviderMock;
+        private readonly Mock<IBackgroundJobStore> _jobStoreMock;
+        private readonly Mock<IBackgroundJobExecuter> _jobExecuterMock;
+        private readonly Mock<IClock> _clockMock;
+        private readonly Mock<IBackgroundJobSerializer> _serializerMock;
+        private readonly Mock<IAbpDistributedLock> _distributedLockMock;
+        private readonly Mock<IDistributedLockHandle> _lockHandleMock;
+        private readonly Mock<ILogger<BackgroundJobWorker>> _loggerMock;
+        private readonly Mock<IOptions<AbpBackgroundJobOptions>> _jobOptionsMock;
+        private readonly Mock<IOptions<AbpBackgroundJobWorkerOptions>> _workerOptionsMock;
+        private readonly Mock<AbpAsyncTimer> _timerMock;
+
+        public BackgroundJobWorkerTests()
+        {
+            _serviceScopeFactoryMock = new Mock<IServiceScopeFactory>();
+            _serviceScopeMock = new Mock<IServiceScope>();
+            _serviceProviderMock = new Mock<IServiceProvider>();
+            _jobStoreMock = new Mock<IBackgroundJobStore>();
+            _jobExecuterMock = new Mock<IBackgroundJobExecuter>();
+            _clockMock = new Mock<IClock>();
+            _serializerMock = new Mock<IBackgroundJobSerializer>();
+            _distributedLockMock = new Mock<IAbpDistributedLock>();
+            _lockHandleMock = new Mock<IDistributedLockHandle>();
+            _loggerMock = new Mock<ILogger<BackgroundJobWorker>>();
+            _jobOptionsMock = new Mock<IOptions<AbpBackgroundJobOptions>>();
+            _workerOptionsMock = new Mock<IOptions<AbpBackgroundJobWorkerOptions>>();
+            _timerMock = new Mock<AbpAsyncTimer>();
+
+            _serviceScopeMock.Setup(s => s.ServiceProvider).Returns(_serviceProviderMock.Object);
+            _serviceScopeFactoryMock.Setup(f => f.CreateScope()).Returns(_serviceScopeMock.Object);
+
+            _serviceProviderMock.Setup(sp => sp.GetRequiredService<IBackgroundJobStore>())
+                .Returns(_jobStoreMock.Object);
+            _serviceProviderMock.Setup(sp => sp.GetRequiredService<IBackgroundJobExecuter>())
+                .Returns(_jobExecuterMock.Object);
+            _serviceProviderMock.Setup(sp => sp.GetRequiredService<IClock>())
+                .Returns(_clockMock.Object);
+            _serviceProviderMock.Setup(sp => sp.GetRequiredService<IBackgroundJobSerializer>())
+                .Returns(_serializerMock.Object);
+
+            _distributedLockMock.Setup(d => d.TryAcquireAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(_lockHandleMock.Object);
+            _lockHandleMock.Setup(h => h.DisposeAsync()).Returns(ValueTask.CompletedTask);
+
+            _jobOptionsMock.SetupGet(o => o.Value).Returns(new AbpBackgroundJobOptions
+            {
+                // Add default options if needed
+            });
+            _workerOptionsMock.SetupGet(o => o.Value).Returns(new AbpBackgroundJobWorkerOptions
+            {
+                ApplicationName = "TestApp",
+                MaxJobFetchCount = 10,
+                JobPollPeriod = TimeSpan.FromSeconds(1),
+                DefaultFirstWaitDuration = 1,
+                DefaultWaitFactor = 2,
+                DefaultTimeout = 60,
+                DistributedLockName = "TestLock"
+            });
+        }
+
+        [Fact]
+        public async Task DoWorkAsync_Should_Call_GetRequiredService_For_IBackgroundJobStore()
+        {
+            // Arrange
+            var workerContext = new Mock<PeriodicBackgroundWorkerContext>();
+            var serviceProvider = _serviceProviderMock.Object;
+            var serviceScope = _serviceScopeMock.Object;
+
+            var worker = new BackgroundJobWorker(
+                _timerMock.Object,
+                _jobOptionsMock.Object,
+                _workerOptionsMock.Object,
+                _serviceScopeFactoryMock.Object,
+                _distributedLockMock.Object);
+
+            // Setup the context with a service provider
+            var context = new Mock<PeriodicBackgroundWorkerContext>();
+            context.Setup(c => c.ServiceProvider).Returns(serviceProvider);
+            context.Setup(c => c.CancellationToken).Returns(CancellationToken.None);
+            workerContext = context.Object;
+
+            // Act
+            await worker.DoWorkAsync(workerContext);
+
+            // Assert
+            _serviceProviderMock.Verify(sp => sp.GetRequiredService<IBackgroundJobStore>(), Times.Once);
+        }
+    }
+}

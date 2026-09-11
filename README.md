@@ -8,8 +8,11 @@ Project documentation is now under [docs/README.md](docs/README.md). The reposit
 
 The experiment progresses in phases. Each phase fixes the input set and varies one thing — the test-generation strategy — so we can attribute coverage gains and failure modes to that strategy.
 
+In this project, a **Mode #1 site** is a C# call that looks mockable and compiles, but Moq cannot intercept: either an extension method on an interface receiver or a non-virtual instance method on a concrete class. Mock setup therefore fails at runtime with `NotSupportedException`; see the [Mode #1 analyzer definition](Mode1Analyzer/README.md#what-counts-as-mode-1) for the precise rules and scoped APIs.
+
 | Phase | Strategy | Status |
 |---|---|---|
+| Repository selection | Search popular, active C# repositories, rank them by Mode #1 footprint, then retain projects that are Linux-buildable at reasonable CI cost. | [Selection criteria and decisions](#phase-2-expansion-may-2026) · [SEARCH METHOD](tools/repo_search/README.md) · [CANDIDATE RANKING](tools/repo_search/MODE1_CANDIDATES.md) |
 | 1 — baseline | No generation. Measure existing test suites. | ✅ sealed · [REPORT](phases/phase1-baseline/REPORT.md) |
 | 2 — single agent, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, max 6 turns. The agent can explore the repo before submitting, but never sees its own compile or test output. | ✅ v2 sweep complete (300 cells × 3 runs × 7 models = 6,300 attempts) · [HEADLINE](phases/phase2-agentic/HEADLINE.md) · [REPORT](phases/phase2-agentic/REPORT.md) · [COSTS](phases/phase2-agentic/COSTS.md) · [REPLICATION](phases/phase2-agentic/REPLICATION.md) |
 | 3 — agentic loop | Same single agent as phase 2, but compile errors **and `dotnet test` results** are fed back as additional turns so the agent can fix its own output (up to 4 submissions per cell). | ✅ v2 sweep complete (300 cells × 3 runs × 6 models = 5,400 attempts) · [HEADLINE](phases/phase3-agentic-loop/HEADLINE.md) · [REPORT](phases/phase3-agentic-loop/REPORT.md) · [COSTS](phases/phase3-agentic-loop/COSTS.md) · [REPLICATION](phases/phase3-agentic-loop/REPLICATION.md) |

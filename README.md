@@ -269,6 +269,12 @@ The following table tracks the repositories cloned into the `cloned_repos/` dire
 
 To grow the sample set from 7 to a more meaningful 13–15 repositories, we ran a Roslyn-semantic Mode #1 detector ([Mode1Analyzer/](Mode1Analyzer/)) over candidate codebases discovered via GitHub Code Search ([tools/repo_search/](tools/repo_search/)). Repositories were selected for the coverage CI matrix using the following criteria:
 
+#### GitHub search criteria
+
+The original December 2025 repository search queried the GitHub API with `language:C# -is:archived stars:>10000 size:>10000`: C# repositories with more than 10,000 stars and a repository size greater than 10,000 KB, excluding archived projects. That strict query produced too few usable repositories for the experiment, leaving seven in the initial baseline.
+
+For the Phase 2 expansion, we broadened the candidate pool by lowering the star threshold and removing the size threshold. The revised finder uses `language:C# stars:>1000 archived:false`, takes up to 150 candidates by default, and then ranks them by Mode #1 hits; see the [repository-search implementation](tools/repo_search/find_mode1_repos.py) and [generated candidate ranking](tools/repo_search/MODE1_CANDIDATES.md). The broader search only supplies candidates: the buildability, activity, Mode #1 footprint, and CI-cost criteria below determine final inclusion.
+
 1. **Linux-buildable in a containerized .NET SDK** (`mcr.microsoft.com/dotnet/sdk:10.0-noble`). Anything requiring Windows-only UI frameworks (WinUI, WPF) is out.
 2. **Active project** — not deprecated, not archived.
 3. **Measurable Mode #1 footprint** — enough call sites to a non-mockable static API surface (`ILogger`/`HttpClient`/`IConfiguration`/`IServiceProvider`) to materially affect coverage if a developer attempted to write tests against them.

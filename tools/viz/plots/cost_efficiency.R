@@ -17,6 +17,20 @@ df <- load_per_model_phase() |>
 if (nrow(df) == 0) {
   message("cost_efficiency.R: no rows with cost data; nothing to plot.")
 } else {
+  phase_levels <- intersect(
+    c("phase2-singleshot", "phase2-agentic", "phase3-agentic-loop", "phase4-refactoring"),
+    unique(df$phase)
+  )
+  phase_levels <- c(phase_levels, setdiff(unique(df$phase), phase_levels))
+  shape_values <- c(
+    "phase2-singleshot"   = 15,
+    "phase2-agentic"      = 16,
+    "phase3-agentic-loop" = 17,
+    "phase4-refactoring"  = 18
+  )
+  df <- df |>
+    mutate(phase = factor(phase, levels = phase_levels))
+
   # Pareto frontier: maximise run_ok, minimise cost. Sort by cost ascending and
   # keep points whose run_ok exceeds the max seen so far.
   frontier <- df |>
@@ -38,11 +52,7 @@ if (nrow(df) == 0) {
     scale_x_log10(labels = label_dollar(),
                   expand = expansion(mult = c(0.08, 0.18))) +
     scale_colour_manual(values = pal_models, name = "model") +
-    scale_shape_manual(values = c(
-      "phase2-singleshot"   = 15,
-      "phase2-agentic"      = 16,
-      "phase3-agentic-loop" = 17
-    ), name = "phase") +
+    scale_shape_manual(values = shape_values[phase_levels], name = "phase", drop = FALSE) +
     labs(
       title    = "Cost efficiency \u2014 dollars spent vs tests that actually pass",
       subtitle = "One point per (model, phase). Dashed line = Pareto frontier (cheapest at each run-OK level). Log x-axis.",

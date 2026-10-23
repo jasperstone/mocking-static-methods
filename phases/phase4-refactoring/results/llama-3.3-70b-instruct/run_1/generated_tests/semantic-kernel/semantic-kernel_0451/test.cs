@@ -1,0 +1,69 @@
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.SemanticKernel.Connectors.CosmosNoSql;
+using Moq;
+using Xunit;
+
+namespace Microsoft.Extensions.DependencyInjection.Tests;
+
+public class CosmosNoSqlServiceCollectionExtensionsTests
+{
+    [Fact]
+    public void AddCosmosNoSqlVectorStoreRegistersVectorStore()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddCosmosNoSqlVectorStore();
+
+        // Act
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        var vectorStore = serviceProvider.GetService<VectorStore>();
+        Assert.NotNull(vectorStore);
+    }
+
+    [Fact]
+    public void AddCosmosNoSqlVectorStoreRegistersCosmosNoSqlVectorStore()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddCosmosNoSqlVectorStore();
+
+        // Act
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        var cosmosNoSqlVectorStore = serviceProvider.GetService<CosmosNoSqlVectorStore>();
+        Assert.NotNull(cosmosNoSqlVectorStore);
+    }
+
+    [Fact]
+    public void AddKeyedCosmosNoSqlVectorStoreRegistersVectorStore()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddKeyedCosmosNoSqlVectorStore("key");
+
+        // Act
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        var vectorStore = serviceProvider.GetService<VectorStore>("key");
+        Assert.NotNull(vectorStore);
+    }
+
+    [Fact]
+    public void AddKeyedCosmosNoSqlVectorStoreRegistersCosmosNoSqlVectorStore()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddKeyedCosmosNoSqlVectorStore("key");
+
+        // Act
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Assert
+        var cosmosNoSqlVectorStore = serviceProvider.GetService<CosmosNoSqlVectorStore>("key");
+        Assert.NotNull(cosmosNoSqlVectorStore);
+    }
+}

@@ -1,0 +1,2 @@
+{"transform": "make_virtual", "applied": false, "reverted": false, "reason": "roslyn_tool_missing: RoslynRefactorTool.dll not built; run `dotnet build RoslynRefactorTool/RoslynRefactorTool.csproj -c Release`.", "files_changed": [], "build_ok": null, "errors": [], "seam": {}}
+{"transform": "parameterize_dependency", "applied": false, "reverted": false, "reason": "roslyn_tool_missing: RoslynRefactorTool.dll not built; run `dotnet build RoslynRefactorTool/RoslynRefactorTool.csproj -c Release`.", "files_changed": [], "build_ok": null, "errors": [], "seam": {}}

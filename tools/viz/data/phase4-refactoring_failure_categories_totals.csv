@@ -1,0 +1,14 @@
+scope,phase,category,count,share_of_non_submitted,share_of_attempts
+phase_total,phase4-refactoring,timeout/connection,0,0.0000,0.0000
+phase_total,phase4-refactoring,auth/access,0,0.0000,0.0000
+phase_total,phase4-refactoring,rate-limit,3,0.0015,0.0006
+phase_total,phase4-refactoring,server-5xx,0,0.0000,0.0000
+phase_total,phase4-refactoring,api-version-unsupported,696,0.3524,0.1329
+phase_total,phase4-refactoring,baseline_compile_failed,1170,0.5924,0.2234
+phase_total,phase4-refactoring,baseline_no_owning_csproj,54,0.0273,0.0103
+phase_total,phase4-refactoring,max-turns-exhausted,49,0.0248,0.0094
+phase_total,phase4-refactoring,context-length,0,0.0000,0.0000
+phase_total,phase4-refactoring,content-filter,3,0.0015,0.0006
+phase_total,phase4-refactoring,invalid-prompt,0,0.0000,0.0000
+phase_total,phase4-refactoring,adapter-parse-error,0,0.0000,0.0000
+phase_total,phase4-refactoring,other,0,0.0000,0.0000

@@ -15,24 +15,33 @@ In this project, a **Mode #1 site** is a C# call that looks mockable and compile
 | Repository selection | Search popular, active C# repositories, rank them by Mode #1 footprint, then retain projects that are Linux-buildable at reasonable CI cost. | [Selection criteria and decisions](#phase-2-expansion-may-2026) · [SEARCH METHOD](tools/repo_search/README.md) · [CANDIDATE RANKING](tools/repo_search/MODE1_CANDIDATES.md) |
 | 1 — baseline | No generation. Measure existing test suites. | ✅ sealed · [REPORT](phases/phase1-baseline/REPORT.md) |
 | 2 — single agent, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, max 6 turns. The agent can explore the repo before submitting, but never sees its own compile or test output. | ✅ v2 sweep complete (300 cells × 3 runs × 7 models = 6,300 attempts) · [HEADLINE](phases/phase2-agentic/HEADLINE.md) · [REPORT](phases/phase2-agentic/REPORT.md) · [COSTS](phases/phase2-agentic/COSTS.md) · [REPLICATION](phases/phase2-agentic/REPLICATION.md) |
-| 3 — single-agent feedback and refactoring | One agent iterates on compile errors and `dotnet test` results (up to 4 submissions per cell). The refactoring arm additionally exposes `apply_refactor` to introduce a testability seam in production code. | Feedback arm: ✅ v2 sweep complete (300 cells × 3 runs × 6 models = 5,400 attempts) · [HEADLINE](phases/phase3-agentic-loop/HEADLINE.md) · [REPORT](phases/phase3-agentic-loop/REPORT.md) · [COSTS](phases/phase3-agentic-loop/COSTS.md) · [REPLICATION](phases/phase3-agentic-loop/REPLICATION.md). Refactoring arm: [PLAN](phases/phase4-refactoring/PLAN.md) · [REPLICATION](phases/phase4-refactoring/REPLICATION.md); implemented harness, no consolidated results committed. |
+| 3 — single-agent feedback loop with refactoring | One agent iterates on compile errors and `dotnet test` results (up to 4 submissions per cell), with `apply_refactor` available to introduce a testability seam in production code. The existing feedback-only condition is retained as the control for measuring the tool's effect. | Feedback arm: ✅ v2 sweep complete (300 cells × 3 runs × 6 models = 5,400 attempts) · [HEADLINE](phases/phase3-agentic-loop/HEADLINE.md) · [REPORT](phases/phase3-agentic-loop/REPORT.md) · [COSTS](phases/phase3-agentic-loop/COSTS.md) · [REPLICATION](phases/phase3-agentic-loop/REPLICATION.md). Refactoring arm: [PLAN](phases/phase4-refactoring/PLAN.md) · [REPLICATION](phases/phase4-refactoring/REPLICATION.md); implemented harness, no consolidated results committed. |
 | 4 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | scaffold · [PLAN](phases/phase5-multiagent/PLAN.md) (legacy artifact ID: `phase5-multiagent`) |
 
 > Each phase directory contains a **REPORT.md** (narrative + per-model results table), a **COSTS.md** (per-model spend), a **REPLICATION.md** (one-page reproduction recipe), a **phase.lock.yaml** (frozen inputs), and a **results/** tree (raw JSONL + generated tests).
 
 ### Phase numbering and historical artifacts
 
-The design has **four overall phases**: baseline, single agent without feedback,
-single agent with feedback/refactoring, and multi-agent. Phase 3 contains two
-experimental arms: **3a — feedback only** and **3b — feedback plus the refactoring
-tool**. Keeping those arms separate preserves the comparison of tool availability.
+The documentation presents **four overall phases**: baseline, single agent
+without feedback, **single-agent feedback loop with refactoring**, and
+**multi-agent**. Phase 3 retains two existing experimental conditions:
+**3a — feedback-only control** and **3b — feedback plus the refactoring tool**.
+Keeping their results separate preserves the comparison of tool availability.
+
+This is a **documentation regrouping agreed on 2026-11-12**, not a change to
+the experiment or a claim that the conditions were originally run together.
+The [2026-06-11 decision](.squad/decisions.md#2026-06-11-phase-ladder-renumbered-in-the-reports-forward-looking-roadmap-labels-only)
+used five phase numbers: feedback only = 3, feedback plus refactoring = 4,
+multi-agent = 5. The four-phase presentation groups the two single-agent
+feedback conditions under phase 3 and calls multi-agent phase 4. Prompts,
+tool availability, targets, run IDs, and measured results retain their identities.
 
 Existing directory names, workflow names, lock-file IDs, and historical reports
 retain their original numbering for reproducibility:
 
 | Overall phase / arm | Existing artifact directory | Interpretation |
 |---|---|---|
-| 3a — feedback only | [`phase3-agentic-loop`](phases/phase3-agentic-loop/) | The completed 5,400-attempt sweep; **787 compile / 386 run-OK**. Its [allowed tools](phases/phase3-agentic-loop/phase.lock.yaml) are `read_file`, `list_dir`, and `submit_test`; it did **not** offer `apply_refactor`. |
+| 3a — feedback-only control | [`phase3-agentic-loop`](phases/phase3-agentic-loop/) | The completed 5,400-attempt sweep; **787 compile / 386 run-OK**. Its [allowed tools](phases/phase3-agentic-loop/phase.lock.yaml) are `read_file`, `list_dir`, and `submit_test`; it did **not** offer `apply_refactor`. |
 | 3b — feedback + refactoring | [`phase4-refactoring`](phases/phase4-refactoring/) | Separate single-agent harness with `apply_refactor`; its checked-in [report](phases/phase4-refactoring/REPORT.md) still contains predictions and its results directory has no consolidated sweep. Do not attribute the 3a results to refactoring. |
 | 4 — multi-agent | [`phase5-multiagent`](phases/phase5-multiagent/) | Writer / reviewer / fixer scaffold. Historical references to “phase 5” identify this phase. |
 

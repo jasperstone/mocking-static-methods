@@ -8,12 +8,12 @@ Each phase varies one thing — the test-generation strategy — against a fixed
 |---|---|---|
 | 1 — baseline | Measure existing test suites across the 15 screened repositories. | ✅ sealed · [`phase1-baseline/`](phase1-baseline/) |
 | 2 — single agent, no feedback | One agent explores with `read_file` / `list_dir` and calls `submit_test`; it never sees compile or test output. | ✅ v2 sweep complete: 300 targets × 3 runs × 7 models = 6,300 attempts · [`phase2-agentic/`](phase2-agentic/) |
-| 3 — single-agent feedback and refactoring | **3a:** compile + run feedback, up to 4 submissions. **3b:** the same single-agent approach with an additional `apply_refactor` tool. | 3a: ✅ 5,400-attempt sweep, **787 compile / 386 run-OK** · [`phase3-agentic-loop/`](phase3-agentic-loop/). 3b: implemented harness; checked-in report still predictive, no consolidated results committed · [`phase4-refactoring/`](phase4-refactoring/). |
+| 3 — single-agent feedback loop with refactoring | **3a control:** compile + run feedback without refactoring, up to 4 submissions. **3b:** the feedback loop with `apply_refactor` available. | 3a: ✅ 5,400-attempt sweep, **787 compile / 386 run-OK** · [`phase3-agentic-loop/`](phase3-agentic-loop/). 3b: implemented harness; checked-in report still predictive, no consolidated results committed · [`phase4-refactoring/`](phase4-refactoring/). |
 | 4 — multi-agent | Writer / reviewer / fixer collaborate per target. | Scaffold · [`phase5-multiagent/PLAN.md`](phase5-multiagent/PLAN.md) |
 
 ### Historical IDs and result attribution
 
-The four-phase design groups feedback and refactoring into two arms of phase 3.
+The four-phase presentation groups the existing feedback-only control and feedback-plus-refactoring condition under phase 3. This documentation regrouping was agreed on 2026-11-12; the June 11 decision used five phase numbers. It does not change the experiment, merge result sets, or imply that the feedback-only sweep used the tool.
 Existing artifact IDs remain unchanged: `phase3-agentic-loop` = **3a**,
 `phase4-refactoring` = **3b**, and `phase5-multiagent` = **4**.
 Historical documents and workflow names use those legacy numbers. See the

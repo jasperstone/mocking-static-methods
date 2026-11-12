@@ -1,5 +1,7 @@
 # Phase 5 — Multi-agent (writer / reviewer / fixer): PLAN
 
+> **Numbering note:** This historical plan is the current overall **phase 4 (multi-agent)** in the [four-phase design](../../README.md#phase-numbering-and-historical-artifacts). The `phase5-multiagent` directory, workflow names, and “phase 5” wording below retain their legacy IDs for reproducibility. The single-agent feedback and refactoring arms are grouped under overall phase 3.
+
 > **Status: scaffolding only. NO Azure dispatch before ~2026-06-08.**
 >
 > This document captures the design of phase 5 before any tokens are spent.

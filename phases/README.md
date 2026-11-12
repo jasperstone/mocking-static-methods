@@ -2,19 +2,37 @@
 
 Each phase varies one thing — the test-generation strategy — against a fixed input set ([`targets/v2/targets.csv`](../targets/v2/targets.csv), 300 stratified cells across 12 repos) and a fixed model panel. The 300-cell v2 sample is frozen across phases 2+; only the strategy changes.
 
-## The pattern
+## Four overall phases
 
-| Phase | Strategy | Status |
+| Phase | Strategy | Status / artifacts |
 |---|---|---|
-| 1 — baseline | No generation. Measure existing test suites against detected Mode#1 sites. | ✅ sealed ([`phase1-baseline/`](phase1-baseline/)) |
-| 2 — agentic, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, ≤6 turns. Can explore the repo before submitting; never sees its own compile or test output. | ✅ v2 sweep complete — 300 cells × 3 runs × 7 models = 6,300 attempts ([`phase2-agentic/`](phase2-agentic/)) |
-| 3 — agentic loop | Same single agent as phase 2, but compile errors **and `dotnet test` results** are fed back as additional turns so the agent can fix its own output, ≤4 submissions per cell. | ✅ v2 sweep complete — 300 cells × 3 runs × 6 models = 5,400 attempts ([`phase3-agentic-loop/`](phase3-agentic-loop/)) |
-| 4 — agentic loop + testability refactoring | The phase-3 single agent, plus an `apply_refactor` tool that can introduce a testability seam into the production code (extract-and-override, wrapper interface, dependency parameterization) before testing it. Isolates the effect of a refactoring *capability*; prompts stay generic. | design in progress |
-| 5 — multi-agent | Writer / reviewer / fixer specialist agents collaborate per target. | 🟡 scaffold only — design in [`phase5-multiagent/PLAN.md`](phase5-multiagent/PLAN.md); Azure dispatch frozen until ~2026-06-08 |
+| 1 — baseline | Measure existing test suites across the 15 screened repositories. | ✅ sealed · [`phase1-baseline/`](phase1-baseline/) |
+| 2 — single agent, no feedback | One agent explores with `read_file` / `list_dir` and calls `submit_test`; it never sees compile or test output. | ✅ v2 sweep complete: 300 targets × 3 runs × 7 models = 6,300 attempts · [`phase2-agentic/`](phase2-agentic/) |
+| 3 — single-agent feedback and refactoring | **3a:** compile + run feedback, up to 4 submissions. **3b:** the same single-agent approach with an additional `apply_refactor` tool. | 3a: ✅ 5,400-attempt sweep, **787 compile / 386 run-OK** · [`phase3-agentic-loop/`](phase3-agentic-loop/). 3b: implemented harness; checked-in report still predictive, no consolidated results committed · [`phase4-refactoring/`](phase4-refactoring/). |
+| 4 — multi-agent | Writer / reviewer / fixer collaborate per target. | Scaffold · [`phase5-multiagent/PLAN.md`](phase5-multiagent/PLAN.md) |
 
-Every phase 2+ runs the **same 300-cell v2 sample** so cross-phase deltas reflect generation strategy, not target drift.
+### Historical IDs and result attribution
 
-> **Phase 4 and later are devcontainer-only.** Local/dev steps (unit tests, tools, single-cell smoke tests) run inside the dev container ([`.devcontainer/devcontainer.json`](../.devcontainer/devcontainer.json)); production sweeps run via the containerized GitHub Actions workflows. There is no separate host execution path. See [`phase4-refactoring/REPLICATION.md`](phase4-refactoring/REPLICATION.md).
+The four-phase design groups feedback and refactoring into two arms of phase 3.
+Existing artifact IDs remain unchanged: `phase3-agentic-loop` = **3a**,
+`phase4-refactoring` = **3b**, and `phase5-multiagent` = **4**.
+Historical documents and workflow names use those legacy numbers. See the
+[root mapping](../README.md#phase-numbering-and-historical-artifacts).
+
+The completed 3a sweep did **not** have `apply_refactor`: its
+[lock file](phase3-agentic-loop/phase.lock.yaml) permits only `read_file`,
+`list_dir`, and `submit_test`. The refactoring arm has its own
+[lock file](phase4-refactoring/phase.lock.yaml) and results namespace; grouping
+the arms does not pool their results or establish a measured refactoring gain.
+
+The 300-cell v2 sample is fixed for generation comparisons. Its **12 contributing
+repositories** are the nonempty eligible subset of the **15-repository baseline
+matrix**; see the [screening and contribution table](../README.md#screened-repositories-and-sampled-target-contributors).
+
+> **The refactoring arm (3b) and multi-agent phase (4) are devcontainer-only.**
+> Local/dev steps run inside the [devcontainer](../.devcontainer/devcontainer.json);
+> production sweeps run via containerized GitHub Actions. See
+> [refactoring replication](phase4-refactoring/REPLICATION.md).
 
 ### Model panel (as run)
 
@@ -46,8 +64,8 @@ Each phase ships **its own** GitHub Actions workflow:
   coverage-orchestrator.yml         # always current — measures whatever's there
   phase2-agentic.yml                # frozen at seal of phase 2
   phase3-agentic-loop.yml           # frozen at seal of phase 3
-  phase4-refactoring.yml            # planned — agentic loop + refactoring tool
-  phase5-{generate,evaluate,aggregate}.yml   # scaffolded (multi-agent), defaults to mock adapter
+  phase4-refactoring.yml            # phase 3b — legacy refactoring ID
+  phase5-{generate,evaluate,aggregate}.yml   # phase 4 — legacy multi-agent ID, mock default
 ```
 
 Why one workflow per phase, not one parameterized workflow:

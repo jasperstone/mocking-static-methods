@@ -6,6 +6,27 @@
 - Seed: 42
 - Repo floor: 3
 
+## Repository screening versus sample contribution
+
+The baseline screened **15 repositories**; **12** supplied the **3,147 eligible
+v1 sites** from which this sample selects **300 targets**. Every eligible
+repository is represented in the allocation table below.
+
+The other three had no eligible sites before sampling:
+
+| Screened repository | Detected sites | Why no eligible v1 or sampled v2 targets |
+|---|---:|---|
+| Avalonia | 9 | All 9 sites were in non-production paths. |
+| runtime | 33 | 1 production site was already covered; 32 were `unknown_file` (no baseline Cobertura file entry). |
+| StockSharp | 3 | All 3 production sites were `unknown_file`. |
+
+These are deterministic eligibility exclusions, not random sampling omissions.
+See the [v1 per-repository buckets](../v1/README.md#per-repo-bucket-breakdown)
+and [v1 provenance lock](../v1/targets.lock.yaml).
+The [earlier repository exclusions and their reasons](../../README.md#repositories-excluded-before-the-final-baseline-matrix)
+are separate: those repositories never entered the final 15-repository baseline
+matrix. The frozen v2 sample does not add branch-coverage or unknown-coverage sites.
+
 ## Selection procedure
 
 The sample is selected by [`stratified_sample.py`](../../tools/targets/stratified_sample.py)

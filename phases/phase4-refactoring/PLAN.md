@@ -1,5 +1,7 @@
 # Phase 4 — Agentic loop + testability refactoring tool: PLAN
 
+> **Numbering note:** This historical plan describes **phase 3b (feedback + refactoring)** in the [four-phase design](../../README.md#phase-numbering-and-historical-artifacts). “Phase 4” below is the legacy `phase4-refactoring` artifact ID; “phase 3” is the feedback-only control (3a), and “phase 5” is the current overall **phase 4 (multi-agent)**. Results remain separate from the completed feedback-only sweep.
+
 > **Status: scaffolding only. No Azure dispatch before run_1 go/no-go.**
 >
 > This document is the design-of-record for phase 4 before any tokens are

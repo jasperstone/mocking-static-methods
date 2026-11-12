@@ -13,7 +13,7 @@ A "Mode #1 site" is a call to a static method or extension method that the sourc
 
 ## Why uncovered-only
 
-If a line is already covered by an existing test, generating a new test for it can't move the line-coverage number. This experiment's headline metric is *new coverage produced by each generation strategy*; including already-covered sites would dilute that signal. Branch coverage of already-covered lines is a separate experiment — see `targets/v2/` (future) for that scope.
+If a line is already covered by an existing test, generating a new test for it can't move the line-coverage number. This experiment's headline metric is *new coverage produced by each generation strategy*; including already-covered sites would dilute that signal. Branch coverage of already-covered lines would require a separate future input-set version. The existing [v2 sample](../v2/sampling_report.md) selects 300 sites from this v1 population; it does not expand eligibility.
 
 For the analysis of how the 1,087 covered sites are *currently* covered (the five buckets: deterministic statics, in-process test servers, default/null config paths, wrapper-mocked, and integration tests), see [`covered_sites_analysis.csv`](covered_sites_analysis.csv) and the rationale section in the root [`README.md`](../../README.md#why-we-target-only-uncovered-sites).
 
@@ -73,7 +73,7 @@ The analyzer detected **6,321 Mode #1 sites** across the 15 repos in the matrix.
 | **uncovered, in cobertura** | **3,147** | ✅ **yes** | Production code, line is not currently covered, cobertura has the file/line. We can verify whether a generated test newly covers it. |
 | already covered | 1,087 | no | Production code, line already hit by the existing suite. A new test here can't move line coverage. Catalogued in [`covered_sites_analysis.csv`](covered_sites_analysis.csv). |
 | non-production path | 1,167 | no | Site lives under `test/`, `samples/`, `benchmarks/`, `playground/`. Out of scope by definition. |
-| `unknown_file` | 901 | no — deferred to v2 | Production source exists but cobertura has no entry — the existing test suite's projects never reference the assembly. A generated test gives us no signal until we resolve the missing-assembly issue. |
+| `unknown_file` | 901 | no — future expansion | Production source exists but cobertura has no entry — the existing test suite's projects never reference the assembly. A generated test gives us no signal until we resolve the missing-assembly issue. |
 | `unknown_line` | 19 | no | Cobertura has the file but not the exact line (multi-line expression cobertura collapsed). Data quality issue. |
 | **TOTAL** | **6,321** | | `3,147 + 1,087 + 1,167 + 901 + 19` |
 
@@ -102,8 +102,12 @@ The full provenance (sha256, source SHAs, source CI run) is in [`targets.lock.ya
 
 Highlights:
 - jellyfin (1,046), garnet (499), semantic-kernel (458), abp (445), aspnetcore (403) carry 79% of the targets.
-- Avalonia, runtime, StockSharp contribute 0 targets. Their production Mode #1 sites are either already covered or sit in files cobertura didn't load (recoverable in v2).
-- abp and aspnetcore alone account for 573 of the 901 `unknown_file` sites. Recovering those is the most valuable v2 expansion — see issue notes in v2 README when created.
+- **15 repositories were screened; 12 contribute eligible v1 sites and all 12 appear in the 300-target v2 sample.**
+- **Avalonia:** all 9 detected sites are non-production, so none are eligible.
+- **runtime:** 1 of 33 production sites is already covered; the other 32 are `unknown_file`.
+- **StockSharp:** all 3 production sites are `unknown_file`.
+- These three passed repository-level selection but have zero eligible sites; they were not dropped by random sampling. The separate [earlier exclusions](../../README.md#repositories-excluded-before-the-final-baseline-matrix) never entered this final 15-repository matrix.
+- abp and aspnetcore alone account for 573 of the 901 `unknown_file` sites. Recovering those would require a future input-set expansion; the actual [v2 sample](../v2/sampling_report.md) is a 300-site subset of v1 and does not recover unknown-coverage sites.
 
 ## Versioning
 

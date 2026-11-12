@@ -6,7 +6,7 @@ Project documentation is now under [docs/README.md](docs/README.md). The reposit
 
 ## Experimental design
 
-The experiment progresses in phases. Each phase fixes the input set and varies one thing — the test-generation strategy — so we can attribute coverage gains and failure modes to that strategy.
+The experiment has four overall phases. Comparisons use fixed inputs to assess changes in test-generation strategy; phase 3 separates feedback-only and refactoring arms so their effects remain distinguishable.
 
 In this project, a **Mode #1 site** is a C# call that looks mockable and compiles, but Moq cannot intercept: either an extension method on an interface receiver or a non-virtual instance method on a concrete class. Mock setup therefore fails at runtime with `NotSupportedException`; see the [Mode #1 analyzer definition](Mode1Analyzer/README.md#what-counts-as-mode-1) for the precise rules and scoped APIs.
 
@@ -15,23 +15,47 @@ In this project, a **Mode #1 site** is a C# call that looks mockable and compile
 | Repository selection | Search popular, active C# repositories, rank them by Mode #1 footprint, then retain projects that are Linux-buildable at reasonable CI cost. | [Selection criteria and decisions](#phase-2-expansion-may-2026) · [SEARCH METHOD](tools/repo_search/README.md) · [CANDIDATE RANKING](tools/repo_search/MODE1_CANDIDATES.md) |
 | 1 — baseline | No generation. Measure existing test suites. | ✅ sealed · [REPORT](phases/phase1-baseline/REPORT.md) |
 | 2 — single agent, no feedback | One agent with `read_file` / `list_dir` / `submit_test` tools, max 6 turns. The agent can explore the repo before submitting, but never sees its own compile or test output. | ✅ v2 sweep complete (300 cells × 3 runs × 7 models = 6,300 attempts) · [HEADLINE](phases/phase2-agentic/HEADLINE.md) · [REPORT](phases/phase2-agentic/REPORT.md) · [COSTS](phases/phase2-agentic/COSTS.md) · [REPLICATION](phases/phase2-agentic/REPLICATION.md) |
-| 3 — agentic loop | Same single agent as phase 2, but compile errors **and `dotnet test` results** are fed back as additional turns so the agent can fix its own output (up to 4 submissions per cell). | ✅ v2 sweep complete (300 cells × 3 runs × 6 models = 5,400 attempts) · [HEADLINE](phases/phase3-agentic-loop/HEADLINE.md) · [REPORT](phases/phase3-agentic-loop/REPORT.md) · [COSTS](phases/phase3-agentic-loop/COSTS.md) · [REPLICATION](phases/phase3-agentic-loop/REPLICATION.md) |
-| 4 — agentic loop + testability refactoring | The phase-3 single agent, plus an `apply_refactor` tool that can introduce a testability seam (extract-and-override, wrapper interface, dependency parameterization) into the production code before testing it. Isolates the effect of a refactoring *capability* on a fixed input set. | design in progress |
-| 5 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | scaffold ([`phase5-multiagent/PLAN.md`](phases/phase5-multiagent/PLAN.md)) |
+| 3 — single-agent feedback loop with refactoring | One agent iterates on compile errors and `dotnet test` results (up to 4 submissions per cell), with `apply_refactor` available to introduce a testability seam in production code. The existing feedback-only condition is retained as the control for measuring the tool's effect. | Feedback arm: ✅ v2 sweep complete (300 cells × 3 runs × 6 models = 5,400 attempts) · [HEADLINE](phases/phase3-agentic-loop/HEADLINE.md) · [REPORT](phases/phase3-agentic-loop/REPORT.md) · [COSTS](phases/phase3-agentic-loop/COSTS.md) · [REPLICATION](phases/phase3-agentic-loop/REPLICATION.md). Refactoring arm: [PLAN](phases/phase4-refactoring/PLAN.md) · [REPLICATION](phases/phase4-refactoring/REPLICATION.md); implemented harness, no consolidated results committed. |
+| 4 — multi-agent | Specialist agents (writer / reviewer / fixer) collaborate on each target. | scaffold · [PLAN](phases/phase5-multiagent/PLAN.md) (legacy artifact ID: `phase5-multiagent`) |
 
 > Each phase directory contains a **REPORT.md** (narrative + per-model results table), a **COSTS.md** (per-model spend), a **REPLICATION.md** (one-page reproduction recipe), a **phase.lock.yaml** (frozen inputs), and a **results/** tree (raw JSONL + generated tests).
 
+### Phase numbering and historical artifacts
+
+The documentation presents **four overall phases**: baseline, single agent
+without feedback, **single-agent feedback loop with refactoring**, and
+**multi-agent**. Phase 3 retains two existing experimental conditions:
+**3a — feedback-only control** and **3b — feedback plus the refactoring tool**.
+Keeping their results separate preserves the comparison of tool availability.
+
+This is a **documentation regrouping agreed on 2026-11-12**, not a change to
+the experiment or a claim that the conditions were originally run together.
+The [2026-06-11 decision](.squad/decisions.md#2026-06-11-phase-ladder-renumbered-in-the-reports-forward-looking-roadmap-labels-only)
+used five phase numbers: feedback only = 3, feedback plus refactoring = 4,
+multi-agent = 5. The four-phase presentation groups the two single-agent
+feedback conditions under phase 3 and calls multi-agent phase 4. Prompts,
+tool availability, targets, run IDs, and measured results retain their identities.
+
+Existing directory names, workflow names, lock-file IDs, and historical reports
+retain their original numbering for reproducibility:
+
+| Overall phase / arm | Existing artifact directory | Interpretation |
+|---|---|---|
+| 3a — feedback-only control | [`phase3-agentic-loop`](phases/phase3-agentic-loop/) | The completed 5,400-attempt sweep; **787 compile / 386 run-OK**. Its [allowed tools](phases/phase3-agentic-loop/phase.lock.yaml) are `read_file`, `list_dir`, and `submit_test`; it did **not** offer `apply_refactor`. |
+| 3b — feedback + refactoring | [`phase4-refactoring`](phases/phase4-refactoring/) | Separate single-agent harness with `apply_refactor`; its checked-in [report](phases/phase4-refactoring/REPORT.md) still contains predictions and its results directory has no consolidated sweep. Do not attribute the 3a results to refactoring. |
+| 4 — multi-agent | [`phase5-multiagent`](phases/phase5-multiagent/) | Writer / reviewer / fixer scaffold. Historical references to “phase 5” identify this phase. |
+
 ### Cost so far
 
-The full [phase 2 v2 sweep](phases/phase2-agentic/) — 7 models × 300 cells × 3 runs = 6,300 attempts — cost **\$89.98 USD** in token spend (Azure bill ~\$105 including infra). 82% of the bill (\$73.40) was `gpt-5-codex`, which has since been removed from the panel and from Azure AI Foundry for phases 3-5. The remaining 6-model panel costs ~\$0.018 per attempt. See [phases/phase2-agentic/COSTS.md](phases/phase2-agentic/COSTS.md) for the per-model breakdown and projections for the next tiers.
+The full [phase 2 v2 sweep](phases/phase2-agentic/) — 7 models × 300 cells × 3 runs = 6,300 attempts — cost **\$89.98 USD** in token spend (Azure bill ~\$105 including infra). 82% of the bill (\$73.40) was `gpt-5-codex`, which has since been removed from the panel and from Azure AI Foundry for phases 3–4 (including both phase 3 arms). The remaining 6-model panel costs ~\$0.018 per attempt. See [phases/phase2-agentic/COSTS.md](phases/phase2-agentic/COSTS.md) for the per-model breakdown and projections for the next tiers.
 
 ![Cost per passing test, per model](assets/figures/cost-per-passing-test.png)
 
 *Cost per passing generated test, by model. `gpt-5-codex` was the most expensive per attempt and the reason it was dropped from the panel for phases 3+.*
 
-### Phase 3 — agentic loop with compile + run feedback (final, 3 runs)
+### Phase 3a — agentic loop with compile + run feedback (final, 3 runs)
 
-The phase 3 sweep ran the same 300 v2 targets, three runs, against the same 6-model panel as phase 2 (no codex), with one structural change: after every `submit_test` the runner does `dotnet build` AND `dotnet test`, then feeds either the compile errors or the failing-test messages back to the model. The model gets up to 4 submission attempts per cell. These are **canonical evaluator numbers** (`evaluation.jsonl` from the dedicated evaluator workflow that builds each test against the real production csproj).
+The phase 3a feedback-only sweep ran the same 300 v2 targets, three runs, against the same 6-model panel as phase 2 (no codex), with one structural change: after every `submit_test` the runner does `dotnet build` AND `dotnet test`, then feeds either the compile errors or the failing-test messages back to the model. The model gets up to 4 submission attempts per cell. These are **canonical evaluator numbers** (`evaluation.jsonl` from the dedicated evaluator workflow that builds each test against the real production csproj).
 
 | Model | Cells (n) | Submitted | Compile-OK | **Run-OK** | Compile% | Run% |
 |---|---:|---:|---:|---:|---:|---:|
@@ -69,7 +93,8 @@ phases/                  Per-phase snapshots (immutable once sealed)
   phase2-agentic/        Single-agent / no-feedback v2 sweep + REPORT + COSTS + HEADLINE + results/
   ...
 targets/                 Versioned input set (which Mode#1 sites to attempt)
-  v1/                    Production sites, currently uncovered
+  v1/                    Eligible production sites, currently uncovered (3,147)
+  v2/                    Frozen stratified sample of v1 (300 targets, 12 repos)
   current -> v1          Convenience symlink
 tools/                   Global, evolving — analyzers, orchestrator helpers
   coverage_xref/         Cobertura ↔ Mode#1-site cross-reference
@@ -109,7 +134,7 @@ The 1,087 currently-covered sites fall into roughly five buckets, all of which a
 
 #### What we leave on the table by excluding covered sites
 
-Branch-uncovered code around line-covered statics. A generated test for "FOO is set to bad value" can add real value without changing line coverage. That's a separate experiment scoped to a future `targets/v2/` (branch-coverage targets), not merged into v1's input set.
+Branch-uncovered code around line-covered statics. A generated test for "FOO is set to bad value" can add real value without changing line coverage. That would require a separate future input-set version. The existing `targets/v2/` is a 300-site stratified sample of v1, not a branch-coverage expansion.
 
 #### What we drop besides covered sites
 
@@ -120,7 +145,7 @@ The Mode #1 analyzer detected 6,321 sites total across the 15 repos. Each lands 
 | **production, uncovered, in cobertura** | **3,147** | ✅ **yes — `targets/v1/targets.csv`** |
 | production, already line-covered | 1,087 | no — see five buckets above |
 | non-production path (test/, samples/, benchmarks/, playground/) | 1,167 | no — out of scope |
-| production, `unknown_file` (no cobertura entry — test suite never loaded the assembly) | 901 | no — deferred to v2 |
+| production, `unknown_file` (no cobertura entry — test suite never loaded the assembly) | 901 | no — requires a future coverage/input-set expansion |
 | production, `unknown_line` (cobertura collapsed a multi-line expression) | 19 | no — data quality |
 
 Per-repo breakdown is in [`targets/v1/README.md`](targets/v1/README.md#per-repo-bucket-breakdown). Full provenance with sha256 of the input is in [`targets/v1/targets.lock.yaml`](targets/v1/targets.lock.yaml).
@@ -143,7 +168,7 @@ The **dev container is the canonical execution environment** for this project. O
 the workspace in VS Code and run "Dev Containers: Reopen in Container", then run
 every command inside the container. Local/dev steps run in the devcontainer;
 production sweeps run via the (also containerized) GitHub Actions workflows.
-Phase 4 and later assume devcontainer-only execution — see
+The refactoring arm (3b) and multi-agent phase (4) assume devcontainer-only execution — see
 [phases/phase4-refactoring/REPLICATION.md](phases/phase4-refactoring/REPLICATION.md).
 
 ### Dev Container (canonical)
@@ -170,13 +195,13 @@ build tooling the matrix needs:
 
 4. **You're ready!** All tools (.NET SDKs, Python, PowerShell, coverage tools) are pre-installed.
 
-### Local installation (legacy — phases 1–3 only)
+### Local installation (legacy — baseline, no-feedback, and feedback-only tooling)
 
-> **Phase 4 and later require the devcontainer.** This bare-machine install is kept
-> only for reproducing the historical phase 1–3 tooling and is not a supported path
+> **The refactoring arm and multi-agent phase require the devcontainer.** This bare-machine install is kept
+> only for reproducing the historical baseline, no-feedback, and feedback-only tooling and is not a supported path
 > for newer phases — use the dev container above.
 
-If you are reproducing the legacy phase 1–3 tooling without containers:
+If you are reproducing the legacy baseline, no-feedback, or feedback-only tooling without containers:
 
 ### Prerequisites
 - .NET 8.0 SDK
@@ -248,20 +273,17 @@ Each repository below implements this algorithm with project-specific commands.
 
 ### Repository Build & Test Scripts
 
-The following table tracks the repositories cloned into the `cloned_repos/` directory with complete build and test scripts:
+The following table records the seven original baseline repositories and their build commands. The eight additions and the complete 15-repository screening list are below; candidates excluded before the final baseline matrix are listed separately.
 
 | Description | GitHub Link | .NET Version | Build & Test Script |
 |-------------|-------------|--------------|---------------------|
 | App Framework | [https://github.com/abpframework/abp](https://github.com/abpframework/abp) | .NET 10 | [See below](#abp-framework-build--test-command) |
 | Web Framework | [https://github.com/dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | SDK 10.0.101 | [See below](#aspnet-core-build--test-command) |
 | ORM | [https://github.com/dotnet/efcore](https://github.com/dotnet/efcore) | SDK 10.0.102 | [See below](#ef-core-build--test-command) |
-| XPlat Runtime | [https://github.com/mono/mono](https://github.com/mono/mono) | Native (autotools) | **Skipped** - Final release Feb 2024, archived project |
 | Distributed Actors | [https://github.com/dotnet/orleans](https://github.com/dotnet/orleans) | .NET 10 | [See below](#orleans-build--test-command) |
 | Compiler | [https://github.com/dotnet/roslyn](https://github.com/dotnet/roslyn) | SDK 10.0.102 | [See below](#roslyn-build--test-command) |
 | .NET Runtime | [https://github.com/dotnet/runtime](https://github.com/dotnet/runtime) | SDK 10.0.100 | [See below](#runtime-build--test-command) |
 | AI SDK | [https://github.com/microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | SDK 10.0.100 | [See below](#semantic-kernel-build--test-command) |
-| Auth Server | [https://github.com/DuendeArchive/IdentityServer4](https://github.com/DuendeArchive/IdentityServer4) | .NET 5/6 | **Skipped** - Archived, moved to Duende IdentityServer (commercial) |
-| Subtitle Editor | [https://github.com/SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | Framework 4.8 | **Skipped** - Uses .NET Framework 4.8, no .NET 10 support |
 
 > **Note:** Build commands may vary based on the specific repository structure and requirements. Some repositories may require additional setup steps or have custom build scripts. Always check the repository's README for specific build instructions.
 
@@ -288,13 +310,75 @@ For the Phase 2 expansion, we broadened the candidate pool by lowering the star 
 | eShop | [dotnet/eShop](https://github.com/dotnet/eShop) | 94 | ✅ Included | Microsoft reference architecture; `tests/ClientApp.UnitTests` excluded (requires `maui-tizen` workload) |
 | duplicati | [duplicati/duplicati](https://github.com/duplicati/duplicati) | 34 | ✅ Included | Cross-platform backup tool, standard .NET test layout |
 | Avalonia | [AvaloniaUI/Avalonia](https://github.com/AvaloniaUI/Avalonia) | 9 | ✅ Included | Cross-platform UI; restore scoped to `tests/*.UnitTests.csproj` to avoid Android/iOS/wasm sample projects |
-| MAUI | [dotnet/maui](https://github.com/dotnet/maui) | 329 | ❌ Removed (was deferred) | Removed after 4 rounds of remediation. The MAUI build presumes MS-internal CI conventions (`Build.Tasks.slnf` prerequisite, then projects target `net10.0-android36.0` directly). Carrying these workarounds added more drag than the data justified |
-| Files | [files-community/Files](https://github.com/files-community/Files) | 163 | ❌ Excluded | UWP/WinUI 3, Windows-only TFMs throughout (`Directory.Build.props` mandates `net10.0-windows10.0.26100.0`); UI tests carry `Package.appxmanifest`. Cannot build in Linux container |
-| PowerToys | [microsoft/PowerToys](https://github.com/microsoft/PowerToys) | 66 | ❌ Excluded | WPF/WinUI 3, Windows-only. UnitTest projects all hang off `src/modules/<windows-only-module>/` and pull WinUI references transitively. Cannot build in Linux container |
 | OpenRA | [OpenRA/OpenRA](https://github.com/OpenRA/OpenRA) | 13 | ✅ Included | Cross-platform (`net8.0`, NUnit 4). .NET 8 SDK side-installed in the .NET 10 container; `OpenRA.Test` uses external `dotnet-coverage` (no coverlet in repo) |
 | StockSharp | [StockSharp/StockSharp](https://github.com/StockSharp/StockSharp) | 3 | ✅ Included | Cross-platform (`net10.0`, MSTest 4). Single `Tests/Tests.csproj`; external `dotnet-coverage` data-collector path |
 
-**Result:** 15 repos in the active matrix (7 original + 8 added in Phase 2), covering ~6,500 of 6,879 detected Mode #1 sites (94%).
+**Result:** 15 repositories reached the final baseline screening/coverage matrix
+(7 original + 8 added). The frozen analyzer/coverage cross-reference records
+**6,321 detected sites**, of which **3,147** meet the production, uncovered,
+known-file-and-line criteria in [targets/v1](targets/v1/README.md).
+Those eligible sites come from **12 repositories**; the frozen
+[300-target v2 sample](targets/v2/sampling_report.md) represents all 12.
+
+#### Screened repositories and sampled-target contributors
+
+“Screened” here means the 15-repository baseline matrix, after the broader
+GitHub candidate search and buildability triage. It does not mean every repository
+returned by the search. Counts below come from the
+[v1 bucket breakdown](targets/v1/README.md#per-repo-bucket-breakdown) and
+[v2 allocation lock](targets/v2/targets.lock.yaml).
+
+| Screened repository | GitHub | Eligible v1 sites | Sampled v2 targets |
+|---|---|---:|---:|
+| abp | [abpframework/abp](https://github.com/abpframework/abp) | 445 | 41 |
+| aspnetcore | [dotnet/aspnetcore](https://github.com/dotnet/aspnetcore) | 403 | 39 |
+| Avalonia | [AvaloniaUI/Avalonia](https://github.com/AvaloniaUI/Avalonia) | 0 | 0 |
+| duplicati | [duplicati/duplicati](https://github.com/duplicati/duplicati) | 21 | 9 |
+| efcore | [dotnet/efcore](https://github.com/dotnet/efcore) | 1 | 1 |
+| eShop | [dotnet/eShop](https://github.com/dotnet/eShop) | 30 | 11 |
+| garnet | [microsoft/garnet](https://github.com/microsoft/garnet) | 499 | 43 |
+| jellyfin | [jellyfin/jellyfin](https://github.com/jellyfin/jellyfin) | 1,046 | 62 |
+| OpenRA | [OpenRA/OpenRA](https://github.com/OpenRA/OpenRA) | 13 | 7 |
+| orleans | [dotnet/orleans](https://github.com/dotnet/orleans) | 98 | 19 |
+| roslyn | [dotnet/roslyn](https://github.com/dotnet/roslyn) | 6 | 5 |
+| runtime | [dotnet/runtime](https://github.com/dotnet/runtime) | 0 | 0 |
+| semantic-kernel | [microsoft/semantic-kernel](https://github.com/microsoft/semantic-kernel) | 458 | 41 |
+| server (Bitwarden) | [bitwarden/server](https://github.com/bitwarden/server) | 127 | 22 |
+| StockSharp | [StockSharp/StockSharp](https://github.com/StockSharp/StockSharp) | 0 | 0 |
+| **Total: 15 screened, 12 contributing** | | **3,147** | **300** |
+
+The other three were retained in baseline screening but supplied **no eligible
+v1 sites**, so there was nothing for the v2 sampler to select:
+
+| Repository | Why it contributed no targets |
+|---|---|
+| Avalonia | All **9** detected sites were in **non-production paths**; none met the production-code criterion. |
+| runtime | Of **33** production sites, **1** was already line-covered and **32** were `unknown_file` (no Cobertura file entry in the baseline coverage). No site met all eligibility criteria. |
+| StockSharp | All **3** production sites were `unknown_file`; none had the coverage-file entry needed to verify new coverage. |
+
+These are eligibility outcomes, not random sampling omissions or repository
+build exclusions. The frozen v2 sample is a stratified subset of v1; it did not
+recover unknown-coverage sites or add branch-coverage targets.
+
+#### Repositories excluded before the final baseline matrix
+
+The following documented exclusions/removal are separate from the three
+zero-target repositories above. They are **not part of the 15 screened baseline
+repositories or the 12 sampled contributors**. Reasons describe the selection-time
+decision, rather than a claim about the projects' current state.
+
+| Repository | Stage / decision | Recorded reason |
+|---|---|---|
+| [mono/mono](https://github.com/mono/mono) | Original shortlist — skipped | Archived project; the original selection notes recorded its final release as February 2024. |
+| [DuendeArchive/IdentityServer4](https://github.com/DuendeArchive/IdentityServer4) | Original shortlist — skipped | Archived; successor Duende IdentityServer is commercial. |
+| [SubtitleEdit/subtitleedit](https://github.com/SubtitleEdit/subtitleedit) | Original shortlist — skipped | Selected version used .NET Framework 4.8, outside the containerized .NET SDK build scope. |
+| [dotnet/maui](https://github.com/dotnet/maui) | Expansion — removed after deferral | Four remediation rounds still required MAUI-specific build prerequisites (`Build.Tasks.slnf`) and Android-targeted projects (`net10.0-android36.0`); workload/CI cost exceeded the value of inclusion. |
+| [files-community/Files](https://github.com/files-community/Files) | Expansion — excluded | UWP/WinUI 3, Windows-only `net10.0-windows10.0.26100.0` targets and app manifests; incompatible with the Linux container. |
+| [microsoft/PowerToys](https://github.com/microsoft/PowerToys) | Expansion — excluded | WPF/WinUI 3 test projects transitively require Windows-only modules; incompatible with the Linux container. |
+
+The [candidate ranking](tools/repo_search/MODE1_CANDIDATES.md) is a broader
+discovery list, not a complete exclusion log: an unselected ranked repository
+does not by itself establish a recorded exclusion reason.
 
 ### Containerized Builds
 
